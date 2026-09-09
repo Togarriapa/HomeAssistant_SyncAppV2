@@ -5,6 +5,7 @@ import pytest
 
 from ha_syncapp.core_runtime import (
     CoreApiResponse,
+    CoreApiTransport,
     CoreRuntimeError,
     collect_core_runtime_inventory,
 )
@@ -15,7 +16,9 @@ STATES_URL = "http://supervisor/core/api/states"
 SERVICES_URL = "http://supervisor/core/api/services"
 
 
-def _transport(records: list[tuple[str, str, Mapping[str, str], float, int]]):
+def _transport(
+    records: list[tuple[str, str, Mapping[str, str], float, int]],
+) -> CoreApiTransport:
     payloads = {
         CONFIG_URL: {"version": "2026.9.1", "components": ["api"]},
         STATES_URL: [{"entity_id": "light.kitchen", "state": "on"}],
