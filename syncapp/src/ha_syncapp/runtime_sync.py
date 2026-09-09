@@ -89,9 +89,7 @@ def synchronize_runtime_inventory(
         if repository_id is None:
             raise RuntimeSyncError("runtime synchronization repository is not pinned")
 
-        cycle_root = Path(
-            tempfile.mkdtemp(prefix=".runtime-sync-", dir=runtime_staging_root)
-        )
+        cycle_root = Path(tempfile.mkdtemp(prefix=".runtime-sync-", dir=runtime_staging_root))
         artifact = build_runtime_inventory(cycle_root, inventory)
         verify_runtime_inventory(artifact)
         snapshot = capture_snapshot(artifact.root, snapshot_staging_root)
