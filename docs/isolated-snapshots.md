@@ -20,9 +20,15 @@ Source metadata is captured before copying and rescanned before acceptance. File
 
 `verify_snapshot(snapshot_root)` re-enumerates the staged tree, rejects unsafe filesystem objects, re-hashes every file and validates the canonical manifest and snapshot identity. Later Git publication work must call this verification boundary immediately before consuming staged content rather than assuming that a previously accepted staging directory is still trustworthy.
 
+## Change-set contract
+
+`compare_snapshots(before_root, after_root)` re-verifies both accepted snapshots and then returns deterministic `added`, `removed`, and `modified` relative-path tuples. Identical snapshots produce an explicit empty change set, giving later synchronization orchestration a safe basis for suppressing meaningless Git commits.
+
+A change in staged bytes, size, or the permission-mode evidence already bound by the manifest is classified as modified. The comparison does not trust caller-provided metadata and does not depend on staging-directory names or capture order. If either snapshot has been altered since capture, comparison fails closed through the same verification boundary rather than emitting a potentially misleading change set.
+
 ## Explicit non-goals
 
-This increment does not:
+These increments do not:
 
 - run `git` against either staging or the live Home Assistant configuration;
 - implement local-to-Repo-B branch routing;
@@ -33,4 +39,4 @@ This increment does not:
 - modify the running Home Assistant installation;
 - implement observation or rollback.
 
-Remote changes therefore remain outside the scope of this primitive and must eventually use the controlled candidate validation, backup, deployment, observation and rollback process defined by the initial V2 README.
+Remote changes therefore remain outside the scope of these primitives and must eventually use the controlled candidate validation, backup, deployment, observation and rollback process defined by the initial V2 README.
