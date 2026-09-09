@@ -27,7 +27,8 @@ from ha_syncapp.publication_workflow import (
     PublicationWorkflowError,
     complete_authorized_publication,
 )
-from ha_syncapp.snapshot import Snapshot, SnapshotError, capture_snapshot as _capture_snapshot
+from ha_syncapp.snapshot import Snapshot, SnapshotError
+from ha_syncapp.snapshot import capture_snapshot as _capture_snapshot
 from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 
 
