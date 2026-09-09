@@ -203,9 +203,7 @@ def _send_json(
             "Home Assistant Core WebSocket command is invalid"
         ) from None
     if len(message.encode("utf-8")) > max_message_bytes:
-        raise CoreWebSocketRuntimeError(
-            "Home Assistant Core WebSocket command exceeds size limit"
-        )
+        raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket command exceeds size limit")
     try:
         session.send(message)
     except Exception:
