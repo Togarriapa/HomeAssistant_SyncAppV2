@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -120,7 +120,7 @@ def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]
         "LC_ALL": "C",
     }
     try:
-        result = subprocess.run(  # nosec B603 - executable is resolved to an absolute git path.
+        result = subprocess.run(  # nosec B603
             [executable, *arguments],
             cwd=tree,
             env=environment,
