@@ -1,0 +1,7 @@
+configuration:
+  log_level:
+    name: Log level
+    description: Minimum severity for lifecycle messages. Use info to see startup and shutdown.
+  status_interval_seconds:
+    name: Status interval (seconds)
+    description: How often the passive service reports that it is idle, from 30 to 3600 seconds.
