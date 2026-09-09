@@ -12,7 +12,7 @@ import stat
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _HOMEASSISTANT_DEFAULTS: dict[str, object] = {
     "entities": [],
@@ -46,6 +46,7 @@ _ANALYSIS_DEFAULTS: dict[str, object] = {
 }
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{64}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_JSON_DEPTH = 64
 
 
@@ -136,39 +137,45 @@ def verify_runtime_inventory(artifact: RuntimeInventoryArtifact) -> None:
         raise RuntimeInventoryError("runtime inventory artifact evidence is invalid")
     if not _ARTIFACT_ID.fullmatch(artifact.artifact_id):
         raise RuntimeInventoryError("runtime inventory artifact identifier is invalid")
+    _validate_file_evidence(artifact.files)
     if _artifact_id(artifact.files) != artifact.artifact_id:
         raise RuntimeInventoryError("runtime inventory artifact evidence is inconsistent")
 
-    root_stat = _safe_lstat(artifact.root)
-    if not stat.S_ISDIR(root_stat.st_mode):
+    root_before = _safe_lstat(artifact.root)
+    if not stat.S_ISDIR(root_before.st_mode):
         raise RuntimeInventoryError("runtime inventory root is not a safe directory")
 
     expected = {entry.path: entry for entry in artifact.files}
-    if len(expected) != len(artifact.files):
-        raise RuntimeInventoryError("runtime inventory evidence contains duplicate paths")
+    expected_directories = _expected_directories(expected)
     observed: set[str] = set()
+    observed_directories: set[str] = set()
     for directory, directory_names, file_names in os.walk(artifact.root, followlinks=False):
         base = Path(directory)
         for name in directory_names:
             node = base / name
+            relative = node.relative_to(artifact.root).as_posix()
+            if relative not in expected_directories:
+                raise RuntimeInventoryError("runtime inventory directory layout does not match evidence")
             node_stat = _safe_lstat(node)
             if not stat.S_ISDIR(node_stat.st_mode):
                 raise RuntimeInventoryError("runtime inventory contains an unsafe directory entry")
+            observed_directories.add(relative)
         for name in file_names:
             node = base / name
             relative = node.relative_to(artifact.root).as_posix()
             if relative in observed or relative not in expected:
                 raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
             observed.add(relative)
-            node_stat = _safe_lstat(node)
-            if not stat.S_ISREG(node_stat.st_mode) or node_stat.st_nlink != 1:
-                raise RuntimeInventoryError("runtime inventory contains an unsafe file entry")
-            data = node.read_bytes()
+            data = _read_stable_regular_file(node)
             entry = expected[relative]
             if len(data) != entry.size or hashlib.sha256(data).hexdigest() != entry.sha256:
                 raise RuntimeInventoryError("runtime inventory staged bytes do not match evidence")
-    if observed != set(expected):
+    if observed != set(expected) or observed_directories != expected_directories:
         raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
+
+    root_after = _safe_lstat(artifact.root)
+    if _stat_identity(root_before) != _stat_identity(root_after):
+        raise RuntimeInventoryError("runtime inventory root changed during verification")
 
 
 def _inventory_payloads(inventory: RuntimeInventoryInput) -> dict[str, object]:
@@ -242,6 +249,37 @@ def _validate_json_value(value: object, *, depth: int) -> None:
     raise RuntimeInventoryError("runtime inventory contains a non-JSON value")
 
 
+def _validate_file_evidence(files: tuple[RuntimeInventoryFile, ...]) -> None:
+    observed: set[str] = set()
+    for entry in files:
+        if type(entry) is not RuntimeInventoryFile:
+            raise RuntimeInventoryError("runtime inventory file evidence is invalid")
+        path = PurePosixPath(entry.path)
+        if (
+            not entry.path
+            or path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or path.suffix != ".json"
+            or path.as_posix() != entry.path
+        ):
+            raise RuntimeInventoryError("runtime inventory file evidence path is invalid")
+        if entry.path in observed:
+            raise RuntimeInventoryError("runtime inventory evidence contains duplicate paths")
+        observed.add(entry.path)
+        if not _SHA256.fullmatch(entry.sha256) or type(entry.size) is not int or entry.size < 0:
+            raise RuntimeInventoryError("runtime inventory file evidence metadata is invalid")
+
+
+def _expected_directories(expected: Mapping[str, RuntimeInventoryFile]) -> set[str]:
+    directories: set[str] = set()
+    for relative in expected:
+        parent = PurePosixPath(relative).parent
+        while parent != PurePosixPath("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return directories
+
+
 def _artifact_id(files: tuple[RuntimeInventoryFile, ...]) -> str:
     digest = hashlib.sha256()
     for entry in files:
@@ -252,6 +290,40 @@ def _artifact_id(files: tuple[RuntimeInventoryFile, ...]) -> str:
         digest.update(str(entry.size).encode("ascii"))
         digest.update(b"\n")
     return digest.hexdigest()
+
+
+def _read_stable_regular_file(path: Path) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeInventoryError("runtime inventory file could not be opened safely") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise RuntimeInventoryError("runtime inventory contains an unsafe file entry")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            data = source.read()
+        after = os.fstat(descriptor)
+        if _stat_identity(before) != _stat_identity(after):
+            raise RuntimeInventoryError("runtime inventory file changed during verification")
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def _write_file(path: Path, data: bytes) -> None:
