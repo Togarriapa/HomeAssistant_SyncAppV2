@@ -90,9 +90,7 @@ def collect_core_websocket_inventory(
             "area_count": len(_require_list(datasets.get("areas"))),
             "floor_count": len(_require_list(datasets.get("floors"))),
             "label_count": len(_require_list(datasets.get("labels"))),
-            "integration_config_entry_count": len(
-                _require_list(datasets.get("integrations"))
-            ),
+            "integration_config_entry_count": len(_require_list(datasets.get("integrations"))),
         },
         homeassistant=datasets,
     )
