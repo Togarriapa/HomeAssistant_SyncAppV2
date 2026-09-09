@@ -2,10 +2,14 @@
 
 from datetime import datetime
 
-from ha_syncapp.git_workspace import GitWorkspace, verify_workspace_content
+from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, verify_workspace_content
 from ha_syncapp.github_repo import BranchHead
 from ha_syncapp.publication_intent import PublicationIntent
-from ha_syncapp.publication_result import PublicationResult, verify_publication_result
+from ha_syncapp.publication_result import (
+    PublicationResult,
+    PublicationResultError,
+    verify_publication_result,
+)
 from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 
 
@@ -27,16 +31,19 @@ def record_verified_publication(
     if type(result) is not PublicationResult:
         raise PublicationStateError("publication result evidence is invalid")
 
-    trusted_result = verify_publication_result(
-        intent,
-        BranchHead(
-            target=result.target,
-            repository_id=result.repository_id,
-            branch=result.branch,
-            commit_sha=result.commit_sha,
-        ),
-    )
-    snapshot_id = verify_workspace_content(workspace)
+    try:
+        trusted_result = verify_publication_result(
+            intent,
+            BranchHead(
+                target=result.target,
+                repository_id=result.repository_id,
+                branch=result.branch,
+                commit_sha=result.commit_sha,
+            ),
+        )
+        snapshot_id = verify_workspace_content(workspace)
+    except (PublicationResultError, WorkspaceError) as exc:
+        raise PublicationStateError("verified publication evidence could not be re-proven") from exc
     if snapshot_id != workspace.snapshot_id:
         raise PublicationStateError("publication workspace snapshot identity changed")
 
