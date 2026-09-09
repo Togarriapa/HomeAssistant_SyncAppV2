@@ -62,11 +62,13 @@ def _validate_branch(branch: str) -> None:
         raise RepositoryVerificationError("Configured repository branch is invalid")
 
 
-def _read_json(request: Request) -> object:
+def _read_json(request: Request, *, allow_not_found: bool = False) -> object | None:
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310
             raw = response.read(MAX_METADATA_BYTES + 1)
     except HTTPError as error:
+        if allow_not_found and error.code == 404:
+            return None
         raise RepositoryVerificationError(
             f"GitHub repository verification failed with HTTP {error.code}"
         ) from None
@@ -120,20 +122,22 @@ def fetch_and_verify_private_repository(
     return RepoIdentity(target=full_name, repository_id=repository_id)
 
 
-def fetch_trusted_branch_head(
+def fetch_optional_trusted_branch_head(
     target: str,
     token: str,
     *,
     expected_id: int,
     branch: str = "main",
-) -> BranchHead:
-    """Read one exact Repo B branch head only after re-proving repository identity."""
+) -> BranchHead | None:
+    """Return a trusted branch head or explicit absence after re-proving Repo B identity."""
     if type(expected_id) is not int or expected_id <= 0:
         raise RepositoryVerificationError("Expected repository identity is invalid")
     _validate_branch(branch)
     identity = fetch_and_verify_private_repository(target, token, expected_id=expected_id)
     branch_url = f"{_metadata_url(identity.target)}/branches/{quote(branch, safe='')}"
-    metadata = _read_json(_request(branch_url, token))
+    metadata = _read_json(_request(branch_url, token), allow_not_found=True)
+    if metadata is None:
+        return None
     if not isinstance(metadata, dict):
         raise RepositoryVerificationError("GitHub returned invalid branch metadata")
     name = metadata.get("name")
@@ -149,3 +153,22 @@ def fetch_trusted_branch_head(
         branch=name,
         commit_sha=commit_sha,
     )
+
+
+def fetch_trusted_branch_head(
+    target: str,
+    token: str,
+    *,
+    expected_id: int,
+    branch: str = "main",
+) -> BranchHead:
+    """Read one exact Repo B branch head only after re-proving repository identity."""
+    head = fetch_optional_trusted_branch_head(
+        target,
+        token,
+        expected_id=expected_id,
+        branch=branch,
+    )
+    if head is None:
+        raise RepositoryVerificationError("Trusted repository branch does not exist")
+    return head
