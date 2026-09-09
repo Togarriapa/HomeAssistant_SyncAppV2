@@ -40,5 +40,5 @@ def test_primary_docs_preserve_guarded_remote_update_transaction() -> None:
 def test_roadmap_rejects_blanket_file_class_exclusions() -> None:
     roadmap = _text("docs/roadmap.md").lower()
     assert "remove blanket exclusions" in roadmap
-    assert "sole log-routing exception" in roadmap
+    assert "logs as the sole intentional exception" in roadmap
     assert "unknown/unsupported mutation classes fail closed" in roadmap
