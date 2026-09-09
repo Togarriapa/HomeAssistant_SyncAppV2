@@ -80,7 +80,8 @@ def _read_json(request: Request, *, allow_not_found: bool = False) -> object | N
     if len(raw) > MAX_METADATA_BYTES:
         raise RepositoryVerificationError("GitHub repository metadata exceeded the size limit")
     try:
-        return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        parsed: object = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        return parsed
     except (UnicodeError, ValueError, RecursionError):
         raise RepositoryVerificationError("GitHub returned invalid repository metadata") from None
 
