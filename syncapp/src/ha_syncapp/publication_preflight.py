@@ -65,7 +65,9 @@ def assess_publication_preflight(
     if type(baseline) is not SynchronizationBaseline:
         raise PublicationPreflightError("synchronization baseline evidence is invalid")
     if baseline.target.casefold() != remote.target.casefold() or baseline.branch != remote.branch:
-        raise PublicationPreflightError("publication evidence does not describe one repository branch")
+        raise PublicationPreflightError(
+            "publication evidence does not describe one repository branch"
+        )
     if _COMMIT_SHA.fullmatch(baseline.commit_sha) is None:
         raise PublicationPreflightError("baseline commit identity is invalid")
 
