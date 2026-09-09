@@ -10,8 +10,12 @@ from ha_syncapp.github_repo import (
     RepositoryVerificationError,
 )
 from ha_syncapp.publication_intent import PublicationIntent
+from ha_syncapp.publication_result import PublicationResult
 from ha_syncapp.publication_state import PublicationStateError
-from ha_syncapp.publication_workflow import PublicationWorkflowError, complete_authorized_publication
+from ha_syncapp.publication_workflow import (
+    PublicationWorkflowError,
+    complete_authorized_publication,
+)
 from ha_syncapp.snapshot import capture_snapshot
 from ha_syncapp.state import StateStore, SynchronizationBaseline
 
@@ -76,9 +80,9 @@ def test_verified_publication_orders_fresh_remote_transport_and_persistence(
 
     original_verify = workflow_module.verify_publication_result
 
-    def verify(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+    def verify(intent_arg: PublicationIntent, remote_arg: BranchHead) -> PublicationResult:
         calls.append("verify")
-        return original_verify(*args, **kwargs)
+        return original_verify(intent_arg, remote_arg)
 
     def persist(*_args: object, **kwargs: object) -> SynchronizationBaseline:
         calls.append("persist")
@@ -154,9 +158,11 @@ def test_pre_transport_remote_failure_never_pushes(
     monkeypatch.setattr(workflow_module, "fetch_optional_trusted_branch_head", fail_before)
     monkeypatch.setattr(workflow_module, "push_publication_intent", unexpected_push)
 
-    with StateStore(tmp_path / "state") as store:
-        with pytest.raises(PublicationWorkflowError, match="every verification gate"):
-            complete_authorized_publication(store, workspace, intent, TOKEN)
+    with (
+        StateStore(tmp_path / "state") as store,
+        pytest.raises(PublicationWorkflowError, match="every verification gate"),
+    ):
+        complete_authorized_publication(store, workspace, intent, TOKEN)
 
     assert not pushed
 
@@ -191,9 +197,11 @@ def test_wrong_post_push_sha_never_persists(
 
     monkeypatch.setattr(workflow_module, "record_verified_publication", unexpected_persist)
 
-    with StateStore(tmp_path / "state") as store:
-        with pytest.raises(PublicationWorkflowError, match="every verification gate"):
-            complete_authorized_publication(store, workspace, intent, TOKEN)
+    with (
+        StateStore(tmp_path / "state") as store,
+        pytest.raises(PublicationWorkflowError, match="every verification gate"),
+    ):
+        complete_authorized_publication(store, workspace, intent, TOKEN)
 
     assert not persisted
 
@@ -227,9 +235,11 @@ def test_post_push_remote_outage_never_persists(
     monkeypatch.setattr(workflow_module, "fetch_trusted_branch_head", fail_after)
     monkeypatch.setattr(workflow_module, "record_verified_publication", unexpected_persist)
 
-    with StateStore(tmp_path / "state") as store:
-        with pytest.raises(PublicationWorkflowError, match="every verification gate"):
-            complete_authorized_publication(store, workspace, intent, TOKEN)
+    with (
+        StateStore(tmp_path / "state") as store,
+        pytest.raises(PublicationWorkflowError, match="every verification gate"),
+    ):
+        complete_authorized_publication(store, workspace, intent, TOKEN)
 
     assert not persisted
 
@@ -261,9 +271,11 @@ def test_persistence_failure_is_reported_as_incomplete_publication(
 
     monkeypatch.setattr(workflow_module, "record_verified_publication", fail_persist)
 
-    with StateStore(tmp_path / "state") as store:
-        with pytest.raises(PublicationWorkflowError, match="every verification gate"):
-            complete_authorized_publication(store, workspace, intent, TOKEN)
+    with (
+        StateStore(tmp_path / "state") as store,
+        pytest.raises(PublicationWorkflowError, match="every verification gate"),
+    ):
+        complete_authorized_publication(store, workspace, intent, TOKEN)
 
 
 def test_unexpected_transport_commit_evidence_blocks_post_push_inspection(
@@ -291,8 +303,10 @@ def test_unexpected_transport_commit_evidence_blocks_post_push_inspection(
 
     monkeypatch.setattr(workflow_module, "fetch_trusted_branch_head", unexpected_after)
 
-    with StateStore(tmp_path / "state") as store:
-        with pytest.raises(PublicationWorkflowError, match="unexpected commit evidence"):
-            complete_authorized_publication(store, workspace, intent, TOKEN)
+    with (
+        StateStore(tmp_path / "state") as store,
+        pytest.raises(PublicationWorkflowError, match="unexpected commit evidence"),
+    ):
+        complete_authorized_publication(store, workspace, intent, TOKEN)
 
     assert not inspected_after
