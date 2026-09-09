@@ -61,7 +61,9 @@ def fetch_and_verify_private_repository(
             f"GitHub repository verification failed with HTTP {error.code}"
         ) from None
     except (URLError, TimeoutError, OSError):
-        raise RepositoryVerificationError("GitHub repository verification transport failed") from None
+        raise RepositoryVerificationError(
+            "GitHub repository verification transport failed"
+        ) from None
 
     if len(raw) > MAX_METADATA_BYTES:
         raise RepositoryVerificationError("GitHub repository metadata exceeded the size limit")
