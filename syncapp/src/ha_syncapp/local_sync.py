@@ -16,6 +16,7 @@ from ha_syncapp.github_repo import (
     fetch_optional_trusted_branch_head,
 )
 from ha_syncapp.local_git import GitError, create_snapshot_commit, initialize_repository
+from ha_syncapp.main_routing import include_in_main
 from ha_syncapp.publication_intent import PublicationIntentError, build_publication_intent
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
@@ -69,6 +70,8 @@ def synchronize_local_configuration(
     """Capture, classify and when authorized publish one stable local configuration snapshot."""
     if type(store) is not StateStore:
         raise LocalSyncError("local synchronization state store is invalid")
+    if branch != "main":
+        raise LocalSyncError("local configuration synchronization only supports main")
 
     snapshot: Snapshot | None = None
     workspace: GitWorkspace | None = None
@@ -77,7 +80,7 @@ def synchronize_local_configuration(
         if repository_id is None:
             raise LocalSyncError("local synchronization repository is not pinned")
 
-        snapshot = capture_snapshot(source, snapshot_root)
+        snapshot = capture_snapshot(source, snapshot_root, include_path=include_in_main)
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=branch)
 
