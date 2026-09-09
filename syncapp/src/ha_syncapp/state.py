@@ -412,9 +412,7 @@ class StateStore:
         except sqlite3.Error:
             raise StateError("Unable to persist repository binding") from None
 
-    def synchronization_baseline(
-        self, target: str, branch: str
-    ) -> SynchronizationBaseline | None:
+    def synchronization_baseline(self, target: str, branch: str) -> SynchronizationBaseline | None:
         """Read the last successful local synchronization result for a branch."""
         _validate_synchronization_identity(target, branch)
         try:
@@ -468,12 +466,14 @@ class StateStore:
         if len(row) != 5:
             raise StateError("Invalid synchronization baseline")
         target, branch, snapshot_id, commit_sha, synchronized_at = row
-        if not all(isinstance(value, str) for value in row):
+        if (
+            not isinstance(target, str)
+            or not isinstance(branch, str)
+            or not isinstance(snapshot_id, str)
+            or not isinstance(commit_sha, str)
+            or not isinstance(synchronized_at, str)
+        ):
             raise StateError("Invalid synchronization baseline")
-        assert isinstance(target, str)
-        assert isinstance(branch, str)
-        assert isinstance(snapshot_id, str)
-        assert isinstance(commit_sha, str)
         _validate_synchronization_identity(target, branch, snapshot_id, commit_sha)
         return SynchronizationBaseline(
             target=target,
