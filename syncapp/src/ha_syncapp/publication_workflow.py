@@ -1,4 +1,4 @@
-"""Crash-safe orchestration of one authorized Local -> Repo B publication."""
+"""Crash-safe verified orchestration of one authorized Local -> Repo B publication."""
 
 from datetime import datetime
 
