@@ -59,9 +59,7 @@ def test_collects_only_fixed_get_endpoints_and_maps_runtime() -> None:
         "service_domain_count": 1,
         "home_assistant_version": "2026.9.1",
     }
-    assert inventory.homeassistant["states"] == [
-        {"entity_id": "light.kitchen", "state": "on"}
-    ]
+    assert inventory.homeassistant["states"] == [{"entity_id": "light.kitchen", "state": "on"}]
     assert inventory.homeassistant["services"] == [{"domain": "light", "services": {}}]
     assert "entities" not in inventory.homeassistant
     assert "devices" not in inventory.homeassistant
