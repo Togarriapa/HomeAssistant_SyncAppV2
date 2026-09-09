@@ -15,6 +15,11 @@ from ha_syncapp.local_sync_retrigger import (
     LocalSyncRetriggerResult,
     run_local_sync_retrigger_pass,
 )
+from ha_syncapp.runtime_sync_retrigger import (
+    RuntimeSyncRetriggerError,
+    RuntimeSyncRetriggerResult,
+    run_runtime_sync_retrigger_pass,
+)
 from ha_syncapp.state import StateStore
 
 
@@ -28,6 +33,7 @@ class RetriggerCycleResult:
 
     local_sync: LocalSyncRetriggerResult
     database_sync: DatabaseSyncRetriggerResult
+    runtime_sync: RuntimeSyncRetriggerResult
 
 
 def run_retrigger_cycle(
@@ -39,10 +45,15 @@ def run_retrigger_cycle(
     database_staging_root: Path,
     database_snapshot_root: Path,
     database_workspace_root: Path,
+    runtime_staging_root: Path,
+    runtime_snapshot_root: Path,
+    runtime_workspace_root: Path,
     target: str,
-    token: str,
+    github_token: str,
+    *,
+    core_token: str | None = None,
 ) -> RetriggerCycleResult:
-    """Process at most one Local-sync and one database item in deterministic order."""
+    """Process at most one item from each implemented outbound lane in order."""
     if type(store) is not StateStore:
         raise RetriggerCycleError("retrigger cycle state store is invalid")
 
@@ -53,7 +64,7 @@ def run_retrigger_cycle(
             snapshot_staging_root,
             local_workspace_root,
             target,
-            token,
+            github_token,
         )
         database_sync = run_database_sync_retrigger_pass(
             store,
@@ -62,9 +73,26 @@ def run_retrigger_cycle(
             database_snapshot_root,
             database_workspace_root,
             target,
-            token,
+            github_token,
         )
-    except (LocalSyncRetriggerError, DatabaseSyncRetriggerError) as exc:
+        runtime_sync = run_runtime_sync_retrigger_pass(
+            store,
+            runtime_staging_root,
+            runtime_snapshot_root,
+            runtime_workspace_root,
+            target,
+            github_token,
+            core_token=core_token,
+        )
+    except (
+        LocalSyncRetriggerError,
+        DatabaseSyncRetriggerError,
+        RuntimeSyncRetriggerError,
+    ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
-    return RetriggerCycleResult(local_sync=local_sync, database_sync=database_sync)
+    return RetriggerCycleResult(
+        local_sync=local_sync,
+        database_sync=database_sync,
+        runtime_sync=runtime_sync,
+    )
