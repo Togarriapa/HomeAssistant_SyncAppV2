@@ -136,19 +136,27 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
-        fields = {**asdict(boot), "version": __version__, "mode": "passive"}
-        level = "warning" if boot.interrupted_run_id else "info"
-        if config.log_level == "info" or (config.log_level == "warning" and level == "warning"):
-            emit("service_started", level=level, **fields)
-
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
+
         with RetriggerServer(socket_path) as retrigger_server:
+            fields = {**asdict(boot), "version": __version__, "mode": "passive"}
+            level = "warning" if boot.interrupted_run_id else "info"
+            if config.log_level == "info" or (
+                config.log_level == "warning" and level == "warning"
+            ):
+                emit("service_started", level=level, **fields)
+
             while not stop.requested:
-                retrigger_server.serve_once(
-                    lambda request: _handle_retrigger_request(store, config, data_dir, request),
-                    timeout_seconds=0.25,
-                )
+                try:
+                    retrigger_server.serve_once(
+                        lambda request: _handle_retrigger_request(store, config, data_dir, request),
+                        timeout_seconds=0.25,
+                    )
+                except RetriggerIPCError:
+                    if stop.requested:
+                        break
+                    raise
                 now = time.monotonic()
                 if now >= next_status:
                     if config.log_level == "info":
