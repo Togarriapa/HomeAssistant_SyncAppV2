@@ -136,4 +136,6 @@ def _validate_claim(
     if item.work_kind != _WORK_KIND or item.status != "running" or item.attempts < 1:
         raise DatabaseSyncWorkError("database synchronization work is not an eligible claimed item")
     if item.work_key != database_sync_work_key(target, source_database):
-        raise DatabaseSyncWorkError("database synchronization work identity does not match the target")
+        raise DatabaseSyncWorkError(
+            "database synchronization work identity does not match the target"
+        )
