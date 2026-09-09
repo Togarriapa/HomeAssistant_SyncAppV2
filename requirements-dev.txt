@@ -1,4 +1,6 @@
-# Development tools only. The service has no third-party Python dependencies.
+-r syncapp/requirements.txt
+
+# Development tools only.
 ast_serialize==0.11.0
 bandit==1.9.4
 iniconfig==2.3.0
