@@ -183,6 +183,6 @@ def fetch_trusted_branch_head(
         expected_id=expected_id,
         branch=branch,
     )
-    if type(state) is BranchAbsence:
+    if isinstance(state, BranchAbsence):
         raise RepositoryVerificationError("Trusted repository branch does not exist")
     return state
