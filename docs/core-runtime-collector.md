@@ -28,6 +28,7 @@ one-shot read-only commands:
 - `config/area_registry/list`
 - `config/floor_registry/list`
 - `config/label_registry/list`
+- `config_entries/get`
 
 No subscription or mutation command is part of this boundary. Request identifiers are assigned
 monotonically and every result must match the exact request identifier and report `success: true`.
@@ -40,23 +41,29 @@ REST responses are bounded by request timeout and maximum byte count and require
 `application/json`, UTF-8 JSON, finite JSON values, and the expected top-level shape.
 
 WebSocket messages are likewise bounded by timeout and maximum byte count. Authentication state,
-message type, request ID, success flag, JSON shape, registry identity fields and duplicate
-identities are checked before data is accepted. Registry records are retained field-for-field as
-JSON-compatible objects and sorted by stable registry identity before they enter deterministic
-runtime artifact staging. Transport and protocol failures are converted to sanitized errors.
+message type, request ID, success flag, JSON shape, stable identity fields and duplicate identities
+are checked before data is accepted. Records are retained field-for-field as JSON-compatible
+objects and sorted by stable identity before they enter deterministic runtime artifact staging.
+Transport and protocol failures are converted to sanitized errors.
 
 The REST `/api/config` object is retained in the runtime manifest as `core_config`; its `version`,
 state count, and service-domain count are exposed as summary fields. REST states and services fill
 `homeassistant/states.json` and `homeassistant/services.json`. The WebSocket collector fills
 `homeassistant/entities.json`, `homeassistant/devices.json`, `homeassistant/areas.json`,
-`homeassistant/floors.json`, and `homeassistant/labels.json`, with summary counts in its returned
-manifest fragment.
+`homeassistant/floors.json`, `homeassistant/labels.json`, and `homeassistant/integrations.json`,
+with summary counts in its returned manifest fragment.
+
+`integrations.json` currently means configured Home Assistant config-entry instances returned by
+`config_entries/get`. Records are ordered by `entry_id` and preserve the API's domain, title,
+source, state, capability/preference and other JSON-compatible fields. The manifest therefore calls
+its summary `integration_config_entry_count`; this must not be presented as a complete count of
+YAML-only or otherwise config-entry-less loaded integration domains.
 
 ## Deliberate partial coverage
 
-This is still only part of the README-defined runtime inventory. Integrations/config entries,
-Supervisor data, hardware data, topology/dependency analysis and deployment observation require
-separate, independently justified increments. The current collectors must not invent those
+This is still only part of the README-defined runtime inventory. Complete loaded-integration
+coverage, Supervisor data, hardware data, topology/dependency analysis and deployment observation
+require separate, independently justified increments. The current collectors must not invent those
 datasets or infer them from incomplete state data.
 
 This slice does not:

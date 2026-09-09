@@ -79,6 +79,27 @@ def _success_responses() -> list[object]:
                 {"id": "energy", "name": "Energy"},
             ],
         },
+        {
+            "id": 6,
+            "type": "result",
+            "success": True,
+            "result": [
+                {
+                    "entry_id": "z-entry",
+                    "domain": "zha",
+                    "title": "Zigbee",
+                    "source": "user",
+                    "state": "loaded",
+                },
+                {
+                    "entry_id": "a-entry",
+                    "domain": "mqtt",
+                    "title": "MQTT",
+                    "source": "user",
+                    "state": "loaded",
+                },
+            ],
+        },
     ]
 
 
@@ -122,6 +143,7 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
         {"id": 3, "type": "config/area_registry/list"},
         {"id": 4, "type": "config/floor_registry/list"},
         {"id": 5, "type": "config/label_registry/list"},
+        {"id": 6, "type": "config_entries/get"},
     ]
     assert inventory.manifest == {
         "registry_entity_count": 2,
@@ -129,6 +151,7 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
         "area_count": 2,
         "floor_count": 2,
         "label_count": 2,
+        "integration_config_entry_count": 2,
     }
     assert [entry["entity_id"] for entry in _records(inventory.homeassistant["entities"])] == [
         "light.a",
@@ -150,6 +173,15 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
         "energy",
         "security",
     ]
+    integrations = _records(inventory.homeassistant["integrations"])
+    assert [entry["entry_id"] for entry in integrations] == ["a-entry", "z-entry"]
+    assert integrations[0] == {
+        "entry_id": "a-entry",
+        "domain": "mqtt",
+        "title": "MQTT",
+        "source": "user",
+        "state": "loaded",
+    }
 
 
 def test_rejects_authentication_failure_without_leaking_token() -> None:
@@ -239,6 +271,20 @@ def test_rejects_duplicate_floor_and_label_identifiers() -> None:
             "success": True,
             "result": [{"id": "duplicate"}, {"id": "duplicate"}],
         }
+        with pytest.raises(CoreWebSocketRuntimeError, match="registry is invalid"):
+            collect_core_websocket_inventory(
+                token="token",
+                session_factory=_factory_for(FakeSession(responses)),
+            )
+
+
+def test_rejects_missing_or_duplicate_integration_entry_ids() -> None:
+    for result in (
+        [{"domain": "mqtt"}],
+        [{"entry_id": "duplicate"}, {"entry_id": "duplicate"}],
+    ):
+        responses = _success_responses()
+        responses[7] = {"id": 6, "type": "result", "success": True, "result": result}
         with pytest.raises(CoreWebSocketRuntimeError, match="registry is invalid"):
             collect_core_websocket_inventory(
                 token="token",
