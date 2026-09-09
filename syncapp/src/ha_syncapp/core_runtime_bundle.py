@@ -61,7 +61,5 @@ def _merge_mapping(
         )
     duplicates = set(first).intersection(second)
     if duplicates:
-        raise CoreRuntimeBundleError(
-            f"Home Assistant Core runtime {section} datasets overlap"
-        )
+        raise CoreRuntimeBundleError(f"Home Assistant Core runtime {section} datasets overlap")
     return {**first, **second}
