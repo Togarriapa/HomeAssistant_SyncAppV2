@@ -59,3 +59,33 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "github_token" not in manifest["options"]
     assert manifest["schema"]["repo_b"].endswith("?")
     assert manifest["schema"]["github_token"].endswith("?")
+
+
+def test_runtime_dependency_is_exactly_pinned_and_hashed() -> None:
+    requirements = (ROOT / "syncapp/requirements.txt").read_text()
+    non_comment_lines = [
+        line.strip()
+        for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert non_comment_lines == [
+        "websockets==17.1 \\",
+        "--hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23",
+    ]
+    assert "websockets" not in (ROOT / "requirements-dev.txt").read_text()
+
+
+def test_quality_ci_installs_runtime_hashes_separately() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
+    assert "python -m pip install -r requirements-dev.txt" in workflow
+
+
+def test_container_installs_only_locked_runtime_requirements() -> None:
+    dockerfile = (ROOT / "syncapp/Dockerfile").read_text()
+    assert "COPY requirements.txt /app/requirements.txt" in dockerfile
+    assert (
+        "python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt"
+        in dockerfile
+    )
+    assert "pip install websockets" not in dockerfile

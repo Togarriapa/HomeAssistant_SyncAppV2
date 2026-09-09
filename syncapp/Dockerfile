@@ -13,6 +13,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 COPY src/ /app/
 
 STOPSIGNAL SIGTERM
