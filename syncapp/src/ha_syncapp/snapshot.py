@@ -89,30 +89,210 @@ def capture_snapshot(
         os.close(root_descriptor)
 
 
+def verify_snapshot(staging_root: Path, manifest: SnapshotManifest) -> None:
+    """Verify that isolated staging still matches an accepted snapshot exactly.
+
+    This check is intended to run immediately before any later consumer (for
+    example Git publication) uses staged bytes. It detects content, route, path,
+    directory, and manifest tampering and never follows links while traversing.
+    """
+
+    try:
+        expected_files, expected_directories = _validate_manifest(manifest)
+        stage, stage_descriptor, stage_expected = _open_directory_root(
+            staging_root, "staging root"
+        )
+        try:
+            actual_files: dict[tuple[Route, str], tuple[int, str]] = {}
+            actual_directories: set[tuple[Route, str]] = set()
+            expected_routes = {entry.route for entry in manifest.entries}
+            top_children = _scan_children(stage_descriptor, "")
+            actual_routes = {child.name for child, _ in top_children}
+            if actual_routes != expected_routes:
+                raise SnapshotError("staging routes do not match manifest")
+
+            for child, info in top_children:
+                if child.name not in {"main", "logs"} or not stat.S_ISDIR(info.st_mode):
+                    raise SnapshotError("invalid staging route")
+                route: Route = "main" if child.name == "main" else "logs"
+                route_descriptor = _open_child_directory(
+                    stage_descriptor, child.name, child.name, info
+                )
+                try:
+                    _verify_staged_tree(
+                        route_descriptor,
+                        "",
+                        route,
+                        actual_files,
+                        actual_directories,
+                    )
+                    if _fingerprint(os.fstat(route_descriptor)) != _fingerprint(info):
+                        raise SnapshotError("staging tree changed during verification")
+                finally:
+                    os.close(route_descriptor)
+
+            _assert_directory_root_unchanged(
+                stage, stage_descriptor, stage_expected, "staging root"
+            )
+            if actual_files != expected_files or actual_directories != expected_directories:
+                raise SnapshotError("staging contents do not match manifest")
+        finally:
+            os.close(stage_descriptor)
+    except SnapshotError as exc:
+        raise SnapshotError("staged snapshot integrity verification failed") from exc
+
+
+def _validate_manifest(
+    manifest: SnapshotManifest,
+) -> tuple[
+    dict[tuple[Route, str], tuple[int, str]],
+    set[tuple[Route, str]],
+]:
+    entries = manifest.entries
+    if entries != tuple(sorted(entries, key=lambda entry: (entry.path, entry.route))):
+        raise SnapshotError("snapshot manifest entries are not canonical")
+    if manifest.total_bytes != sum(entry.size for entry in entries):
+        raise SnapshotError("snapshot manifest byte total is invalid")
+    if manifest.snapshot_id != _snapshot_id(entries):
+        raise SnapshotError("snapshot manifest identity is invalid")
+
+    files: dict[tuple[Route, str], tuple[int, str]] = {}
+    directories: set[tuple[Route, str]] = set()
+    source_paths: set[str] = set()
+    for entry in entries:
+        if entry.route not in {"main", "logs"}:
+            raise SnapshotError("snapshot manifest route is invalid")
+        normalized = _normalize_relative_path(entry.path, "snapshot path")
+        if normalized in source_paths:
+            raise SnapshotError("snapshot manifest contains duplicate source path")
+        source_paths.add(normalized)
+        if entry.size < 0 or len(entry.sha256) != 64:
+            raise SnapshotError("snapshot manifest file metadata is invalid")
+        try:
+            int(entry.sha256, 16)
+        except ValueError as exc:
+            raise SnapshotError("snapshot manifest digest is invalid") from exc
+        files[(entry.route, normalized)] = (entry.size, entry.sha256)
+
+        parts = PurePosixPath(normalized).parts
+        for index in range(1, len(parts)):
+            directories.add((entry.route, PurePosixPath(*parts[:index]).as_posix()))
+    return files, directories
+
+
+def _verify_staged_tree(
+    directory_descriptor: int,
+    prefix: str,
+    route: Route,
+    files: dict[tuple[Route, str], tuple[int, str]],
+    directories: set[tuple[Route, str]],
+) -> None:
+    directory_before = os.fstat(directory_descriptor)
+    for child, expected in _scan_children(directory_descriptor, prefix):
+        relative = _relative_path(prefix, child.name)
+        if stat.S_ISLNK(expected.st_mode):
+            raise SnapshotError(f"symlink found in staging: {relative}")
+        if stat.S_ISDIR(expected.st_mode):
+            directories.add((route, relative))
+            child_descriptor = _open_child_directory(
+                directory_descriptor, child.name, relative, expected
+            )
+            try:
+                _verify_staged_tree(
+                    child_descriptor,
+                    relative,
+                    route,
+                    files,
+                    directories,
+                )
+                if _fingerprint(os.fstat(child_descriptor)) != _fingerprint(expected):
+                    raise SnapshotError("staging tree changed during verification")
+            finally:
+                os.close(child_descriptor)
+            continue
+        if not stat.S_ISREG(expected.st_mode) or expected.st_nlink != 1:
+            raise SnapshotError(f"unsafe file found in staging: {relative}")
+        size, digest = _hash_regular_file(
+            directory_descriptor,
+            child.name,
+            relative,
+            expected,
+        )
+        files[(route, relative)] = (size, digest)
+
+    if _fingerprint(os.fstat(directory_descriptor)) != _fingerprint(directory_before):
+        raise SnapshotError("staging tree changed during verification")
+
+
+def _hash_regular_file(
+    directory_descriptor: int,
+    name: str,
+    relative: str,
+    expected: os.stat_result,
+) -> tuple[int, str]:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open staged file safely: {relative}") from exc
+
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        opened = os.fstat(descriptor)
+        if _fingerprint(opened) != _fingerprint(expected):
+            raise SnapshotError("staging tree changed during verification")
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise SnapshotError(f"unsafe staged file encountered: {relative}")
+        while True:
+            chunk = os.read(descriptor, _CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+        after = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        if _fingerprint(opened) != _fingerprint(after) or _fingerprint(opened) != _fingerprint(
+            current
+        ):
+            raise SnapshotError("staging tree changed during verification")
+        if total != opened.st_size:
+            raise SnapshotError("staged file size changed during verification")
+    finally:
+        os.close(descriptor)
+    return total, digest.hexdigest()
+
+
 def _open_source_root(path: Path) -> tuple[Path, int, FileFingerprint]:
+    return _open_directory_root(path, "source root")
+
+
+def _open_directory_root(path: Path, label: str) -> tuple[Path, int, FileFingerprint]:
     try:
         expected = path.lstat()
     except FileNotFoundError as exc:
-        raise SnapshotError("source root does not exist") from exc
+        raise SnapshotError(f"{label} does not exist") from exc
     if stat.S_ISLNK(expected.st_mode):
-        raise SnapshotError("source root must not be a symlink")
+        raise SnapshotError(f"{label} must not be a symlink")
     if not stat.S_ISDIR(expected.st_mode):
-        raise SnapshotError("source root must be a directory")
+        raise SnapshotError(f"{label} must be a directory")
 
-    source = path.resolve(strict=True)
+    resolved = path.resolve(strict=True)
     flags = os.O_RDONLY | os.O_DIRECTORY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
-        descriptor = os.open(source, flags)
+        descriptor = os.open(resolved, flags)
     except OSError as exc:
-        raise SnapshotError("unable to open source root safely") from exc
+        raise SnapshotError(f"unable to open {label} safely") from exc
 
     opened = os.fstat(descriptor)
     if _fingerprint(expected) != _fingerprint(opened):
         os.close(descriptor)
-        raise SnapshotError("source root changed while opening")
-    return source, descriptor, _fingerprint(opened)
+        raise SnapshotError(f"{label} changed while opening")
+    return resolved, descriptor, _fingerprint(opened)
 
 
 def _validate_staging_root(source: Path, path: Path) -> Path:
@@ -138,6 +318,10 @@ def _is_relative_to(path: Path, other: Path) -> bool:
 
 
 def _normalize_log_path(path: str) -> str:
+    return _normalize_relative_path(path, "log path")
+
+
+def _normalize_relative_path(path: str, label: str) -> str:
     candidate = PurePosixPath(path)
     if (
         not path
@@ -146,7 +330,7 @@ def _normalize_log_path(path: str) -> str:
         or "." in candidate.parts
         or str(candidate) != path
     ):
-        raise SnapshotError(f"invalid log path: {path!r}")
+        raise SnapshotError(f"invalid {label}: {path!r}")
     return candidate.as_posix()
 
 
@@ -240,7 +424,7 @@ def _scan_children(
             children = sorted(iterator, key=lambda entry: entry.name)
     except OSError as exc:
         location = prefix or "."
-        raise SnapshotError(f"unable to enumerate source tree at: {location}") from exc
+        raise SnapshotError(f"unable to enumerate tree at: {location}") from exc
 
     result: list[tuple[os.DirEntry[str], os.stat_result]] = []
     for child in children:
@@ -248,7 +432,7 @@ def _scan_children(
             expected = child.stat(follow_symlinks=False)
         except OSError as exc:
             relative = _relative_path(prefix, child.name)
-            raise SnapshotError(f"unable to inspect source path: {relative}") from exc
+            raise SnapshotError(f"unable to inspect path: {relative}") from exc
         result.append((child, expected))
     return result
 
@@ -265,10 +449,10 @@ def _open_child_directory(
     try:
         descriptor = os.open(name, flags, dir_fd=parent_descriptor)
     except OSError as exc:
-        raise SnapshotError(f"unable to open source directory safely: {relative}") from exc
+        raise SnapshotError(f"unable to open directory safely: {relative}") from exc
     if _fingerprint(os.fstat(descriptor)) != _fingerprint(expected):
         os.close(descriptor)
-        raise SnapshotError(f"source tree changed during snapshot: {relative}")
+        raise SnapshotError(f"tree changed while opening directory: {relative}")
     return descriptor
 
 
@@ -329,16 +513,25 @@ def _copy_regular_file(
 
 
 def _assert_root_unchanged(source: Path, descriptor: int, expected: FileFingerprint) -> None:
+    _assert_directory_root_unchanged(source, descriptor, expected, "source root")
+
+
+def _assert_directory_root_unchanged(
+    root: Path,
+    descriptor: int,
+    expected: FileFingerprint,
+    label: str,
+) -> None:
     try:
-        current_path = source.lstat()
+        current_path = root.lstat()
     except OSError as exc:
-        raise SnapshotError("source root changed during snapshot") from exc
+        raise SnapshotError(f"{label} changed during snapshot") from exc
     if (
         _fingerprint(os.fstat(descriptor)) != expected
         or _fingerprint(current_path) != expected
         or stat.S_ISLNK(current_path.st_mode)
     ):
-        raise SnapshotError("source root changed during snapshot")
+        raise SnapshotError(f"{label} changed during snapshot")
 
 
 def _relative_path(prefix: str, name: str) -> str:
