@@ -1,17 +1,5 @@
 # HomeAssistant_SyncAppV2
 
-## Implementation status
-
-The initial **0.1.0 experimental foundation** implements strict app options,
-protected persistent lifecycle state, exclusive process locking, restart
-detection, structured logs and automated tests/CI. It is a passive service;
-synchronization, candidate deployment, backup/rollback and the Retrigger Work
-Cron Job are not implemented yet. The sections below define the full target.
-
-See [app documentation](syncapp/DOCS.md), [development instructions](docs/development.md)
-and [architecture and next increments](docs/architecture.md). Initial delivery is
-tracked in [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1).
-
 ## Overview
 
 HomeAssistant_SyncAppV2 is a Home Assistant App that provides a safe, automated and observable synchronization layer between a Home Assistant OS installation and a user-provided private GitHub repository.
