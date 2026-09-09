@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.snapshot import SnapshotError, capture_snapshot
 
 
