@@ -1,4 +1,4 @@
-"""Exclusive, versioned lifecycle state in app-owned storage.
+"""Exclusive, versioned lifecycle and recoverable-work state in app-owned storage.
 
 The process lock is held until the SQLite connection closes. Its file must never
 be deleted to recover a lock: the kernel releases flock when the process exits.
@@ -6,15 +6,17 @@ be deleted to recover a lock: the kernel releases flock when the process exits.
 
 import fcntl
 import os
+import re
 import sqlite3
 import stat
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
 class StateError(RuntimeError):
@@ -31,6 +33,19 @@ class Boot:
     run_id: str
     boot_count: int
     interrupted_run_id: str | None
+
+
+@dataclass(frozen=True)
+class WorkItem:
+    """Durable identity and lifecycle metadata for one idempotent unit of work."""
+
+    work_kind: str
+    work_key: str
+    status: str
+    attempts: int
+    created_at: datetime
+    updated_at: datetime
+    next_attempt_at: datetime | None
 
 
 def _private_file(path: Path, *, create: bool = False) -> int:
@@ -58,8 +73,41 @@ def _valid_uuid(value: object) -> bool:
         return False
 
 
+def _timestamp(value: datetime | None = None) -> datetime:
+    current = value or datetime.now(UTC)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise StateError("Work timestamps must include a timezone")
+    return current.astimezone(UTC)
+
+
+def _parse_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise StateError("Invalid work timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise StateError("Invalid work timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise StateError("Invalid work timestamp")
+    return parsed.astimezone(UTC)
+
+
+def _validate_work_identity(work_kind: str, work_key: str) -> None:
+    if not isinstance(work_kind, str) or _WORK_KIND.fullmatch(work_kind) is None:
+        raise StateError("Invalid work kind")
+    if (
+        not isinstance(work_key, str)
+        or not 1 <= len(work_key) <= 256
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in work_key)
+    ):
+        raise StateError("Invalid work key")
+
+
 class StateStore:
     """One service instance owns one store for its entire lifetime."""
+
+    MAX_WORK_ATTEMPTS = 8
+    MAX_WORK_BACKOFF_SECONDS = 3600
 
     def __init__(self, data_dir: Path) -> None:
         self._data_dir = data_dir
@@ -122,6 +170,18 @@ class StateStore:
             raise StateError("State is not open")
         return self._db
 
+    @staticmethod
+    def _create_work_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE work ("
+            "work_kind TEXT NOT NULL, work_key TEXT NOT NULL, "
+            "status TEXT NOT NULL CHECK (status IN ('pending','running','retry','blocked','succeeded')), "
+            "attempts INTEGER NOT NULL CHECK (attempts >= 0), "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, "
+            "PRIMARY KEY (work_kind, work_key))"
+        )
+        db.execute("CREATE INDEX work_ready ON work(status, next_attempt_at, created_at)")
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         # Check sidecars before SQLite can follow them during crash recovery.
@@ -141,12 +201,12 @@ class StateStore:
         self._db = sqlite3.connect(path, timeout=5)
         db = self._connection
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (created and version == 0):
-            raise StateError("Unsupported state schema")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
         db.execute("PRAGMA synchronous = FULL")
         if created:
+            if version != 0:
+                raise StateError("Unsupported state schema")
             with db:
                 # Explicit BEGIN keeps DDL, seed and schema version atomic.
                 db.execute("BEGIN IMMEDIATE")
@@ -160,13 +220,23 @@ class StateStore:
                 db.execute(
                     "INSERT INTO installation VALUES (1, ?, 0, NULL, NULL, NULL)", (str(uuid4()),)
                 )
-                db.execute("PRAGMA user_version = 1")
+                self._create_work_table(db)
+                db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             # Persist the new file's directory entry as well as its contents.
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(root_fd)
             finally:
                 os.close(root_fd)
+        elif version == 1:
+            # Validate the shipped v1 identity before changing anything.
+            self._identity()
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                self._create_work_table(db)
+                db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        elif version != SCHEMA_VERSION:
+            raise StateError("Unsupported state schema")
         self._identity()
 
     def _identity(self) -> tuple[str, int, str | None]:
@@ -221,6 +291,150 @@ class StateStore:
             self._active_run = None
         except sqlite3.Error:
             raise StateError("Unable to record shutdown") from None
+
+    def _work_from_row(self, row: tuple[object, ...]) -> WorkItem:
+        if len(row) != 7:
+            raise StateError("Invalid work record")
+        work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at = row
+        if (
+            not isinstance(work_kind, str)
+            or not isinstance(work_key, str)
+            or status not in {"pending", "running", "retry", "blocked", "succeeded"}
+            or type(attempts) is not int
+            or attempts < 0
+        ):
+            raise StateError("Invalid work record")
+        _validate_work_identity(work_kind, work_key)
+        return WorkItem(
+            work_kind=work_kind,
+            work_key=work_key,
+            status=status,
+            attempts=attempts,
+            created_at=_parse_timestamp(created_at),
+            updated_at=_parse_timestamp(updated_at),
+            next_attempt_at=None if next_attempt_at is None else _parse_timestamp(next_attempt_at),
+        )
+
+    def _get_work(self, work_kind: str, work_key: str) -> WorkItem:
+        rows = self._connection.execute(
+            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
+            "FROM work WHERE work_kind = ? AND work_key = ?",
+            (work_kind, work_key),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateError("Work record is missing")
+        return self._work_from_row(rows[0])
+
+    def enqueue_work(self, work_kind: str, work_key: str, *, now: datetime | None = None) -> WorkItem:
+        """Create one deterministic work item, or return its existing durable state."""
+        _validate_work_identity(work_kind, work_key)
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT OR IGNORE INTO work "
+                    "(work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at) "
+                    "VALUES (?, ?, 'pending', 0, ?, ?, ?)",
+                    (work_kind, work_key, current, current, current),
+                )
+            return self._get_work(work_kind, work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to enqueue work") from None
+
+    def claim_work(self, *, now: datetime | None = None) -> WorkItem | None:
+        """Atomically claim the oldest eligible pending/retry item."""
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
+                    "FROM work WHERE status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1",
+                    (current,),
+                ).fetchone()
+                if row is None:
+                    return None
+                item = self._work_from_row(row)
+                result = db.execute(
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
+                    "updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.status, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work claim changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to claim work") from None
+
+    def recover_interrupted_work(self, *, now: datetime | None = None) -> int:
+        """Make work left running by an interrupted process immediately retryable."""
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? "
+                    "WHERE status = 'running'",
+                    (current, current),
+                )
+            return result.rowcount
+        except sqlite3.Error:
+            raise StateError("Unable to recover interrupted work") from None
+
+    def fail_work(
+        self,
+        item: WorkItem,
+        *,
+        transient: bool,
+        now: datetime | None = None,
+    ) -> WorkItem:
+        """Record a failed running attempt as retryable or permanently blocked."""
+        current_time = _timestamp(now)
+        current = current_time.isoformat()
+        if item.status != "running" or item.attempts < 1:
+            raise StateError("Only running work can fail")
+        if transient and item.attempts < self.MAX_WORK_ATTEMPTS:
+            delay = min(60 * (2 ** (item.attempts - 1)), self.MAX_WORK_BACKOFF_SECONDS)
+            status = "retry"
+            next_attempt = (current_time + timedelta(seconds=delay)).isoformat()
+        else:
+            status = "blocked"
+            next_attempt = None
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = ?, updated_at = ?, next_attempt_at = ? "
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
+                    (status, current, next_attempt, item.work_kind, item.work_key, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work transition changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to record work failure") from None
+
+    def complete_work(self, item: WorkItem, *, now: datetime | None = None) -> WorkItem:
+        """Durably mark one running attempt successful."""
+        current = _timestamp(now).isoformat()
+        if item.status != "running" or item.attempts < 1:
+            raise StateError("Only running work can complete")
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = 'succeeded', updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work transition changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to complete work") from None
 
     def _close(self) -> None:
         try:
