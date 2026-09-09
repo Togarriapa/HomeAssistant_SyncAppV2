@@ -77,10 +77,7 @@ def test_runtime_dependency_is_exactly_pinned_and_hashed() -> None:
 
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert (
-        "python -m pip install --require-hashes -r syncapp/requirements.txt"
-        in workflow
-    )
+    assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
     assert "python -m pip install -r requirements-dev.txt" in workflow
 
 
