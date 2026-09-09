@@ -6,10 +6,11 @@ import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final, Literal
+from typing import Final, Literal, TypeAlias
 
 _CHUNK_SIZE: Final = 1024 * 1024
 Route = Literal["main", "logs"]
+FileFingerprint: TypeAlias = tuple[int, int, int, int, int, int, int]
 
 
 class SnapshotError(RuntimeError):
@@ -43,41 +44,75 @@ def capture_snapshot(
     ``log_paths`` are routed to ``staging_root/logs``; every other regular file is
     routed to ``staging_root/main``. File classes are never filtered implicitly.
 
-    The staging root must be new and outside the source tree. Unsafe links,
-    hardlinks, special files, and files that change while being copied fail closed.
-    A failed capture removes the incomplete staging root.
+    Traversal is rooted in directory file descriptors so a path cannot be swapped
+    to a symlink between inspection and descent. The entire source tree is scanned
+    again after copying and must have the same identity/metadata before the staged
+    snapshot is accepted.
     """
 
-    source = _validate_source_root(source_root)
-    stage = _validate_staging_root(source, staging_root)
-    normalized_logs = {_normalize_log_path(path) for path in log_paths}
-
-    stage.mkdir(mode=0o700)
+    source, root_descriptor, root_expected = _open_source_root(source_root)
     try:
-        entries: list[SnapshotEntry] = []
-        _walk_and_copy(source, source, stage, normalized_logs, entries)
-        entries.sort(key=lambda entry: (entry.path, entry.route))
-        frozen_entries = tuple(entries)
-        return SnapshotManifest(
-            snapshot_id=_snapshot_id(frozen_entries),
-            entries=frozen_entries,
-            total_bytes=sum(entry.size for entry in frozen_entries),
-        )
-    except Exception:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
+        stage = _validate_staging_root(source, staging_root)
+        normalized_logs = {_normalize_log_path(path) for path in log_paths}
+
+        stage.mkdir(mode=0o700)
+        try:
+            entries: list[SnapshotEntry] = []
+            initial_state: dict[str, FileFingerprint] = {}
+            _walk_and_copy(
+                root_descriptor,
+                "",
+                stage,
+                normalized_logs,
+                entries,
+                initial_state,
+            )
+            _assert_root_unchanged(source, root_descriptor, root_expected)
+
+            final_state: dict[str, FileFingerprint] = {}
+            _scan_tree(root_descriptor, "", final_state)
+            _assert_root_unchanged(source, root_descriptor, root_expected)
+            if initial_state != final_state:
+                raise SnapshotError("source tree changed during snapshot")
+
+            entries.sort(key=lambda entry: (entry.path, entry.route))
+            frozen_entries = tuple(entries)
+            return SnapshotManifest(
+                snapshot_id=_snapshot_id(frozen_entries),
+                entries=frozen_entries,
+                total_bytes=sum(entry.size for entry in frozen_entries),
+            )
+        except Exception:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise
+    finally:
+        os.close(root_descriptor)
 
 
-def _validate_source_root(path: Path) -> Path:
+def _open_source_root(path: Path) -> tuple[Path, int, FileFingerprint]:
     try:
-        info = path.lstat()
+        expected = path.lstat()
     except FileNotFoundError as exc:
         raise SnapshotError("source root does not exist") from exc
-    if stat.S_ISLNK(info.st_mode):
+    if stat.S_ISLNK(expected.st_mode):
         raise SnapshotError("source root must not be a symlink")
-    if not stat.S_ISDIR(info.st_mode):
+    if not stat.S_ISDIR(expected.st_mode):
         raise SnapshotError("source root must be a directory")
-    return path.resolve(strict=True)
+
+    source = path.resolve(strict=True)
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(source, flags)
+    except OSError as exc:
+        raise SnapshotError("unable to open source root safely") from exc
+
+    opened = os.fstat(descriptor)
+    if _fingerprint(expected) != _fingerprint(opened):
+        os.close(descriptor)
+        raise SnapshotError("source root changed while opening")
+    return source, descriptor, _fingerprint(opened)
 
 
 def _validate_staging_root(source: Path, path: Path) -> Path:
@@ -116,61 +151,147 @@ def _normalize_log_path(path: str) -> str:
 
 
 def _walk_and_copy(
-    source_root: Path,
-    directory: Path,
+    directory_descriptor: int,
+    prefix: str,
     stage: Path,
     log_paths: set[str],
     entries: list[SnapshotEntry],
+    tree_state: dict[str, FileFingerprint],
 ) -> None:
-    try:
-        with os.scandir(directory) as iterator:
-            children = sorted(iterator, key=lambda entry: entry.name)
-    except OSError as exc:
-        raise SnapshotError("unable to enumerate source tree") from exc
+    children = _scan_children(directory_descriptor, prefix)
+    for child, expected in children:
+        relative = _relative_path(prefix, child.name)
+        tree_state[relative] = _fingerprint(expected)
 
-    for child in children:
-        source_path = directory / child.name
-        relative = source_path.relative_to(source_root).as_posix()
-        try:
-            info = child.stat(follow_symlinks=False)
-        except OSError as exc:
-            raise SnapshotError(f"unable to inspect source path: {relative}") from exc
-
-        if stat.S_ISLNK(info.st_mode):
+        if stat.S_ISLNK(expected.st_mode):
             raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
-        if stat.S_ISDIR(info.st_mode):
-            _walk_and_copy(source_root, source_path, stage, log_paths, entries)
+        if stat.S_ISDIR(expected.st_mode):
+            child_descriptor = _open_child_directory(directory_descriptor, child.name, relative, expected)
+            try:
+                _walk_and_copy(
+                    child_descriptor,
+                    relative,
+                    stage,
+                    log_paths,
+                    entries,
+                    tree_state,
+                )
+                if _fingerprint(os.fstat(child_descriptor)) != _fingerprint(expected):
+                    raise SnapshotError(f"source tree changed during snapshot: {relative}")
+            finally:
+                os.close(child_descriptor)
             continue
-        if not stat.S_ISREG(info.st_mode):
+        if not stat.S_ISREG(expected.st_mode):
             raise SnapshotError(f"special file is not allowed in snapshot: {relative}")
-        if info.st_nlink != 1:
+        if expected.st_nlink != 1:
             raise SnapshotError(f"hardlink is not allowed in snapshot: {relative}")
 
         route: Route = "logs" if relative in log_paths else "main"
-        digest, size = _copy_regular_file(source_path, stage / route / relative, info)
+        digest, size = _copy_regular_file(
+            directory_descriptor,
+            child.name,
+            relative,
+            stage / route / relative,
+            expected,
+        )
         entries.append(SnapshotEntry(relative, route, size, digest))
 
 
+def _scan_tree(
+    directory_descriptor: int,
+    prefix: str,
+    tree_state: dict[str, FileFingerprint],
+) -> None:
+    directory_before = os.fstat(directory_descriptor)
+    children = _scan_children(directory_descriptor, prefix)
+    for child, expected in children:
+        relative = _relative_path(prefix, child.name)
+        tree_state[relative] = _fingerprint(expected)
+
+        if stat.S_ISLNK(expected.st_mode):
+            raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
+        if stat.S_ISDIR(expected.st_mode):
+            child_descriptor = _open_child_directory(directory_descriptor, child.name, relative, expected)
+            try:
+                _scan_tree(child_descriptor, relative, tree_state)
+                if _fingerprint(os.fstat(child_descriptor)) != _fingerprint(expected):
+                    raise SnapshotError("source tree changed during snapshot")
+            finally:
+                os.close(child_descriptor)
+            continue
+        if not stat.S_ISREG(expected.st_mode):
+            raise SnapshotError(f"special file is not allowed in snapshot: {relative}")
+        if expected.st_nlink != 1:
+            raise SnapshotError(f"hardlink is not allowed in snapshot: {relative}")
+
+    if _fingerprint(os.fstat(directory_descriptor)) != _fingerprint(directory_before):
+        raise SnapshotError("source tree changed during snapshot")
+
+
+def _scan_children(
+    directory_descriptor: int, prefix: str
+) -> list[tuple[os.DirEntry[str], os.stat_result]]:
+    try:
+        with os.scandir(directory_descriptor) as iterator:
+            children = sorted(iterator, key=lambda entry: entry.name)
+    except OSError as exc:
+        location = prefix or "."
+        raise SnapshotError(f"unable to enumerate source tree at: {location}") from exc
+
+    result: list[tuple[os.DirEntry[str], os.stat_result]] = []
+    for child in children:
+        try:
+            expected = child.stat(follow_symlinks=False)
+        except OSError as exc:
+            relative = _relative_path(prefix, child.name)
+            raise SnapshotError(f"unable to inspect source path: {relative}") from exc
+        result.append((child, expected))
+    return result
+
+
+def _open_child_directory(
+    parent_descriptor: int,
+    name: str,
+    relative: str,
+    expected: os.stat_result,
+) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open source directory safely: {relative}") from exc
+    if _fingerprint(os.fstat(descriptor)) != _fingerprint(expected):
+        os.close(descriptor)
+        raise SnapshotError(f"source tree changed during snapshot: {relative}")
+    return descriptor
+
+
 def _copy_regular_file(
-    source: Path, destination: Path, expected: os.stat_result
+    directory_descriptor: int,
+    name: str,
+    relative: str,
+    destination: Path,
+    expected: os.stat_result,
 ) -> tuple[str, int]:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
-        descriptor = os.open(source, flags)
+        descriptor = os.open(name, flags, dir_fd=directory_descriptor)
     except OSError as exc:
-        raise SnapshotError(f"unable to open source file safely: {source.name}") from exc
+        raise SnapshotError(f"unable to open source file safely: {relative}") from exc
 
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     digest = hashlib.sha256()
     total = 0
     try:
         opened = os.fstat(descriptor)
-        if not _same_file_version(expected, opened):
-            raise SnapshotError(f"source file changed before copy: {source.name}")
+        if _fingerprint(expected) != _fingerprint(opened):
+            raise SnapshotError(f"source file changed before copy: {relative}")
         if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
-            raise SnapshotError(f"unsafe source file encountered: {source.name}")
+            raise SnapshotError(f"unsafe source file encountered: {relative}")
 
         destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         output = os.open(destination, destination_flags, 0o600)
@@ -188,36 +309,47 @@ def _copy_regular_file(
 
         after_fd = os.fstat(descriptor)
         try:
-            after_path = source.stat(follow_symlinks=False)
+            after_path = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
         except OSError as exc:
-            raise SnapshotError(f"source file changed during copy: {source.name}") from exc
-        if not _same_file_version(opened, after_fd) or not _same_file_version(opened, after_path):
-            raise SnapshotError(f"source file changed during copy: {source.name}")
+            raise SnapshotError(f"source file changed during copy: {relative}") from exc
+        if _fingerprint(opened) != _fingerprint(after_fd) or _fingerprint(opened) != _fingerprint(
+            after_path
+        ):
+            raise SnapshotError(f"source file changed during copy: {relative}")
         if total != opened.st_size:
-            raise SnapshotError(f"source file size changed during copy: {source.name}")
+            raise SnapshotError(f"source file size changed during copy: {relative}")
     finally:
         os.close(descriptor)
 
     return digest.hexdigest(), total
 
 
-def _same_file_version(left: os.stat_result, right: os.stat_result) -> bool:
+def _assert_root_unchanged(source: Path, descriptor: int, expected: FileFingerprint) -> None:
+    try:
+        current_path = source.lstat()
+    except OSError as exc:
+        raise SnapshotError("source root changed during snapshot") from exc
+    if (
+        _fingerprint(os.fstat(descriptor)) != expected
+        or _fingerprint(current_path) != expected
+        or stat.S_ISLNK(current_path.st_mode)
+    ):
+        raise SnapshotError("source root changed during snapshot")
+
+
+def _relative_path(prefix: str, name: str) -> str:
+    return f"{prefix}/{name}" if prefix else name
+
+
+def _fingerprint(info: os.stat_result) -> FileFingerprint:
     return (
-        left.st_dev,
-        left.st_ino,
-        left.st_mode,
-        left.st_nlink,
-        left.st_size,
-        left.st_mtime_ns,
-        left.st_ctime_ns,
-    ) == (
-        right.st_dev,
-        right.st_ino,
-        right.st_mode,
-        right.st_nlink,
-        right.st_size,
-        right.st_mtime_ns,
-        right.st_ctime_ns,
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
     )
 
 
