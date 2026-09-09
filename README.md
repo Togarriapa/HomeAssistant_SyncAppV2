@@ -1,216 +1,117 @@
 # HomeAssistant_SyncAppV2
 
-## Implementation status
+HomeAssistant_SyncAppV2 is a Home Assistant App whose primary purpose is to make a real Home Assistant installation comprehensively understandable and safely adjustable by both humans and AI assistants.
 
-The initial **0.1.0 experimental foundation** implements strict app options,
-protected persistent lifecycle state, exclusive process locking, restart
-detection, structured logs and automated tests/CI. It is a passive service;
-synchronization, candidate deployment, backup/rollback and the Retrigger Work
-Cron Job are not implemented yet. The sections below define the full target.
+The target feedback loop is:
 
-See [app documentation](syncapp/DOCS.md), [development instructions](docs/development.md)
-and [architecture and next increments](docs/architecture.md). Initial delivery is
-tracked in [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1).
+**Home Assistant → private GitHub Repo B → AI analysis/edit → candidate branch → Detect → Fetch → Stage → Validate → Backup → Apply → Verify → Rollback if necessary → logs/runtime state → AI iteration**
 
-## Overview
+The application source lives in this repository (Repo A). The user's actual Home Assistant representation lives in a separate **private** repository (Repo B).
 
-HomeAssistant_SyncAppV2 is a Home Assistant App that provides a safe, automated and observable synchronization layer between a Home Assistant OS installation and a user-provided private GitHub repository.
+## Current implementation status
 
-The project is initially targeted at Home Assistant OS running on a Raspberry Pi 5 with 8 GB RAM, while its architecture should avoid unnecessary Raspberry Pi-specific dependencies wherever possible.
+Version 0.1.0 provides the passive application foundation only: strict options, protected persistent lifecycle state, exclusive process locking, interrupted-run detection, structured logs, automated tests and native amd64/aarch64 container CI.
 
-The primary purpose of the project is to make a Home Assistant installation fully understandable and safely maintainable by both a human administrator and an AI assistant.
+Synchronization, Repo B initialization, runtime inventory, guarded deployment, backup/rollback and recovery scheduling remain incremental milestones. The product contract below governs those increments.
 
-The GitHub repository should expose enough information for an AI assistant to:
-
-* Understand the complete Home Assistant configuration.
-* Inspect integrations, entities, devices, areas, floors and services.
-* Analyze automations, scripts, scenes and dashboards.
-* Understand relationships and dependencies between Home Assistant resources.
-* Inspect current runtime state.
-* Analyze historical state through the Recorder database.
-* Inspect Home Assistant, Supervisor and SyncApp logs.
-* Detect unavailable, orphaned or problematic entities and devices.
-* Identify configuration errors and operational problems.
-* Suggest optimizations and improvements.
-* Submit configuration changes.
-* Observe the outcome of those changes.
-* Safely iterate when further adjustments are required.
-
-The system must not simply copy Git files directly into a running Home Assistant installation. Remote changes are treated as deployment candidates and must pass a controlled validation, backup, deployment, observation and rollback process.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), [development instructions](docs/development.md), [app documentation](syncapp/DOCS.md), MVP issue #7 and P0 product-contract issue #10.
 
 ---
 
-# Project Repositories
+# Authoritative product contract
 
-The solution consists of two repositories.
+## 1. Complete-tree visibility
 
-## Repo A — HomeAssistant_SyncAppV2
+Repo B's configuration representation must expose the **complete configured Home Assistant tree** with byte-preserving file contents so an AI can reason about the actual installation rather than a curated subset.
 
-This repository contains the application source code.
+This includes, when present under the configured Home Assistant tree:
 
-It is responsible for:
+- configuration YAML and packages;
+- automations, scripts and scenes;
+- dashboards and Lovelace resources;
+- helpers, blueprints and custom components;
+- hidden `.storage` state;
+- integration/config-entry, entity, device, area, floor and label registries;
+- secrets and credentials;
+- certificates and keys;
+- Recorder database, WAL and related state;
+- generated/runtime/cache/state files;
+- binary files;
+- every other file that belongs to the configured Home Assistant tree.
 
-* Home Assistant App packaging.
-* Git synchronization.
-* Local snapshot management.
-* GitHub change detection.
-* Candidate deployment.
-* Configuration validation.
-* Dependency analysis.
-* Deployment risk classification.
-* Backup creation.
-* Rollback and disaster recovery.
-* Runtime inventory collection.
-* Dependency/topology generation.
-* Database snapshot management.
-* Log collection and retention.
-* Deployment observation.
-* Health monitoring.
-* Retry/recovery processing.
-* Retrigger Work Cron Job.
-* Application configuration.
-* Automated tests.
-* CI/CD workflows.
-* Development and operational documentation.
+**Logs are the sole intentional exception from the main complete-tree representation.** Logs remain visible through the dedicated `logs` branch for diagnostics and deployment correlation.
 
-Repo A must never depend on Repo B for its own GitHub authentication credentials or internal application state.
+A file must not be omitted merely because it is sensitive, binary, generated, database-backed, runtime-oriented, hidden, high-risk or inconvenient to diff.
 
----
+This requirement applies to Repo B only. Repo A credentials, SyncApp deploy keys, internal operation journals and protected app state remain isolated from the synchronized Home Assistant tree.
 
-# Repo B — Home Assistant Setup Repository
+## 2. Private-repository requirement
 
-Repo B is supplied by the user and must be a **private GitHub repository** because it intentionally contains the real Home Assistant configuration, including sensitive configuration and credentials.
+Repo B intentionally contains sensitive material and therefore must be private. SyncApp must verify repository identity and privacy before transfers. Git content transfers should use the configured SSH deploy-key path; any metadata token is separate and must never become the transport credential for Repo B content.
 
-The repository is divided into dedicated branches according to the type and lifecycle of information stored.
+Secrets must not be copied into Repo A, diagnostic logs or unrelated generated artifacts.
 
-## `main`
+## 3. AI operability
 
-`main` represents the **last known-good Home Assistant configuration**.
+The synchronized system must let an AI determine:
 
-It contains the byte-for-byte file contents of the synchronized Home Assistant configuration and persistent configuration state, including applicable hidden `.storage` data.
+- which entities, devices, integrations/config entries, areas, floors and labels exist;
+- current states and services;
+- automation/script/scene/dashboard definitions;
+- relationships and dependencies between resources;
+- relevant historical Recorder information;
+- startup/runtime/deployment errors and warnings;
+- what changed in a proposed deployment;
+- whether the change produced its intended effect;
+- what failed when it did not.
 
-Examples include:
+Dedicated normalized `runtime` and `database` branches may make analysis efficient, but they are **additional views**, not excuses to omit the underlying complete-tree files from the main representation.
 
-* `configuration.yaml`
-* `automations.yaml`
-* `scripts.yaml`
-* `scenes.yaml`
-* `secrets.yaml`
-* `.storage/`
-* dashboards
-* blueprints
-* packages
-* custom components
-* integration configuration
-* entity registry
-* device registry
-* area/floor/label registries
-* other Home Assistant configuration files
+## 4. Bidirectional adjustment without blind trust
 
-Database and log data assigned to their dedicated branches are excluded from `main`.
+Complete visibility does not mean arbitrary remote bytes are trusted. Every GitHub → Home Assistant mutation is a controlled transaction:
 
-"Byte-for-byte" means the contents of synchronized files must remain identical. Git is not intended to reproduce filesystem metadata such as inode information, ownership or original modification timestamps.
+**Detect → Fetch → Stage → Validate → Backup → Apply → Verify → Rollback if necessary**
 
-Local Home Assistant configuration changes are synchronized to `main`.
+The transaction must preserve these invariants:
 
-`main` must always represent configuration that has either originated from the running Home Assistant instance or successfully completed the controlled deployment process.
+1. Never run `git pull`, checkout or merge directly into the live Home Assistant configuration directory.
+2. Fetch and stage candidates outside the live tree.
+3. Determine the exact candidate commit and changed path/byte set.
+4. Bind validation evidence to the exact staged bytes later applied.
+5. Detect local/remote divergence and fail closed rather than silently merging.
+6. Perform path/content/risk-aware validation before live mutation.
+7. Create a confirmed recoverable Home Assistant backup and/or integrity-bound preimage before apply.
+8. Apply only the validated candidate bytes.
+9. Reload/restart only what is required and wait for Home Assistant to become healthy.
+10. Verify affected resources plus system health and inspect new errors/warnings.
+11. Promote successful state to known-good `main` and record deployment metadata.
+12. Roll back automatically when apply or verification fails.
+13. Remember deterministic rejected candidate identities so they do not retry forever.
 
----
+Sensitive or critical paths require stronger validation and deployment policy. They are not blanket-excluded solely because of file class.
 
-# `candidate`
+## 5. Repository B branch model
 
-`candidate` contains configuration changes proposed by a user or AI assistant.
+### `main`
 
-Remote configuration changes must target this branch rather than being deployed directly from `main`.
+`main` represents the last known-good **complete Home Assistant tree**, excluding only logs that are routed to `logs`.
 
-A candidate commit is never considered trusted simply because it exists in Git.
+Local Home Assistant changes are synchronized to `main` after a stable, integrity-checked snapshot. Successful remote candidates are promoted to `main` only after validation, backup, apply and verification succeed.
 
-Each candidate must pass through the deployment pipeline.
+### `candidate`
 
-```
-Candidate commit
-      |
-      v
-Change detection
-      |
-      v
-Integrity validation
-      |
-      v
-Dependency analysis
-      |
-      v
-Risk classification
-      |
-      v
-Home Assistant validation
-      |
-      v
-Pre-deployment backup
-      |
-      v
-Apply candidate
-      |
-      v
-Reload / Restart
-      |
-      v
-Observation window
-      |
- +----+----+
- |         |
-```
+`candidate` contains user- or AI-proposed changes. A commit existing here is never trusted automatically. It must pass the full guarded deployment transaction.
 
-SUCCESS   FAILURE
-|         |
-v         v
-Promote   Rollback
-to main   previous state
+### `runtime`
 
-Successful candidates are promoted to `main`.
-
-Failed candidates are retained for diagnostic purposes but their commit SHA must be marked as rejected so that the same deterministic failure is not automatically deployed repeatedly.
-
----
-
-# `database`
-
-The `database` branch contains consistent snapshots of the Home Assistant Recorder database.
-
-Its synchronization direction is:
-
-```
-Home Assistant -> GitHub
-```
-
-The AI may read and analyze database information, but database modifications must not normally be deployed from GitHub back into Home Assistant.
-
-Database snapshots must be created consistently so that a database is not copied into Git while an incomplete write produces an unusable snapshot.
-
-Database snapshots should have configurable retention, initially defaulting to approximately seven days.
-
-Large binary database files should be handled using an appropriate large-file strategy where required.
-
----
-
-# `runtime`
-
-The `runtime` branch provides a normalized, AI-friendly representation of the currently running Home Assistant system.
-
-The branch is generated by HomeAssistant_SyncAppV2 and is not a deployment source.
-
-Its synchronization direction is:
-
-```
-Home Assistant -> GitHub
-```
+`runtime` is a generated AI-friendly view of the running installation: inventories, current states, services, topology/dependencies, health summaries and deployment outcomes. It is not a direct deployment source.
 
 Suggested structure:
 
-```
+```text
 runtime/
 ├── manifest.json
-│
 ├── homeassistant/
 │   ├── entities.json
 │   ├── devices.json
@@ -220,700 +121,106 @@ runtime/
 │   ├── labels.json
 │   ├── services.json
 │   └── states.json
-│
 ├── supervisor/
-│   ├── apps.json
-│   ├── repositories.json
-│   ├── backups.json
-│   └── system.json
-│
 ├── hardware/
-│   ├── system.json
-│   ├── storage.json
-│   └── network.json
-│
 ├── analysis/
 │   ├── topology.json
 │   ├── dependencies.json
 │   ├── unavailable_entities.json
-│   ├── unknown_entities.json
 │   ├── orphan_entities.json
 │   ├── orphan_devices.json
 │   └── integration_health.json
-│
-└── deployments/
-    └── <commit-sha>.json
-```
-
-## Runtime Manifest
-
-`manifest.json` provides an immediate summary of the installation.
-
-It should contain information such as:
-
-* Home Assistant version.
-* SyncApp version.
-* Last successful synchronization.
-* Last successful deployment.
-* Current `main` commit.
-* Current candidate commit.
-* Entity count.
-* Device count.
-* Integration count.
-* Automation count.
-* Script count.
-* Unavailable entity count.
-* Warning count.
-* Error count.
-* Current system health.
-
----
-
-# Dependency and Topology Model
-
-The SyncApp should generate relationships between Home Assistant objects instead of requiring an AI to manually correlate registry IDs.
-
-The topology should make relationships such as the following discoverable:
-
-```
-Area
-  |
-  +-- Device
-  |     |
-  |     +-- Integration
-  |     |
-  |     +-- Entity
-  |
-  +-- Automation
-         |
-         +-- Trigger Entity
-         +-- Conditions
-         +-- Action Entities
-         +-- Scripts
-         +-- Scenes
-```
-
-This allows an AI assistant to answer questions such as:
-
-* Which automations depend on this entity?
-* What will be affected if this device is removed?
-* Which entities are no longer referenced?
-* Which integrations are producing unavailable entities?
-* Which automation caused a particular action?
-* Which resources are associated with a particular room?
-
----
-
-# `logs`
-
-The `logs` branch contains operational and diagnostic information.
-
-Its synchronization direction is:
-
-```
-Home Assistant -> GitHub
-```
-
-Suggested structure:
-
-```
-logs/
-├── home-assistant/
-├── supervisor/
-├── syncapp/
 └── deployments/
 ```
 
-Logs must have a **30-day retention period**.
+### `database`
 
-Because deleting a file from the current Git tree does not remove that information from historical Git commits, retention management must account for Git history as well as the working tree.
+`database` may hold consistent, retention-managed Recorder snapshots or normalized historical-analysis artifacts. It is an additional analytical view; Recorder files that live inside the configured Home Assistant tree remain part of the complete-tree representation on `main`.
 
-The log branch may therefore periodically rebuild/prune its generated history so that old log history does not grow without bounds.
+Remote database mutation is critical-risk work and must fail closed unless a specific safe validation/backup/apply/verify strategy exists.
 
-The repository must not treat Git history rewriting as guaranteed forensic secure deletion.
+### `logs`
+
+`logs` contains Home Assistant, Supervisor, SyncApp and deployment diagnostics. Logs are intentionally routed away from `main` and retained on a bounded policy, initially 30 days. Retention must consider Git ancestry growth as well as the current tree and must not claim forensic secure deletion.
 
 ---
 
-# Synchronization
-
-## Local -> GitHub
-
-Local Home Assistant configuration changes must be detected and synchronized automatically.
+# Local → GitHub synchronization
 
 A synchronization cycle should:
 
 1. Detect a stable change.
-2. Debounce rapidly changing files.
-3. Acquire a synchronization lock.
-4. Create a consistent staging snapshot.
-5. Verify copied file integrity.
-6. Compare the snapshot with the last synchronized state.
-7. Create a commit only when meaningful differences exist.
-8. Push the update.
-9. Record the resulting Git commit.
-10. Update runtime synchronization information.
+2. Debounce rapidly changing files where required for consistency.
+3. Acquire the operation lock.
+4. Create a stable snapshot outside the live tree.
+5. Reject unsafe path/link semantics.
+6. Preserve exact bytes, including binary content and line endings.
+7. Record deterministic integrity metadata.
+8. Route logs to the `logs` branch and keep every other Home Assistant-tree file in the complete-tree representation.
+9. Compare against the last synchronized snapshot.
+10. Commit only meaningful changes.
+11. Push atomically with remote-ref lease protection.
+12. Persist resulting commit/operation state.
+13. Update normalized runtime synchronization metadata.
 
-Git operations must occur in a staging area rather than directly inside the live Home Assistant configuration directory.
-
----
-
-# Remote -> Home Assistant
-
-Remote changes must be treated as controlled deployments.
-
-The deployment process must:
-
-1. Detect a new `candidate` commit.
-2. Verify repository and candidate integrity.
-3. Determine exactly what changed.
-4. Analyze dependencies.
-5. Assign a deployment risk level.
-6. Perform static/configuration validation.
-7. Create a recoverable Home Assistant backup.
-8. Record the backup ID against the candidate SHA.
-9. Apply the proposed configuration.
-10. Reload or restart the appropriate Home Assistant components.
-11. Wait for Home Assistant to become healthy.
-12. Observe startup and runtime behavior.
-13. Inspect errors and warnings.
-14. Validate affected integrations/entities when possible.
-15. Record the deployment result.
-16. Promote successful configuration to `main`.
-17. Tag the known-good version.
-18. Roll back automatically if validation fails.
+Git operations must not execute inside the live Home Assistant tree.
 
 ---
 
-# Deployment Risk Classification
+# Conflict handling
 
-Changes should be classified before deployment.
-
-Example levels:
-
-### Low Risk
-
-* Automation changes.
-* Script changes.
-* Scene changes.
-* Non-critical YAML changes.
-
-### Medium Risk
-
-* Integration configuration.
-* Dashboard/configuration changes affecting multiple resources.
-
-### High Risk
-
-* `.storage` registry changes.
-* Core Home Assistant configuration.
-* Authentication-related configuration.
-* Secrets.
-* Custom components.
-
-### Critical
-
-* Database manipulation.
-* System-level operations.
-* Changes capable of preventing Home Assistant or Supervisor recovery.
-
-Risk classification should influence validation requirements and deployment strategy.
+If the live Home Assistant tree diverges locally while a different remote candidate is pending, SyncApp must stop automatic deployment, preserve both states, record the conflict and require deterministic resolution. Binary files and Home Assistant internal state must never be opportunistically text-merged.
 
 ---
 
-# Deployment Observation
+# Backup, verification and rollback
 
-Passing syntax validation is not enough to classify a deployment as successful.
+Git history is not the only recovery mechanism. Before live mutation, SyncApp must create a recoverable Home Assistant backup and preserve enough integrity-bound preimage information for deterministic rollback.
 
-After deployment, SyncApp must observe the Home Assistant system for a configurable period.
+Post-apply verification must go beyond syntax validation. It should verify Home Assistant and Supervisor health, relevant integrations, changed resources, startup/runtime errors and declared/derived assertions where feasible.
 
-The observation process should verify:
-
-* Home Assistant starts successfully.
-* Home Assistant API responds.
-* Supervisor reports an acceptable state.
-* Integrations initialize.
-* No significant new startup errors appear.
-* Changed resources are available.
-* Affected entities have valid states where applicable.
-* Relevant automations/scripts load.
-* Declared or derived post-deployment assertions pass where possible.
-
-Deployment results must be written to the runtime/deployment data and operational logs.
+Every deployment result should record the candidate SHA, resulting known-good SHA if successful, Home Assistant version, backup identifier, changed resources, timestamps, validation evidence and verification outcome.
 
 ---
 
-# Backup and Rollback
+# Retrigger Work and resilience
 
-Git is configuration history, not the sole disaster-recovery mechanism.
+Normal work should be event-driven where practical. A separate recovery/retrigger process handles interrupted or transiently failed work. All operations must be idempotent and persisted with explicit phases, attempts and terminal failure states.
 
-A Home Assistant backup must be created before every configuration deployment capable of affecting the running system.
-
-Two rollback levels should exist.
-
-## Fast Configuration Rollback
-
-Used when Home Assistant remains operational and only the changed configuration needs to be restored.
-
-## Full Recovery Rollback
-
-Used when a deployment causes serious startup, configuration or system failure.
-
-This process restores the pre-deployment Home Assistant backup.
-
-Every known-good deployment should also be associated with:
-
-* Git commit SHA.
-* Deployment identifier.
-* Home Assistant version.
-* Backup identifier.
-* Timestamp.
-* Validation result.
-
-Known-good releases should be identifiable using Git tags.
+Transient failures such as network/GitHub/API availability may retry with bounded backoff. Deterministic failures such as invalid candidates, failed validation, corrupt staged content or known rejected SHAs must block until the candidate changes or an explicit administrative retry occurs.
 
 ---
 
-# Conflict Handling
+# MVP objective
 
-The system must detect concurrent divergence.
+The MVP is not merely "back up YAML to Git." It is the smallest safe system that closes the AI feedback loop:
 
-If Home Assistant changes locally after the last synchronization while a different remote candidate is also waiting for deployment, SyncApp must not blindly merge those states.
+1. verify and initialize private Repo B;
+2. capture the complete Home Assistant tree with logs as the sole main-tree routing exception;
+3. publish normalized runtime context so an AI can understand entities/devices/integrations/states and dependencies;
+4. accept candidate changes through an isolated staging boundary;
+5. validate exact staged bytes;
+6. create a confirmed pre-change backup;
+7. apply guarded changes;
+8. verify Home Assistant and affected resources;
+9. roll back on failure;
+10. expose deployment results and logs for AI iteration;
+11. recover interrupted work idempotently.
 
-Instead it must:
-
-1. Stop automatic deployment.
-2. Preserve both versions.
-3. Record the conflict.
-4. Expose the conflict through runtime/log data.
-5. Require conflict resolution before synchronization continues.
-
-Binary files and internal Home Assistant storage must never be automatically text-merged.
-
----
-
-# Retrigger and Recovery
-
-Normal synchronization should be event-driven wherever practical.
-
-A separate **Retrigger Work Cron Job** provides recovery for interrupted or transiently failed work.
-
-It must identify:
-
-* Interrupted local synchronization.
-* Pending Git pushes.
-* Temporarily unavailable GitHub operations.
-* Unprocessed candidate commits.
-* Interrupted runtime collection.
-* Missed database snapshots.
-* Failed log synchronization.
-* Recoverable deployment orchestration operations.
-* Stale SyncApp locks.
-
-All work must be idempotent.
-
-Transient errors may be retried using controlled backoff.
-
-Permanent failures must not create infinite retry loops.
-
-Examples:
-
-```
-Network unavailable         -> Retry
-GitHub unavailable          -> Retry
-API timeout                 -> Retry
-HA temporarily starting     -> Retry
-
-Invalid YAML                -> Block
-Configuration check failed  -> Block
-Known bad commit SHA        -> Block
-Corrupt candidate           -> Block
-```
-
-A blocked candidate should only become eligible again when its commit changes or an explicit administrative retry is requested.
+See [docs/roadmap.md](docs/roadmap.md) for delivery order and gates.
 
 ---
 
-# Security
-
-Repo B is intentionally private and trusted to contain the real Home Assistant configuration, including credentials.
-
-The system therefore does not sanitize Home Assistant configuration before synchronization.
-
-However:
-
-* Repo B must remain private.
-* GitHub credentials used by SyncApp must not be stored inside Repo B.
-* Application credentials and internal state must reside in protected SyncApp storage.
-* Permissions must follow least-privilege principles.
-* Secrets must never appear in application logs unnecessarily.
-* Deployment and rollback actions must be auditable.
-* Sensitive information must not accidentally be copied into the public Repo A.
-
-Repo A may be public because it contains application source code rather than the user's Home Assistant data.
-
----
-
-# Project Objectives
-
-## Primary Objectives
-
-1. Provide a reliable representation of a Home Assistant installation in GitHub.
-
-2. Preserve Home Assistant configuration with byte-for-byte file-content fidelity.
-
-3. Support safe two-way synchronization of configuration.
-
-4. Allow an AI assistant to comprehensively analyze the Home Assistant environment.
-
-5. Expose runtime state in a normalized AI-readable format.
-
-6. Expose device, entity, integration and automation relationships through dependency/topology data.
-
-7. Provide historical analysis through Recorder database snapshots.
-
-8. Provide operational troubleshooting through retained logs.
-
-9. Allow AI/user-generated configuration changes without directly risking the production Home Assistant installation.
-
-10. Automatically validate, backup, deploy, observe and either accept or roll back configuration changes.
-
-11. Survive Raspberry Pi reboots, Home Assistant restarts, GitHub outages and temporary network failures.
-
-12. Prevent infinite deployment/retry loops.
-
-13. Maintain an auditable relationship between Git commits, deployments and Home Assistant backups.
-
-14. Make the system sufficiently observable that an AI can determine whether a proposed change produced its intended technical result.
-
----
-
-# Non-Functional Objectives
-
-The application should be:
-
-* Reliable.
-* Idempotent.
-* Recoverable.
-* Testable.
-* Observable.
-* Auditable.
-* Modular.
-* Maintainable.
-* Secure by design.
-* Resource-conscious for Raspberry Pi hardware.
-* Resilient to process and system restarts.
-* Backwards-aware of Home Assistant API evolution.
-
-Unsupported direct modification of the Home Assistant OS host should be avoided when supported Home Assistant App, Core and Supervisor interfaces are available.
-
----
-
-# Software Development Methodology
-
-The project must be developed using an **Agile methodology** with short, incremental delivery cycles.
-
-Development should prioritize working, tested increments rather than implementing the entire architecture in a single release.
-
-Every meaningful capability should originate from tracked requirements and acceptance criteria.
-
----
-
-# GitHub as the Project Management Platform
-
-GitHub Issues and GitHub Projects should act as the project's Jira-equivalent planning and delivery system.
-
-The development hierarchy is:
-
-```
-Epic
-  |
-  +-- User Story
-  |      |
-  |      +-- Task
-  |      +-- Task
-  |
-  +-- User Story
-         |
-         +-- Task
-```
-
-Separate issue classifications must also exist for:
-
-* Defect
-* Bugfix
-
-Recommended labels:
-
-```
-type:epic
-type:user-story
-type:task
-type:defect
-type:bugfix
-```
-
-Additional useful labels should include:
-
-```
-priority:critical
-priority:high
-priority:medium
-priority:low
-
-component:sync
-component:git
-component:deployment
-component:backup
-component:rollback
-component:runtime
-component:database
-component:logs
-component:retrigger
-component:security
-component:testing
-component:documentation
-
-risk:low
-risk:medium
-risk:high
-risk:critical
-```
-
-A GitHub Project board should provide at minimum:
-
-```
-Backlog
-   ↓
-Ready
-   ↓
-In Progress
-   ↓
-In Review
-   ↓
-Testing
-   ↓
-Done
-```
-
-`Blocked` should be represented explicitly when applicable.
-
-Sub-issues and dependency relationships should be used to model work hierarchy and blocking relationships.
-
----
-
-# User Stories
-
-User Stories should use a consistent format:
-
-```
-As a <user/system>,
-I want <capability>,
-so that <business/technical value>.
-```
-
-Every User Story must contain measurable acceptance criteria before implementation begins.
-
-Example:
-
-```
-As a Home Assistant administrator,
-I want candidate configurations validated before deployment,
-so that an invalid AI-generated configuration cannot
-prevent my Home Assistant instance from starting.
-```
-
-Acceptance Criteria:
-
-* Candidate is staged outside the live configuration directory.
-* Home Assistant configuration validation executes successfully.
-* Failed validation prevents deployment.
-* Failure information is recorded.
-* The failed SHA is blocked from automatic retry.
-* Existing Home Assistant configuration remains unchanged.
-
----
-
-# Test Driven Development
-
-The project must follow a **Test Driven Development (TDD)** approach.
-
-The expected development loop is:
-
-```
-RED
-Write a failing test describing required behavior.
-   ↓
-GREEN
-Implement the minimum code necessary to pass.
-   ↓
-REFACTOR
-Improve the implementation while keeping tests green.
-   ↓
-REPEAT
-```
-
-Tests should be treated as part of the implementation rather than work performed after development.
-
-Appropriate test levels include:
-
-* Unit tests.
-* Component tests.
-* Git integration tests.
-* Home Assistant API integration tests.
-* Failure-injection tests.
-* Recovery tests.
-* Backup/rollback tests.
-* Synchronization conflict tests.
-* End-to-end deployment tests.
-
-External systems should be isolated through clear interfaces so that Home Assistant, GitHub, filesystem and Supervisor interactions can be mocked or simulated during automated testing.
-
-Critical recovery logic must have explicit tests for failure paths, not only successful execution.
-
----
-
-# Development Best Practices
-
-Development should follow current software engineering best practices, including:
-
-* Small, reviewable changes.
-* Clear separation of concerns.
-* Dependency inversion around external systems.
-* Explicit interfaces between components.
-* Strong error handling.
-* Structured logging.
-* Idempotent operations.
-* Deterministic tests.
-* Automated formatting.
-* Static analysis.
-* Type checking where supported.
-* Dependency vulnerability scanning.
-* Automated CI.
-* Mandatory test execution for pull requests.
-* Code review before integration.
-* No credentials committed to Repo A.
-* Versioned migrations for persistent SyncApp state.
-* Backwards-compatible state handling where practical.
-* Documentation updated as behavior changes.
-
----
-
-# Pull Request Workflow
-
-Development should use short-lived branches and Pull Requests.
-
-A Pull Request should not be considered complete until:
-
-1. Linked Issue/User Story/Task exists.
-2. Acceptance criteria are satisfied.
-3. Automated tests pass.
-4. New behavior has appropriate tests.
-5. Static analysis passes.
-6. Relevant integration tests pass.
-7. No unresolved review comments remain.
-8. Documentation is updated where necessary.
-9. CI is green.
-
-Commits and Pull Requests should link back to their relevant GitHub Issues.
-
----
-
-# Definition of Done
-
-An Issue is Done only when:
-
-* Acceptance criteria are satisfied.
-* Required code has been implemented.
-* TDD tests exist.
-* Existing tests remain green.
-* Failure paths are tested where relevant.
-* Logging/observability is implemented.
-* Documentation is updated.
-* Security implications have been considered.
-* Pull Request review is complete.
-* CI validation succeeds.
-* The change is merged into the appropriate development branch.
-
----
-
-# Initial Epics
-
-The initial project backlog should be organized around the following Epics:
-
-## EPIC 1 — Home Assistant App Foundation
-
-Create the installable Home Assistant App, configuration model, permissions, lifecycle and persistent application state.
-
-## EPIC 2 — Git Synchronization Engine
-
-Implement repository authentication, staging, hashing, change detection, local-to-remote synchronization and synchronization state tracking.
-
-## EPIC 3 — Repository Branch and Data Management
-
-Implement `main`, `candidate`, `database`, `runtime` and `logs` branch responsibilities and retention policies.
-
-## EPIC 4 — Runtime Inventory and AI Context
-
-Collect entities, devices, integrations, areas, floors, services, current states and system information and expose normalized AI-readable representations.
-
-## EPIC 5 — Dependency and Topology Analysis
-
-Build relationships between entities, devices, integrations, automations, scripts, scenes and areas.
-
-## EPIC 6 — Candidate Validation and Deployment
-
-Implement candidate detection, change analysis, validation, risk classification and controlled deployment.
-
-## EPIC 7 — Backup and Rollback
-
-Implement pre-deployment backup, fast rollback, full recovery and known-good version tracking.
-
-## EPIC 8 — Deployment Observation and Health Analysis
-
-Observe Home Assistant after changes and determine whether configuration, integrations and affected resources remain healthy.
-
-## EPIC 9 — Database Snapshot Management
-
-Create consistent Recorder database snapshots and implement configurable retention and large-file handling.
-
-## EPIC 10 — Logging and 30-Day Retention
-
-Collect Home Assistant, Supervisor, application and deployment logs while enforcing the required rolling retention policy.
-
-## EPIC 11 — Retrigger Work and Resilience
-
-Implement idempotent recovery, transient retry handling, stale job recovery and protection against retry loops.
-
-## EPIC 12 — Security and Hardening
-
-Implement credential isolation, permission minimization, input validation, auditability and protection of sensitive information.
-
-## EPIC 13 — Automated Testing and CI/CD
-
-Build the TDD infrastructure, unit/integration/end-to-end test suites and automated quality gates.
-
-## EPIC 14 — Documentation and Operations
-
-Provide installation, configuration, troubleshooting, recovery, architecture and contributor documentation.
-
----
-
-# Success Criteria
-
-The project will be considered successful when:
-
-* Home Assistant configuration can be reliably synchronized to GitHub.
-* Direct local Home Assistant changes are reflected in `main`.
-* AI/user changes can be proposed through `candidate`.
-* Candidates cannot bypass validation and backup.
-* Successful deployments automatically become the new known-good `main`.
-* Failed deployments automatically return Home Assistant to a known-good state.
-* Known-bad commits cannot enter an infinite deployment loop.
-* Home Assistant runtime information is available in a structured AI-readable format.
-* Dependencies between Home Assistant resources can be analyzed.
-* Historical database information is available for analysis.
-* Operational logs are available with 30-day retention.
-* Interrupted operations recover automatically.
-* Every deployment is traceable to a Git commit and recovery point.
-* Core functionality is covered by automated tests and continuously validated by CI.
-* Development work is traceable through Epics, User Stories, Tasks, Defects and Bugfixes in GitHub.
+# Development and safety rules
+
+- Use short-lived feature branches and pull requests.
+- Start meaningful behavior changes with tests.
+- Keep CI green before merge.
+- Use strict failure-path and recovery tests for critical logic.
+- Keep Repo A free of real Home Assistant secrets and credentials; fixtures must be synthetic.
+- Keep SyncApp credentials/internal state outside Repo B's synchronized Home Assistant tree.
+- Do not weaken the staged deployment, backup or rollback boundary to gain speed.
+- Do not merge risky or failing changes.
+- Document behavior when contracts change.
+
+The project remains incremental: a passive foundation being merged does not imply synchronization or deployment is production-ready.
