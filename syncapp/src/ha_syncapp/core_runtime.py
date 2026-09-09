@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -18,6 +17,11 @@ _ENDPOINTS: Final[tuple[tuple[str, str, type[object]], ...]] = (
     ("states", f"{_CORE_API_ROOT}/states", list),
     ("services", f"{_CORE_API_ROOT}/services", list),
 )
+_ALLOWED_PATHS: Final = {
+    f"{_CORE_API_ROOT}/config": "/core/api/config",
+    f"{_CORE_API_ROOT}/states": "/core/api/states",
+    f"{_CORE_API_ROOT}/services": "/core/api/services",
+}
 _DEFAULT_TIMEOUT_SECONDS: Final = 10.0
 _DEFAULT_MAX_RESPONSE_BYTES: Final = 4 * 1024 * 1024
 
@@ -130,25 +134,30 @@ def _default_transport(
     timeout_seconds: float,
     max_response_bytes: int,
 ) -> CoreApiResponse:
-    if method != "GET" or url not in {endpoint[1] for endpoint in _ENDPOINTS}:
+    path = _ALLOWED_PATHS.get(url)
+    if method != "GET" or path is None:
         raise CoreRuntimeError("Home Assistant Core request boundary is invalid")
-    request = urllib.request.Request(url=url, headers=dict(headers), method="GET")
+
+    connection = http.client.HTTPConnection("supervisor", 80, timeout=timeout_seconds)
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-            status = int(response.status)
-            content_type = response.headers.get("Content-Type", "")
-            content_length = response.headers.get("Content-Length")
-            if content_length is not None:
-                try:
-                    if int(content_length) > max_response_bytes:
-                        raise CoreRuntimeError("Home Assistant Core response exceeds size limit")
-                except ValueError:
-                    raise CoreRuntimeError("Home Assistant Core response metadata is invalid") from None
-            body = response.read(max_response_bytes + 1)
+        connection.request("GET", path, headers=dict(headers))
+        response = connection.getresponse()
+        content_type = response.getheader("Content-Type", "") or ""
+        content_length = response.getheader("Content-Length")
+        if content_length is not None:
+            try:
+                if int(content_length) > max_response_bytes:
+                    raise CoreRuntimeError("Home Assistant Core response exceeds size limit")
+            except ValueError:
+                raise CoreRuntimeError("Home Assistant Core response metadata is invalid") from None
+        body = response.read(max_response_bytes + 1)
+        status = int(response.status)
     except CoreRuntimeError:
         raise
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+    except (http.client.HTTPException, TimeoutError, OSError, ValueError):
         raise CoreRuntimeError("Home Assistant Core request failed") from None
+    finally:
+        connection.close()
     return CoreApiResponse(status=status, content_type=content_type, body=body)
 
 
