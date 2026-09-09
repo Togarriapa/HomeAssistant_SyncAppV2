@@ -38,7 +38,9 @@ def push_publication_intent(
         repository = inspect_repository(workspace)
         snapshot_id = verify_workspace_content(workspace)
     except (GitError, WorkspaceError) as exc:
-        raise PublicationTransportError("isolated publication workspace could not be re-proven") from exc
+        raise PublicationTransportError(
+            "isolated publication workspace could not be re-proven"
+        ) from exc
     if repository.default_branch != intent.branch:
         raise PublicationTransportError("publication branch does not match isolated workspace")
     if snapshot_id != workspace.snapshot_id:
@@ -115,7 +117,9 @@ def _validate_current_remote(
         _validate_remote_identity(intent, current_remote)
         return
     if type(current_remote) is not BranchHead:
-        raise PublicationTransportError("publication target branch is no longer at expected baseline")
+        raise PublicationTransportError(
+            "publication target branch is no longer at expected baseline"
+        )
     _validate_remote_identity(intent, current_remote)
     if current_remote.commit_sha != intent.expected_remote_commit_sha:
         raise PublicationTransportError("publication target branch changed after authorization")
@@ -236,6 +240,10 @@ def _verify_after_transport(workspace: GitWorkspace) -> None:
     try:
         snapshot_id = verify_workspace_content(workspace)
     except WorkspaceError as exc:
-        raise PublicationTransportError("isolated publication workspace changed during transport") from exc
+        raise PublicationTransportError(
+            "isolated publication workspace changed during transport"
+        ) from exc
     if snapshot_id != workspace.snapshot_id:
-        raise PublicationTransportError("isolated publication snapshot identity changed during transport")
+        raise PublicationTransportError(
+            "isolated publication snapshot identity changed during transport"
+        )
