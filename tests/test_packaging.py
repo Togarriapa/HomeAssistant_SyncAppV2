@@ -7,7 +7,7 @@ from ha_syncapp.config import load_config
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_packaging_grants_no_access_to_home_assistant_or_host() -> None:
+def test_packaging_exposes_only_read_only_home_assistant_config() -> None:
     manifest = yaml.safe_load((ROOT / "syncapp/config.yaml").read_text())
     assert set(manifest["arch"]) == {"aarch64", "amd64"}
     assert manifest["version"] == __version__
@@ -16,8 +16,14 @@ def test_packaging_grants_no_access_to_home_assistant_or_host() -> None:
     assert manifest["backup"] == "cold"
     assert manifest["init"] is True
     assert manifest.get("apparmor", True) is True
+    assert manifest["map"] == [
+        {
+            "type": "homeassistant_config",
+            "read_only": True,
+            "path": "/homeassistant",
+        }
+    ]
     for capability in (
-        "map",
         "ports",
         "privileged",
         "full_access",
