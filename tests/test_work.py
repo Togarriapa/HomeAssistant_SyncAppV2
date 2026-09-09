@@ -4,8 +4,6 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp.state import StateError, StateStore, WorkItem
-
-
 NOW = datetime(2026, 9, 9, 18, 0, tzinfo=UTC)
 
 
