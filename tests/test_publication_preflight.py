@@ -15,7 +15,9 @@ BASELINE = "a" * 40
 REMOTE_OTHER = "c" * 40
 
 
-def _baseline(commit_sha: str = BASELINE, *, target: str = "Owner/Home", branch: str = "main"):
+def _baseline(
+    commit_sha: str = BASELINE, *, target: str = "Owner/Home", branch: str = "main"
+) -> SynchronizationBaseline:
     return SynchronizationBaseline(
         target=target,
         branch=branch,
@@ -25,7 +27,9 @@ def _baseline(commit_sha: str = BASELINE, *, target: str = "Owner/Home", branch:
     )
 
 
-def _remote(commit_sha: str = BASELINE, *, target: str = "Owner/Home", branch: str = "main"):
+def _remote(
+    commit_sha: str = BASELINE, *, target: str = "Owner/Home", branch: str = "main"
+) -> BranchHead:
     return BranchHead(target=target, repository_id=42, branch=branch, commit_sha=commit_sha)
 
 
