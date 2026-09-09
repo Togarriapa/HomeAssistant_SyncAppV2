@@ -99,9 +99,7 @@ def verify_snapshot(staging_root: Path, manifest: SnapshotManifest) -> None:
 
     try:
         expected_files, expected_directories = _validate_manifest(manifest)
-        stage, stage_descriptor, stage_expected = _open_directory_root(
-            staging_root, "staging root"
-        )
+        stage, stage_descriptor, stage_expected = _open_directory_root(staging_root, "staging root")
         try:
             actual_files: dict[tuple[Route, str], tuple[int, str]] = {}
             actual_directories: set[tuple[Route, str]] = set()
