@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.state import StateError, StateStore, WorkItem
 
 
