@@ -89,14 +89,9 @@ def test_local_sync_claim_respects_retry_time(tmp_path: Path) -> None:
 
     try:
         assert (
-            local_sync_work.claim_local_sync_work(
-                store, now=start + timedelta(seconds=59)
-            )
-            is None
+            local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=59)) is None
         )
-        reclaimed = local_sync_work.claim_local_sync_work(
-            store, now=start + timedelta(seconds=60)
-        )
+        reclaimed = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=60))
     finally:
         store.__exit__(None, None, None)
 
@@ -122,12 +117,8 @@ def test_local_sync_claim_preserves_order_within_kind(tmp_path: Path) -> None:
     )
 
     try:
-        first = local_sync_work.claim_local_sync_work(
-            store, now=start + timedelta(seconds=1)
-        )
-        second = local_sync_work.claim_local_sync_work(
-            store, now=start + timedelta(seconds=1)
-        )
+        first = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
+        second = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
     finally:
         store.__exit__(None, None, None)
 
