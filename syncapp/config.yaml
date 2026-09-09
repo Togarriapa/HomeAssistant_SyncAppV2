@@ -13,6 +13,7 @@ init: true
 apparmor: true
 backup: cold
 timeout: 15
+homeassistant_api: true
 map:
   - type: homeassistant_config
     read_only: true
