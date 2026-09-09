@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ha_syncapp.core_runtime import CoreRuntimeError, collect_core_runtime_inventory
+from ha_syncapp.core_runtime_bundle import CoreRuntimeBundleError, collect_core_runtime_bundle
 from ha_syncapp.runtime_sync_work import (
     RuntimeSyncWorkError,
     RuntimeSyncWorkResult,
@@ -56,8 +56,8 @@ def run_runtime_sync_retrigger_pass(
             )
 
         try:
-            inventory = collect_core_runtime_inventory(token=core_token)
-        except CoreRuntimeError:
+            inventory = collect_core_runtime_bundle(token=core_token)
+        except CoreRuntimeBundleError:
             retry = store.fail_work(item, transient=True)
             return RuntimeSyncRetriggerResult(
                 recovered_interrupted=recovered,
