@@ -105,9 +105,13 @@ def _parse_timestamp(value: object) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _validate_work_identity(work_kind: str, work_key: str) -> None:
+def _validate_work_kind(work_kind: str) -> None:
     if not isinstance(work_kind, str) or _WORK_KIND.fullmatch(work_kind) is None:
         raise StateError("Invalid work kind")
+
+
+def _validate_work_identity(work_kind: str, work_key: str) -> None:
+    _validate_work_kind(work_kind)
     if (
         not isinstance(work_key, str)
         or not 1 <= len(work_key) <= 256
@@ -553,6 +557,40 @@ class StateStore:
                     "AND next_attempt_at <= ? "
                     "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1",
                     (current,),
+                ).fetchone()
+                if row is None:
+                    return None
+                item = self._work_from_row(row)
+                result = db.execute(
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
+                    "updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.status, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work claim changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to claim work") from None
+
+    def claim_work_kind(
+        self,
+        work_kind: str,
+        *,
+        now: datetime | None = None,
+    ) -> WorkItem | None:
+        """Atomically claim the oldest eligible item of exactly one work kind."""
+        _validate_work_kind(work_kind)
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+                    "next_attempt_at FROM work WHERE work_kind = ? "
+                    "AND status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_key LIMIT 1",
+                    (work_kind, current),
                 ).fetchone()
                 if row is None:
                     return None
