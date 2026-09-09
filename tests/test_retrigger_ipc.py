@@ -63,7 +63,7 @@ def test_server_returns_only_sanitized_failure_reason(tmp_path: Path) -> None:
     with RetriggerServer(path) as server:
         thread = Thread(
             target=lambda: server.serve_once(
-                lambda request: "ghp_secret_nested_detail",
+                lambda request: "nested-private-detail",
                 timeout_seconds=5,
             )
         )
@@ -78,7 +78,7 @@ def test_server_returns_only_sanitized_failure_reason(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
     assert str(exc_info.value) == "Retrigger request failed: internal_error"
-    assert "ghp_secret_nested_detail" not in str(exc_info.value)
+    assert "nested-private-detail" not in str(exc_info.value)
 
 
 def test_server_socket_is_private_and_replaces_only_owned_stale_socket(tmp_path: Path) -> None:
@@ -126,16 +126,24 @@ def test_client_rejects_relative_or_control_character_paths_before_connecting(
     data, _ = _private_root(tmp_path)
     path = retrigger_socket_path(data.resolve())
 
-    for home in (Path("relative"), Path("/homeassistant\nother")):
-        with pytest.raises(RetriggerIPCError, match="source path is invalid"):
-            request_retrigger_once(
-                path,
-                home,
-                Path("/homeassistant/home-assistant_v2.db"),
-            )
+    raw_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    raw_server.bind(os.fspath(path))
+    os.chmod(path, 0o600)
+    raw_server.listen(1)
+    try:
+        for home in (Path("relative"), Path("/homeassistant\nother")):
+            with pytest.raises(RetriggerIPCError, match="source path is invalid"):
+                request_retrigger_once(
+                    path,
+                    home,
+                    Path("/homeassistant/home-assistant_v2.db"),
+                )
+    finally:
+        raw_server.close()
+        path.unlink()
 
 
-def test_server_rejects_duplicate_keys_and_does_not_call_handler(tmp_path: Path) -> None:
+def test_server_rejects_duplicate_keys_without_terminating_service(tmp_path: Path) -> None:
     data, _ = _private_root(tmp_path)
     path = retrigger_socket_path(data.resolve())
     called = False
@@ -162,12 +170,51 @@ def test_server_rejects_duplicate_keys_and_does_not_call_handler(tmp_path: Path)
             b'"home_assistant_root":"/homeassistant",'
             b'"recorder_database":"/homeassistant/db"}\n'
         )
+        response = client.recv(8192)
         client.close()
         thread.join(timeout=5)
 
-    assert called is False
-    assert len(server_error) == 1
-    assert isinstance(server_error[0], RetriggerIPCError)
+        second = Thread(target=serve, args=(server,))
+        second.start()
+        request_retrigger_once(
+            path,
+            Path("/homeassistant"),
+            Path("/homeassistant/home-assistant_v2.db"),
+            timeout_seconds=5,
+        )
+        second.join(timeout=5)
+
+    assert json.loads(response) == {
+        "reason": "request_invalid",
+        "status": "failed",
+        "version": 1,
+    }
+    assert server_error == []
+    assert called is True
+
+
+def test_disconnected_malformed_client_does_not_terminate_service(tmp_path: Path) -> None:
+    data, _ = _private_root(tmp_path)
+    path = retrigger_socket_path(data.resolve())
+    server_error: list[BaseException] = []
+
+    def serve(server: RetriggerServer) -> None:
+        try:
+            server.serve_once(lambda request: "completed", timeout_seconds=5)
+        except BaseException as exc:
+            server_error.append(exc)
+
+    with RetriggerServer(path) as server:
+        thread = Thread(target=serve, args=(server,))
+        thread.start()
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(os.fspath(path))
+        client.sendall(b"not-json\n")
+        client.close()
+        thread.join(timeout=5)
+
+    assert thread.is_alive() is False
+    assert server_error == []
 
 
 def test_protocol_payload_contains_no_credential_fields(tmp_path: Path) -> None:
@@ -177,6 +224,7 @@ def test_protocol_payload_contains_no_credential_fields(tmp_path: Path) -> None:
 
     raw_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     raw_server.bind(os.fspath(path))
+    os.chmod(path, 0o600)
     raw_server.listen(1)
 
     def receive() -> None:
@@ -209,3 +257,58 @@ def test_protocol_payload_contains_no_credential_fields(tmp_path: Path) -> None:
         }
     ]
     assert not ({"github_token", "supervisor_token", "repo_b"} & set(captured[0]))
+
+
+def test_client_rejects_untrusted_socket_mode(tmp_path: Path) -> None:
+    data, _ = _private_root(tmp_path)
+    path = retrigger_socket_path(data.resolve())
+    raw_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    raw_server.bind(os.fspath(path))
+    os.chmod(path, 0o666)
+    raw_server.listen(1)
+    try:
+        with pytest.raises(RetriggerIPCError, match="socket is unsafe"):
+            request_retrigger_once(
+                path,
+                Path("/homeassistant"),
+                Path("/homeassistant/home-assistant_v2.db"),
+                timeout_seconds=5,
+            )
+    finally:
+        raw_server.close()
+        path.unlink()
+
+
+def test_client_rejects_arbitrary_failure_reason(tmp_path: Path) -> None:
+    data, _ = _private_root(tmp_path)
+    path = retrigger_socket_path(data.resolve())
+    raw_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    raw_server.bind(os.fspath(path))
+    os.chmod(path, 0o600)
+    raw_server.listen(1)
+
+    def receive() -> None:
+        connection, _ = raw_server.accept()
+        with connection:
+            connection.recv(8192)
+            connection.sendall(
+                b'{"reason":"private-nested-detail","status":"failed","version":1}\n'
+            )
+
+    thread = Thread(target=receive)
+    thread.start()
+    try:
+        with pytest.raises(RetriggerIPCError) as exc_info:
+            request_retrigger_once(
+                path,
+                Path("/homeassistant"),
+                Path("/homeassistant/home-assistant_v2.db"),
+                timeout_seconds=5,
+            )
+    finally:
+        thread.join(timeout=5)
+        raw_server.close()
+        path.unlink()
+
+    assert str(exc_info.value) == "Retrigger response is invalid"
+    assert "private-nested-detail" not in str(exc_info.value)
