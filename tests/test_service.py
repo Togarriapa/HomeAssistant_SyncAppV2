@@ -2,6 +2,7 @@ import json
 import os
 import select
 import signal
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -142,7 +143,9 @@ def test_repo_verification_failure_happens_before_run_is_started(
     with pytest.raises(RepositoryVerificationError):
         run(tmp_path, Shutdown())
     path = tmp_path / "syncapp/state.sqlite3"
-    with pytest.raises(sqlite3.OperationalError):
-        sqlite3.connect(f"file:{path}?mode=ro", uri=True).execute(
-            "SELECT active_run_id FROM installation"
+    with sqlite3.connect(path) as db:
+        boot_count, active_run_id = db.execute(
+            "SELECT boot_count, active_run_id FROM installation WHERE singleton = 1"
         ).fetchone()
+    assert boot_count == 0
+    assert active_run_id is None
