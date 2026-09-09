@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from ha_syncapp.github_repo import BranchHead
+from ha_syncapp.github_repo import BranchAbsence, BranchHead
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
     PublicationPreflightError,
@@ -32,11 +32,41 @@ def _remote(
     return BranchHead(target=target, repository_id=42, branch=branch, commit_sha=commit_sha)
 
 
+def _absent(*, target: str = "Owner/Home", branch: str = "main") -> BranchAbsence:
+    return BranchAbsence(target=target, repository_id=42, branch=branch)
+
+
 def test_unchanged_remote_baseline_allows_later_publication() -> None:
     result = assess_publication_preflight(LOCAL, _remote(), _baseline())
 
     assert result.disposition is PublicationDisposition.SAFE_TO_PUBLISH
     assert result.may_publish is True
+    assert result.requires_initialization is False
+    assert result.remote_commit_sha == BASELINE
+    assert result.baseline_commit_sha == BASELINE
+    assert result.repository_id == 42
+
+
+def test_verified_absent_remote_without_baseline_allows_only_first_publication() -> None:
+    result = assess_publication_preflight(LOCAL, _absent(), None)
+
+    assert result.disposition is PublicationDisposition.SAFE_TO_INITIALIZE
+    assert result.may_publish is True
+    assert result.requires_initialization is True
+    assert result.remote_commit_sha is None
+    assert result.baseline_commit_sha is None
+    assert result.target == "Owner/Home"
+    assert result.branch == "main"
+    assert result.repository_id == 42
+
+
+def test_disappeared_remote_with_successful_baseline_blocks_publication() -> None:
+    result = assess_publication_preflight(LOCAL, _absent(), _baseline())
+
+    assert result.disposition is PublicationDisposition.REMOTE_MISSING
+    assert result.may_publish is False
+    assert result.requires_initialization is False
+    assert result.remote_commit_sha is None
     assert result.baseline_commit_sha == BASELINE
 
 
@@ -74,10 +104,12 @@ def test_existing_remote_without_baseline_fails_closed_as_baseline_required() ->
     [
         (_baseline(target="Other/Home"), _remote()),
         (_baseline(branch="candidate"), _remote()),
+        (_baseline(target="Other/Home"), _absent()),
+        (_baseline(branch="candidate"), _absent()),
     ],
 )
 def test_mismatched_repository_or_branch_evidence_is_rejected(
-    baseline: SynchronizationBaseline, remote: BranchHead
+    baseline: SynchronizationBaseline, remote: BranchHead | BranchAbsence
 ) -> None:
     with pytest.raises(PublicationPreflightError):
         assess_publication_preflight(LOCAL, remote, baseline)
@@ -98,3 +130,28 @@ def test_case_only_repository_target_difference_preserves_bound_identity() -> No
 
     assert result.disposition is PublicationDisposition.SAFE_TO_PUBLISH
     assert result.target == "owner/home"
+
+
+def test_case_only_absent_repository_target_difference_preserves_bound_identity() -> None:
+    result = assess_publication_preflight(
+        LOCAL,
+        _absent(target="owner/home"),
+        _baseline(target="Owner/Home"),
+    )
+
+    assert result.disposition is PublicationDisposition.REMOTE_MISSING
+    assert result.target == "owner/home"
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        BranchAbsence(target="Owner/Home", repository_id=0, branch="main"),
+        BranchAbsence(target="invalid", repository_id=42, branch="main"),
+        BranchAbsence(target="Owner/Home", repository_id=42, branch=""),
+        BranchHead(target="Owner/Home", repository_id=42, branch="main", commit_sha="bad"),
+    ],
+)
+def test_malformed_remote_evidence_fails_closed(remote: BranchHead | BranchAbsence) -> None:
+    with pytest.raises(PublicationPreflightError):
+        assess_publication_preflight(LOCAL, remote, None)
