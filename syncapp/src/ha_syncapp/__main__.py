@@ -142,9 +142,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         with RetriggerServer(socket_path) as retrigger_server:
             fields = {**asdict(boot), "version": __version__, "mode": "passive"}
             level = "warning" if boot.interrupted_run_id else "info"
-            if config.log_level == "info" or (
-                config.log_level == "warning" and level == "warning"
-            ):
+            if config.log_level == "info" or (config.log_level == "warning" and level == "warning"):
                 emit("service_started", level=level, **fields)
 
             while not stop.requested:
