@@ -45,6 +45,25 @@ architectures, starts the image without networking, stops it and restarts it wit
 the same `/data` to verify identity persistence. These are container tests, not
 Supervisor or physical Raspberry Pi certification.
 
+## Synchronization safety boundaries
+
+Git operations are progressively introduced only inside isolated mutable workspaces,
+never in the live Home Assistant configuration tree. Accepted source snapshots are
+integrity evidence; mutable Git workspaces must reproduce that snapshot identity
+before and after a machine commit is accepted.
+
+Repo B network operations have a separate trust boundary. Before branch state is
+used for synchronization decisions, SyncApp re-verifies that the configured target
+is still the expected private repository with the previously bound repository ID.
+Branch-head inspection is read-only, validates the exact requested branch and
+commit identity, and deliberately performs no clone, fetch, pull, push, repository
+mutation or Home Assistant write. Later publication must use this evidence to detect
+divergence rather than overwriting an unexpected remote state.
+
+Remote `candidate` content remains deployment input rather than trusted live state.
+Nothing in the local synchronization path bypasses the root README's validation,
+backup, deployment, observation and rollback requirements.
+
 ## TDD and integration
 
 Add measurable acceptance criteria to a story before implementing it. Start with
