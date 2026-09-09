@@ -8,7 +8,7 @@ from ha_syncapp.github_repo import BranchAbsence, BranchHead
 from ha_syncapp.local_git import GitError
 from ha_syncapp.publication_intent import PublicationIntent
 from ha_syncapp.snapshot import Snapshot
-from ha_syncapp.state import StateStore
+from ha_syncapp.state import StateStore, SynchronizationBaseline
 
 TARGET = "example/private-home-assistant"
 REPOSITORY_ID = 12345
@@ -108,7 +108,11 @@ def test_existing_database_branch_without_baseline_is_blocked(
     store = _store(tmp_path)
     calls: list[tuple[str, object]] = []
     _install_staging_fakes(monkeypatch, calls)
-    monkeypatch.setattr(database_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _head())
+    monkeypatch.setattr(
+        database_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _head(),
+    )
     monkeypatch.setattr(
         database_sync,
         "create_snapshot_commit",
@@ -156,7 +160,11 @@ def test_missing_database_branch_after_baseline_is_blocked(
     store.record_synchronization_baseline(TARGET, "database", "b" * 64, OLD_SHA)
     calls: list[tuple[str, object]] = []
     _install_staging_fakes(monkeypatch, calls)
-    monkeypatch.setattr(database_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _absence())
+    monkeypatch.setattr(
+        database_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _absence(),
+    )
     try:
         result = _run(store, tmp_path)
     finally:
@@ -171,14 +179,25 @@ def test_first_database_publication_uses_verified_publication_workflow(
     store = _store(tmp_path)
     calls: list[tuple[str, object]] = []
     _install_staging_fakes(monkeypatch, calls)
-    monkeypatch.setattr(database_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _absence())
+    monkeypatch.setattr(
+        database_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _absence(),
+    )
     monkeypatch.setattr(database_sync, "create_snapshot_commit", lambda workspace: NEW_SHA)
     intent = PublicationIntent(TARGET, REPOSITORY_ID, "database", NEW_SHA, None, True)
-    monkeypatch.setattr(database_sync, "build_publication_intent", lambda workspace, preflight: intent)
+    monkeypatch.setattr(
+        database_sync,
+        "build_publication_intent",
+        lambda workspace, preflight: intent,
+    )
 
     def complete(
-        state: StateStore, workspace: GitWorkspace, supplied: PublicationIntent, token: str
-    ):
+        state: StateStore,
+        workspace: GitWorkspace,
+        supplied: PublicationIntent,
+        token: str,
+    ) -> SynchronizationBaseline:
         assert supplied == intent
         assert token == "token"
         return state.record_synchronization_baseline(
@@ -204,7 +223,11 @@ def test_existing_database_history_publishes_only_after_exact_anchor(
     store.record_synchronization_baseline(TARGET, "database", "b" * 64, OLD_SHA)
     calls: list[tuple[str, object]] = []
     _install_staging_fakes(monkeypatch, calls)
-    monkeypatch.setattr(database_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _head())
+    monkeypatch.setattr(
+        database_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _head(),
+    )
 
     def anchor(workspace: GitWorkspace, remote: BranchHead, token: str) -> str:
         calls.append(("anchor", remote.commit_sha))
@@ -247,7 +270,11 @@ def test_no_change_database_backup_does_not_publish(
     baseline = store.record_synchronization_baseline(TARGET, "database", "b" * 64, OLD_SHA)
     calls: list[tuple[str, object]] = []
     _install_staging_fakes(monkeypatch, calls)
-    monkeypatch.setattr(database_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _head())
+    monkeypatch.setattr(
+        database_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _head(),
+    )
     monkeypatch.setattr(database_sync, "anchor_trusted_baseline", lambda *a, **k: OLD_SHA)
     monkeypatch.setattr(database_sync, "create_snapshot_commit", lambda workspace: None)
     monkeypatch.setattr(
