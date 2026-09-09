@@ -13,6 +13,10 @@ init: true
 apparmor: true
 backup: cold
 timeout: 15
+map:
+  - type: homeassistant_config
+    read_only: true
+    path: /homeassistant
 options:
   log_level: info
   status_interval_seconds: 300
