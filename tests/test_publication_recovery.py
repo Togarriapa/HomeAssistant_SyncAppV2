@@ -146,7 +146,9 @@ def test_fresh_remote_movement_blocks_recovery_and_preserves_prior_baseline(tmp_
         with pytest.raises(PublicationRecoveryError, match="remote commit changed"):
             complete_publication_recovery(store, workspace, intent, _remote("c" * 40))
 
-        assert store.synchronization_baseline("Owner/Home", "main").commit_sha == PRIOR  # type: ignore[union-attr]
+        baseline = store.synchronization_baseline("Owner/Home", "main")
+        assert baseline is not None
+        assert baseline.commit_sha == PRIOR
 
 
 def test_mutated_workspace_blocks_recovery_and_preserves_prior_baseline(tmp_path: Path) -> None:
@@ -160,7 +162,9 @@ def test_mutated_workspace_blocks_recovery_and_preserves_prior_baseline(tmp_path
         with pytest.raises(PublicationRecoveryError, match="workspace could not be re-proven"):
             complete_publication_recovery(store, workspace, intent, _remote())
 
-        assert store.synchronization_baseline("Owner/Home", "main").commit_sha == PRIOR  # type: ignore[union-attr]
+        baseline = store.synchronization_baseline("Owner/Home", "main")
+        assert baseline is not None
+        assert baseline.commit_sha == PRIOR
 
 
 def test_repository_binding_mismatch_blocks_recovery_even_on_replay(tmp_path: Path) -> None:
@@ -173,4 +177,6 @@ def test_repository_binding_mismatch_blocks_recovery_even_on_replay(tmp_path: Pa
         with pytest.raises(PublicationRecoveryError, match="repository binding changed"):
             complete_publication_recovery(store, workspace, intent, _remote())
 
-        assert store.synchronization_baseline("Owner/Home", "main").commit_sha == PRIOR  # type: ignore[union-attr]
+        baseline = store.synchronization_baseline("Owner/Home", "main")
+        assert baseline is not None
+        assert baseline.commit_sha == PRIOR
