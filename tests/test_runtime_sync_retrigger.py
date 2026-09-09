@@ -120,9 +120,7 @@ def test_valid_claim_collects_combined_core_data_then_executes_once(
         *args: object,
     ) -> RuntimeSyncWorkResult:
         assert supplied_inventory is inventory
-        assert supplied_inventory.homeassistant["entities"] == [
-            {"entity_id": "light.one"}
-        ]
+        assert supplied_inventory.homeassistant["entities"] == [{"entity_id": "light.one"}]
         assert supplied_inventory.homeassistant["devices"] == [{"id": "device-one"}]
         assert supplied_inventory.homeassistant["areas"] == [{"id": "kitchen"}]
         events.append("execute")
