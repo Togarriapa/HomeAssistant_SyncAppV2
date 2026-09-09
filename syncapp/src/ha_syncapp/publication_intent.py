@@ -61,7 +61,9 @@ def build_publication_intent(
         if not preflight.requires_initialization or not preflight.may_publish:
             raise PublicationIntentError("initial publication preflight is internally inconsistent")
         if preflight.remote_commit_sha is not None or preflight.baseline_commit_sha is not None:
-            raise PublicationIntentError("initial publication requires an absent remote with no baseline")
+            raise PublicationIntentError(
+                "initial publication requires an absent remote with no baseline"
+            )
         verify_fast_forward_ancestry(
             workspace,
             baseline_commit_sha=preflight.local_commit_sha,
