@@ -35,9 +35,7 @@ class WebSocketSession(Protocol):
     def recv(self, timeout: float | None = None) -> str | bytes: ...
 
 
-SessionFactory = Callable[
-    [str, float, int], AbstractContextManager[WebSocketSession]
-]
+SessionFactory = Callable[[str, float, int], AbstractContextManager[WebSocketSession]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +98,7 @@ def _authenticate(
     max_message_bytes: int,
 ) -> None:
     required = _receive_json(session, timeout_seconds, max_message_bytes)
-    if required != {"type": "auth_required"}:
+    if not isinstance(required, dict) or required.get("type") != "auth_required":
         raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket authentication failed")
 
     _send_json(session, {"type": "auth", "access_token": token}, max_message_bytes)
@@ -162,21 +160,29 @@ def _receive_json(
         raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket receive failed") from None
     if isinstance(message, bytes):
         if len(message) > max_message_bytes:
-            raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket message exceeds size limit")
+            raise CoreWebSocketRuntimeError(
+                "Home Assistant Core WebSocket message exceeds size limit"
+            )
         try:
             text = message.decode("utf-8")
         except UnicodeDecodeError:
-            raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket message is invalid") from None
+            raise CoreWebSocketRuntimeError(
+                "Home Assistant Core WebSocket message is invalid"
+            ) from None
     elif isinstance(message, str):
         if len(message.encode("utf-8")) > max_message_bytes:
-            raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket message exceeds size limit")
+            raise CoreWebSocketRuntimeError(
+                "Home Assistant Core WebSocket message exceeds size limit"
+            )
         text = message
     else:
         raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket message is invalid")
     try:
         return json.loads(text, parse_constant=_reject_json_constant)
     except (json.JSONDecodeError, ValueError, RecursionError):
-        raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket message is invalid") from None
+        raise CoreWebSocketRuntimeError(
+            "Home Assistant Core WebSocket message is invalid"
+        ) from None
 
 
 def _send_json(
@@ -193,9 +199,13 @@ def _send_json(
             separators=(",", ":"),
         )
     except (TypeError, ValueError, RecursionError):
-        raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket command is invalid") from None
+        raise CoreWebSocketRuntimeError(
+            "Home Assistant Core WebSocket command is invalid"
+        ) from None
     if len(message.encode("utf-8")) > max_message_bytes:
-        raise CoreWebSocketRuntimeError("Home Assistant Core WebSocket command exceeds size limit")
+        raise CoreWebSocketRuntimeError(
+            "Home Assistant Core WebSocket command exceeds size limit"
+        )
     try:
         session.send(message)
     except Exception:
