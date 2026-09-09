@@ -175,7 +175,8 @@ class StateStore:
         db.execute(
             "CREATE TABLE work ("
             "work_kind TEXT NOT NULL, work_key TEXT NOT NULL, "
-            "status TEXT NOT NULL CHECK (status IN ('pending','running','retry','blocked','succeeded')), "
+            "status TEXT NOT NULL CHECK (status IN ("
+            "'pending','running','retry','blocked','succeeded')), "
             "attempts INTEGER NOT NULL CHECK (attempts >= 0), "
             "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, "
             "PRIMARY KEY (work_kind, work_key))"
@@ -184,7 +185,6 @@ class StateStore:
 
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
-        # Check sidecars before SQLite can follow them during crash recovery.
         for suffix in ("-journal", "-wal", "-shm"):
             sidecar = path.with_name(path.name + suffix)
             if os.path.lexists(sidecar):
@@ -208,7 +208,6 @@ class StateStore:
             if version != 0:
                 raise StateError("Unsupported state schema")
             with db:
-                # Explicit BEGIN keeps DDL, seed and schema version atomic.
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
                     "CREATE TABLE installation ("
@@ -218,18 +217,17 @@ class StateStore:
                     "active_run_id TEXT, last_started_at TEXT, last_stopped_at TEXT)"
                 )
                 db.execute(
-                    "INSERT INTO installation VALUES (1, ?, 0, NULL, NULL, NULL)", (str(uuid4()),)
+                    "INSERT INTO installation VALUES (1, ?, 0, NULL, NULL, NULL)",
+                    (str(uuid4()),),
                 )
                 self._create_work_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            # Persist the new file's directory entry as well as its contents.
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(root_fd)
             finally:
                 os.close(root_fd)
         elif version == 1:
-            # Validate the shipped v1 identity before changing anything.
             self._identity()
             with db:
                 db.execute("BEGIN IMMEDIATE")
@@ -312,20 +310,28 @@ class StateStore:
             attempts=attempts,
             created_at=_parse_timestamp(created_at),
             updated_at=_parse_timestamp(updated_at),
-            next_attempt_at=None if next_attempt_at is None else _parse_timestamp(next_attempt_at),
+            next_attempt_at=(
+                None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
+            ),
         )
 
     def _get_work(self, work_kind: str, work_key: str) -> WorkItem:
         rows = self._connection.execute(
-            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
-            "FROM work WHERE work_kind = ? AND work_key = ?",
+            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+            "next_attempt_at FROM work WHERE work_kind = ? AND work_key = ?",
             (work_kind, work_key),
         ).fetchall()
         if len(rows) != 1:
             raise StateError("Work record is missing")
         return self._work_from_row(rows[0])
 
-    def enqueue_work(self, work_kind: str, work_key: str, *, now: datetime | None = None) -> WorkItem:
+    def enqueue_work(
+        self,
+        work_kind: str,
+        work_key: str,
+        *,
+        now: datetime | None = None,
+    ) -> WorkItem:
         """Create one deterministic work item, or return its existing durable state."""
         _validate_work_identity(work_kind, work_key)
         current = _timestamp(now).isoformat()
@@ -333,8 +339,8 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
-                    "INSERT OR IGNORE INTO work "
-                    "(work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at) "
+                    "INSERT OR IGNORE INTO work (work_kind, work_key, status, attempts, "
+                    "created_at, updated_at, next_attempt_at) "
                     "VALUES (?, ?, 'pending', 0, ?, ?, ?)",
                     (work_kind, work_key, current, current, current),
                 )
@@ -349,8 +355,9 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute(
-                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
-                    "FROM work WHERE status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+                    "next_attempt_at FROM work WHERE status IN ('pending','retry') "
+                    "AND next_attempt_at <= ? "
                     "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1",
                     (current,),
                 ).fetchone()
@@ -408,7 +415,8 @@ class StateStore:
                 db.execute("BEGIN IMMEDIATE")
                 result = db.execute(
                     "UPDATE work SET status = ?, updated_at = ?, next_attempt_at = ? "
-                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
+                    "AND attempts = ?",
                     (status, current, next_attempt, item.work_kind, item.work_key, item.attempts),
                 )
                 if result.rowcount != 1:
@@ -427,7 +435,8 @@ class StateStore:
                 db.execute("BEGIN IMMEDIATE")
                 result = db.execute(
                     "UPDATE work SET status = 'succeeded', updated_at = ?, next_attempt_at = NULL "
-                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
+                    "AND attempts = ?",
                     (current, item.work_kind, item.work_key, item.attempts),
                 )
                 if result.rowcount != 1:
