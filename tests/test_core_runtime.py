@@ -2,7 +2,6 @@ import json
 from collections.abc import Mapping
 
 import pytest
-
 from ha_syncapp.core_runtime import (
     CoreApiResponse,
     CoreApiTransport,
