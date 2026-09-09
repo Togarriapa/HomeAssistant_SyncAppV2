@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import snapshot
-from ha_syncapp.snapshot import SnapshotError, capture_snapshot
+from ha_syncapp.snapshot import SnapshotError, capture_snapshot, verify_snapshot
 
 
 def _write(root: Path, relative: str, data: bytes) -> None:
@@ -45,6 +45,7 @@ def test_snapshot_preserves_complete_tree_and_routes_only_explicit_logs(tmp_path
     assert not (stage / "logs/notes.log").exists()
     assert len(manifest.snapshot_id) == 64
     assert manifest.total_bytes == sum(len(value) for value in files.values())
+    verify_snapshot(stage, manifest)
 
 
 def test_snapshot_is_deterministic_for_identical_content(tmp_path: Path) -> None:
@@ -160,3 +161,47 @@ def test_snapshot_fails_if_a_file_is_added_during_capture(
         capture_snapshot(source, tmp_path / "stage")
 
     assert not (tmp_path / "stage").exists()
+
+
+def test_verify_snapshot_rejects_staged_byte_tampering(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    source.mkdir()
+    _write(source, "secrets.yaml", b"token: synthetic\n")
+    stage = tmp_path / "stage"
+    manifest = capture_snapshot(source, stage)
+
+    (stage / "main/secrets.yaml").write_bytes(b"token: changed\n")
+
+    with pytest.raises(SnapshotError, match="staged snapshot integrity"):
+        verify_snapshot(stage, manifest)
+
+
+def test_verify_snapshot_rejects_added_or_removed_paths(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    source.mkdir()
+    _write(source, "configuration.yaml", b"default_config:\n")
+    stage = tmp_path / "stage"
+    manifest = capture_snapshot(source, stage)
+
+    _write(stage / "main", ".storage/injected", b"unexpected\n")
+    with pytest.raises(SnapshotError, match="staged snapshot integrity"):
+        verify_snapshot(stage, manifest)
+
+    (stage / "main/.storage/injected").unlink()
+    (stage / "main/configuration.yaml").unlink()
+    with pytest.raises(SnapshotError, match="staged snapshot integrity"):
+        verify_snapshot(stage, manifest)
+
+
+def test_verify_snapshot_rejects_route_tampering(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    source.mkdir()
+    _write(source, "home-assistant.log", b"log\n")
+    stage = tmp_path / "stage"
+    manifest = capture_snapshot(source, stage, log_paths={"home-assistant.log"})
+
+    (stage / "main").mkdir()
+    (stage / "logs/home-assistant.log").replace(stage / "main/home-assistant.log")
+
+    with pytest.raises(SnapshotError, match="staged snapshot integrity"):
+        verify_snapshot(stage, manifest)
