@@ -40,12 +40,18 @@ def build_publication_recovery_intent(
         raise PublicationRecoveryError("publication recovery preflight is internally inconsistent")
     if type(preflight.repository_id) is not int or preflight.repository_id <= 0:
         raise PublicationRecoveryError("publication recovery repository identity is invalid")
-    if not _valid_target(preflight.target) or not isinstance(preflight.branch, str) or not preflight.branch:
+    if (
+        not _valid_target(preflight.target)
+        or not isinstance(preflight.branch, str)
+        or not preflight.branch
+    ):
         raise PublicationRecoveryError("publication recovery branch identity is invalid")
     if _COMMIT_SHA.fullmatch(preflight.local_commit_sha) is None:
         raise PublicationRecoveryError("publication recovery local commit identity is invalid")
     if preflight.remote_commit_sha != preflight.local_commit_sha:
-        raise PublicationRecoveryError("publication recovery remote state does not match local commit")
+        raise PublicationRecoveryError(
+            "publication recovery remote state does not match local commit"
+        )
     if (
         preflight.baseline_commit_sha is None
         or _COMMIT_SHA.fullmatch(preflight.baseline_commit_sha) is None
@@ -77,18 +83,20 @@ def complete_publication_recovery(
     try:
         snapshot_id = verify_workspace_content(workspace)
     except WorkspaceError as exc:
-        raise PublicationRecoveryError("publication recovery workspace could not be re-proven") from exc
+        raise PublicationRecoveryError(
+            "publication recovery workspace could not be re-proven"
+        ) from exc
     if snapshot_id != workspace.snapshot_id:
         raise PublicationRecoveryError("publication recovery snapshot identity changed")
 
     try:
+        if store.repository_id(intent.target) != intent.repository_id:
+            raise PublicationRecoveryError("publication recovery repository binding changed")
         current = store.synchronization_baseline(intent.target, intent.branch)
         if current is None or current.commit_sha != intent.prior_baseline_commit_sha:
             if current is not None and current.commit_sha == intent.local_commit_sha:
                 return current
             raise PublicationRecoveryError("publication recovery baseline changed unexpectedly")
-        if store.repository_id(intent.target) != intent.repository_id:
-            raise PublicationRecoveryError("publication recovery repository binding changed")
         recorded = store.record_synchronization_baseline(
             intent.target,
             intent.branch,
