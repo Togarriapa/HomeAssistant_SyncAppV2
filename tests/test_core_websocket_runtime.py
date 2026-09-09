@@ -201,7 +201,7 @@ def test_rejects_invalid_registry_protocol(response: Any) -> None:
 
 
 def test_rejects_oversized_message() -> None:
-    session = FakeSession(["{\"type\":\"auth_required\",\"padding\":\"xxxxxxxx\"}"])
+    session = FakeSession(['{"type":"auth_required","padding":"xxxxxxxx"}'])
 
     with pytest.raises(CoreWebSocketRuntimeError, match="exceeds size limit"):
         collect_core_websocket_inventory(
