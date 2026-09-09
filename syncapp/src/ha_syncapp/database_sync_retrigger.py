@@ -9,6 +9,7 @@ from ha_syncapp.database_sync_work import (
     DatabaseSyncWorkError,
     DatabaseSyncWorkResult,
     claim_database_sync_work,
+    database_sync_work_key,
     execute_claimed_database_sync_work,
 )
 from ha_syncapp.state import StateError, StateStore
@@ -44,6 +45,12 @@ def run_database_sync_retrigger_pass(
         item = claim_database_sync_work(store)
         if item is None:
             return DatabaseSyncRetriggerResult(recovered_interrupted=recovered, processed=None)
+        if item.work_key != database_sync_work_key(target, source_database):
+            blocked = store.fail_work(item, transient=False)
+            return DatabaseSyncRetriggerResult(
+                recovered_interrupted=recovered,
+                processed=DatabaseSyncWorkResult(blocked, None),
+            )
         processed = execute_claimed_database_sync_work(
             store,
             item,
