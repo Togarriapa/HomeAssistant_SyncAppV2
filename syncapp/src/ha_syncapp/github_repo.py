@@ -1,6 +1,7 @@
 """Fail-closed GitHub metadata verification for the configured private Repo B."""
 
 import json
+import re
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -8,6 +9,8 @@ from urllib.request import Request, urlopen
 
 MAX_METADATA_BYTES = 65536
 REQUEST_TIMEOUT_SECONDS = 10.0
+_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class RepositoryVerificationError(RuntimeError):
@@ -18,6 +21,14 @@ class RepositoryVerificationError(RuntimeError):
 class RepoIdentity:
     target: str
     repository_id: int
+
+
+@dataclass(frozen=True)
+class BranchHead:
+    target: str
+    repository_id: int
+    branch: str
+    commit_sha: str
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -37,22 +48,21 @@ def _metadata_url(target: str) -> str:
     return f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repository, safe='')}"
 
 
-def fetch_and_verify_private_repository(
-    target: str,
-    token: str,
-    *,
-    expected_id: int | None = None,
-) -> RepoIdentity:
-    """Fetch authenticated GitHub metadata and prove Repo B is the intended private repo."""
-    request = Request(
-        _metadata_url(target),
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "HomeAssistant-SyncAppV2",
-        },
-        method="GET",
-    )
+def _validate_branch(branch: str) -> None:
+    if not isinstance(branch, str) or _BRANCH.fullmatch(branch) is None:
+        raise RepositoryVerificationError("Configured repository branch is invalid")
+    if (
+        branch in {".", ".."}
+        or branch.startswith("/")
+        or branch.endswith(("/", ".", ".lock"))
+        or ".." in branch
+        or "//" in branch
+        or "@{" in branch
+    ):
+        raise RepositoryVerificationError("Configured repository branch is invalid")
+
+
+def _read_json(request: Request) -> object:
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310
             raw = response.read(MAX_METADATA_BYTES + 1)
@@ -68,9 +78,31 @@ def fetch_and_verify_private_repository(
     if len(raw) > MAX_METADATA_BYTES:
         raise RepositoryVerificationError("GitHub repository metadata exceeded the size limit")
     try:
-        metadata = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
     except (UnicodeError, ValueError, RecursionError):
         raise RepositoryVerificationError("GitHub returned invalid repository metadata") from None
+
+
+def _request(url: str, token: str) -> Request:
+    return Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "HomeAssistant-SyncAppV2",
+        },
+        method="GET",
+    )
+
+
+def fetch_and_verify_private_repository(
+    target: str,
+    token: str,
+    *,
+    expected_id: int | None = None,
+) -> RepoIdentity:
+    """Fetch authenticated GitHub metadata and prove Repo B is the intended private repo."""
+    metadata = _read_json(_request(_metadata_url(target), token))
     if not isinstance(metadata, dict):
         raise RepositoryVerificationError("GitHub returned invalid repository metadata")
 
@@ -86,3 +118,34 @@ def fetch_and_verify_private_repository(
     if expected_id is not None and repository_id != expected_id:
         raise RepositoryVerificationError("Configured repository identity changed unexpectedly")
     return RepoIdentity(target=full_name, repository_id=repository_id)
+
+
+def fetch_trusted_branch_head(
+    target: str,
+    token: str,
+    *,
+    expected_id: int,
+    branch: str = "main",
+) -> BranchHead:
+    """Read one exact Repo B branch head only after re-proving repository identity."""
+    if type(expected_id) is not int or expected_id <= 0:
+        raise RepositoryVerificationError("Expected repository identity is invalid")
+    _validate_branch(branch)
+    identity = fetch_and_verify_private_repository(target, token, expected_id=expected_id)
+    branch_url = f"{_metadata_url(identity.target)}/branches/{quote(branch, safe='')}"
+    metadata = _read_json(_request(branch_url, token))
+    if not isinstance(metadata, dict):
+        raise RepositoryVerificationError("GitHub returned invalid branch metadata")
+    name = metadata.get("name")
+    commit = metadata.get("commit")
+    if name != branch or not isinstance(commit, dict):
+        raise RepositoryVerificationError("GitHub returned invalid branch metadata")
+    commit_sha = commit.get("sha")
+    if not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None:
+        raise RepositoryVerificationError("GitHub returned invalid branch metadata")
+    return BranchHead(
+        target=identity.target,
+        repository_id=identity.repository_id,
+        branch=name,
+        commit_sha=commit_sha,
+    )
