@@ -31,7 +31,7 @@ class RetriggerRequest:
 
 def retrigger_socket_path(data_dir: Path) -> Path:
     """Return the socket location inside the StateStore-owned private directory."""
-    if type(data_dir) is not Path or not data_dir.is_absolute():
+    if not isinstance(data_dir, Path) or not data_dir.is_absolute():
         raise RetriggerIPCError("Retrigger data directory is invalid")
     path = data_dir / "syncapp" / _SOCKET_NAME
     if len(os.fsencode(path)) >= 100:
@@ -183,7 +183,7 @@ def _receive_request(connection: socket.socket, timeout_seconds: float) -> Retri
 
 
 def _validate_request_path(path: Path) -> str:
-    if type(path) is not Path:
+    if not isinstance(path, Path):
         raise RetriggerIPCError("Retrigger source path is invalid")
     return _validate_path_text(os.fspath(path))
 
