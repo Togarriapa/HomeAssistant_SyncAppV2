@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ def _open_store(tmp_path: Path) -> StateStore:
 
 def _claimed_local_sync(store: StateStore):
     local_sync_work.enqueue_local_sync_work(store, TARGET)
-    item = store.claim_work()
+    item = local_sync_work.claim_local_sync_work(store)
     assert item is not None
     return item
 
@@ -49,6 +50,105 @@ def test_local_sync_enqueue_is_idempotent_and_case_stable(tmp_path: Path) -> Non
     assert first == second
     assert first.work_kind == "local_sync"
     assert len(first.work_key) == 64
+
+
+def test_local_sync_claim_skips_earlier_unrelated_work(tmp_path: Path) -> None:
+    store = _open_store(tmp_path)
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    later = earlier + timedelta(seconds=1)
+    store.enqueue_work("candidate", "candidate-sha", now=earlier)
+    store.enqueue_work(
+        "local_sync",
+        local_sync_work.local_sync_work_key(TARGET),
+        now=later,
+    )
+
+    try:
+        claimed = local_sync_work.claim_local_sync_work(store, now=later)
+        unrelated = store.claim_work(now=later)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert claimed is not None and claimed.work_kind == "local_sync"
+    assert claimed.attempts == 1 and claimed.status == "running"
+    assert unrelated is not None and unrelated.work_kind == "candidate"
+
+
+def test_local_sync_claim_respects_retry_time(tmp_path: Path) -> None:
+    store = _open_store(tmp_path)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    store.enqueue_work(
+        "local_sync",
+        local_sync_work.local_sync_work_key(TARGET),
+        now=start,
+    )
+    item = local_sync_work.claim_local_sync_work(store, now=start)
+    assert item is not None
+    retry = store.fail_work(item, transient=True, now=start)
+    assert retry.next_attempt_at == start + timedelta(seconds=60)
+
+    try:
+        assert (
+            local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=59)) is None
+        )
+        reclaimed = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=60))
+    finally:
+        store.__exit__(None, None, None)
+
+    assert reclaimed is not None
+    assert reclaimed.attempts == 2
+    assert reclaimed.status == "running"
+
+
+def test_local_sync_claim_preserves_order_within_kind(tmp_path: Path) -> None:
+    store = _open_store(tmp_path)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    first_target = "owner/first"
+    second_target = "owner/second"
+    store.enqueue_work(
+        "local_sync",
+        local_sync_work.local_sync_work_key(first_target),
+        now=start,
+    )
+    store.enqueue_work(
+        "local_sync",
+        local_sync_work.local_sync_work_key(second_target),
+        now=start + timedelta(seconds=1),
+    )
+
+    try:
+        first = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
+        second = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
+    finally:
+        store.__exit__(None, None, None)
+
+    assert first is not None
+    assert first.work_key == local_sync_work.local_sync_work_key(first_target)
+    assert second is not None
+    assert second.work_key == local_sync_work.local_sync_work_key(second_target)
+
+
+def test_local_sync_claim_returns_none_when_only_other_kinds_are_ready(
+    tmp_path: Path,
+) -> None:
+    store = _open_store(tmp_path)
+    store.enqueue_work("runtime", "inventory")
+    try:
+        assert local_sync_work.claim_local_sync_work(store) is None
+        unrelated = store.claim_work()
+    finally:
+        store.__exit__(None, None, None)
+
+    assert unrelated is not None and unrelated.work_kind == "runtime"
+
+
+def test_local_sync_claim_fails_closed_for_unopened_state(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    store = StateStore(data)
+
+    with pytest.raises(local_sync_work.LocalSyncWorkError, match="claim is invalid"):
+        local_sync_work.claim_local_sync_work(store)
 
 
 @pytest.mark.parametrize(
@@ -121,7 +221,7 @@ def test_deterministic_sync_refusals_block_without_retry(
             TARGET,
             "token",
         )
-        assert store.claim_work() is None
+        assert local_sync_work.claim_local_sync_work(store) is None
     finally:
         store.__exit__(None, None, None)
 
@@ -197,7 +297,7 @@ def test_interrupted_local_sync_work_remains_recoverable(tmp_path: Path) -> None
     reopened = _open_store(tmp_path)
     try:
         assert reopened.recover_interrupted_work() == 1
-        reclaimed = reopened.claim_work()
+        reclaimed = local_sync_work.claim_local_sync_work(reopened)
     finally:
         reopened.__exit__(None, None, None)
 
