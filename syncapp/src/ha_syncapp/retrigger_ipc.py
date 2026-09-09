@@ -15,6 +15,16 @@ _PROTOCOL_VERSION: Final = 1
 _MAX_MESSAGE_BYTES: Final = 8192
 _MAX_PATH_CHARS: Final = 4096
 _SOCKET_NAME: Final = "retrigger.sock"
+_PUBLIC_FAILURE_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "configuration_invalid",
+        "repo_b_untrusted",
+        "source_invalid",
+        "cycle_failed",
+        "internal_error",
+        "request_invalid",
+    }
+)
 
 
 class RetriggerIPCError(RuntimeError):
@@ -81,7 +91,7 @@ class RetriggerServer:
         *,
         timeout_seconds: float = 0.25,
     ) -> bool:
-        """Handle at most one request and return whether a client was served."""
+        """Handle at most one request without letting a bad client terminate the service."""
         server = self._socket
         if server is None:
             raise RetriggerIPCError("Retrigger server is not open")
@@ -93,8 +103,24 @@ class RetriggerServer:
             return False
         except OSError:
             raise RetriggerIPCError("Retrigger server accept failed") from None
+
         with connection:
-            request = _receive_request(connection, timeout_seconds=max(timeout_seconds, 1.0))
+            try:
+                request = _receive_request(
+                    connection,
+                    timeout_seconds=max(timeout_seconds, 1.0),
+                )
+            except RetriggerIPCError:
+                _best_effort_response(
+                    connection,
+                    {
+                        "version": _PROTOCOL_VERSION,
+                        "status": "failed",
+                        "reason": "request_invalid",
+                    },
+                )
+                return True
+
             try:
                 reason = handler(request)
             except Exception:
@@ -107,7 +133,7 @@ class RetriggerServer:
                     "status": "failed",
                     "reason": _sanitize_reason(reason),
                 }
-            _send_json(connection, response)
+            _best_effort_response(connection, response)
         return True
 
 
@@ -120,6 +146,7 @@ def request_retrigger_once(
 ) -> None:
     """Ask the state-owning service to execute exactly one bounded Retrigger cycle."""
     _validate_timeout(timeout_seconds)
+    _verify_client_socket(socket_path)
     request = RetriggerRequest(home_assistant_root, recorder_database)
     payload = _request_payload(request)
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -139,12 +166,14 @@ def request_retrigger_once(
         raise RetriggerIPCError("Retrigger response is invalid")
     if response == {"version": _PROTOCOL_VERSION, "status": "completed"}:
         return
+    reason = response.get("reason")
     if (
         response.get("status") == "failed"
-        and isinstance(response.get("reason"), str)
+        and isinstance(reason, str)
+        and reason in _PUBLIC_FAILURE_REASONS
         and set(response) == {"version", "status", "reason"}
     ):
-        raise RetriggerIPCError(f"Retrigger request failed: {response['reason']}")
+        raise RetriggerIPCError(f"Retrigger request failed: {reason}")
     raise RetriggerIPCError("Retrigger response is invalid")
 
 
@@ -249,6 +278,13 @@ def _send_json(connection: socket.socket, payload: dict[str, object]) -> None:
         raise RetriggerIPCError("Retrigger IPC send failed") from None
 
 
+def _best_effort_response(connection: socket.socket, payload: dict[str, object]) -> None:
+    try:
+        _send_json(connection, payload)
+    except RetriggerIPCError:
+        return
+
+
 def _prepare_socket_path(path: Path) -> None:
     parent = path.parent
     try:
@@ -263,6 +299,25 @@ def _prepare_socket_path(path: Path) -> None:
         raise RetriggerIPCError("Retrigger socket directory is unsafe")
     if os.path.lexists(path):
         _remove_owned_socket(path)
+
+
+def _verify_client_socket(path: Path) -> None:
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise RetriggerIPCError("Retrigger socket path is invalid")
+    try:
+        parent_info = path.parent.lstat()
+        socket_info = path.lstat()
+    except OSError:
+        raise RetriggerIPCError("Retrigger service is unavailable") from None
+    if (
+        not stat.S_ISDIR(parent_info.st_mode)
+        or parent_info.st_uid != os.geteuid()
+        or stat.S_IMODE(parent_info.st_mode) != 0o700
+        or not stat.S_ISSOCK(socket_info.st_mode)
+        or socket_info.st_uid != os.geteuid()
+        or stat.S_IMODE(socket_info.st_mode) != 0o600
+    ):
+        raise RetriggerIPCError("Retrigger socket is unsafe")
 
 
 def _remove_owned_socket(path: Path) -> None:
@@ -291,15 +346,7 @@ def _reject_constant(value: str) -> object:
 
 
 def _sanitize_reason(reason: str) -> str:
-    allowed = {
-        "completed",
-        "configuration_invalid",
-        "repo_b_untrusted",
-        "source_invalid",
-        "cycle_failed",
-        "internal_error",
-    }
-    return reason if reason in allowed else "internal_error"
+    return reason if reason in _PUBLIC_FAILURE_REASONS else "internal_error"
 
 
 def _validate_timeout(value: float) -> None:
