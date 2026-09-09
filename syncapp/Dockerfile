@@ -1,4 +1,4 @@
-FROM python:3.12.14-slim-bookworm
+FROM python:3.14.7-slim-bookworm
 
 ARG BUILD_VERSION=0.1.0
 ARG BUILD_ARCH
