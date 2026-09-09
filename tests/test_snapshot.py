@@ -127,14 +127,21 @@ def test_source_insertion_and_deletion_during_capture_fail_closed(
         original_copy = snapshot_module._copy_regular_file
         changed = False
 
-        def change_tree(*args: object, **kwargs: object):
+        def change_tree(
+            *args: object,
+            _action: str = action,
+            _source: Path = source,
+            _victim: Path = victim,
+            _original_copy=original_copy,
+            **kwargs: object,
+        ):
             nonlocal changed
-            result = original_copy(*args, **kwargs)
+            result = _original_copy(*args, **kwargs)
             if not changed:
-                if action == "insert":
-                    (source / "new.yaml").write_text("new")
+                if _action == "insert":
+                    (_source / "new.yaml").write_text("new")
                 else:
-                    victim.unlink()
+                    _victim.unlink()
                 changed = True
             return result
 
