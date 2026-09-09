@@ -15,8 +15,10 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class StateError(RuntimeError):
@@ -48,6 +50,17 @@ class WorkItem:
     next_attempt_at: datetime | None
 
 
+@dataclass(frozen=True)
+class SynchronizationBaseline:
+    """Last successful local synchronization evidence for one repository branch."""
+
+    target: str
+    branch: str
+    snapshot_id: str
+    commit_sha: str
+    synchronized_at: datetime
+
+
 def _private_file(path: Path, *, create: bool = False) -> int:
     flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
     if create:
@@ -76,19 +89,19 @@ def _valid_uuid(value: object) -> bool:
 def _timestamp(value: datetime | None = None) -> datetime:
     current = value or datetime.now(UTC)
     if current.tzinfo is None or current.utcoffset() is None:
-        raise StateError("Work timestamps must include a timezone")
+        raise StateError("State timestamps must include a timezone")
     return current.astimezone(UTC)
 
 
 def _parse_timestamp(value: object) -> datetime:
     if not isinstance(value, str):
-        raise StateError("Invalid work timestamp")
+        raise StateError("Invalid state timestamp")
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
-        raise StateError("Invalid work timestamp") from None
+        raise StateError("Invalid state timestamp") from None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise StateError("Invalid work timestamp")
+        raise StateError("Invalid state timestamp")
     return parsed.astimezone(UTC)
 
 
@@ -112,6 +125,35 @@ def _validate_repository_binding(target: str, repository_id: int | None = None) 
         raise StateError("Invalid repository binding")
     if repository_id is not None and (type(repository_id) is not int or repository_id <= 0):
         raise StateError("Invalid repository binding")
+
+
+def _validate_branch(branch: str) -> None:
+    forbidden = ("..", "//", "@{")
+    if (
+        not isinstance(branch, str)
+        or not 1 <= len(branch) <= 200
+        or branch.startswith(("/", "."))
+        or branch.endswith(("/", ".", ".lock"))
+        or any(token in branch for token in forbidden)
+        or any(character.isspace() or character in "~^:?*[\\" for character in branch)
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in branch)
+    ):
+        raise StateError("Invalid synchronization branch")
+
+
+def _validate_synchronization_identity(
+    target: str, branch: str, snapshot_id: str | None = None, commit_sha: str | None = None
+) -> None:
+    _validate_repository_binding(target)
+    _validate_branch(branch)
+    if snapshot_id is not None and (
+        not isinstance(snapshot_id, str) or _HEX_64.fullmatch(snapshot_id) is None
+    ):
+        raise StateError("Invalid synchronization snapshot")
+    if commit_sha is not None and (
+        not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None
+    ):
+        raise StateError("Invalid synchronization commit")
 
 
 class StateStore:
@@ -202,6 +244,15 @@ class StateStore:
             "repository_id INTEGER NOT NULL CHECK (repository_id > 0))"
         )
 
+    @staticmethod
+    def _create_synchronization_baseline_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE synchronization_baseline ("
+            "target TEXT NOT NULL, branch TEXT NOT NULL, snapshot_id TEXT NOT NULL, "
+            "commit_sha TEXT NOT NULL, synchronized_at TEXT NOT NULL, "
+            "PRIMARY KEY (target, branch))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -241,6 +292,7 @@ class StateStore:
                 )
                 self._create_work_table(db)
                 self._create_repository_binding_table(db)
+                self._create_synchronization_baseline_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -248,7 +300,7 @@ class StateStore:
             finally:
                 os.close(root_fd)
         else:
-            if version not in {1, 2, SCHEMA_VERSION}:
+            if version not in {1, 2, 3, SCHEMA_VERSION}:
                 raise StateError("Unsupported state schema")
             self._identity()
             if version == 1:
@@ -261,6 +313,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_repository_binding_table(db)
+                    db.execute("PRAGMA user_version = 3")
+                version = 3
+            if version == 3:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_synchronization_baseline_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -353,6 +411,77 @@ class StateStore:
                     raise StateError("Repository identity changed unexpectedly")
         except sqlite3.Error:
             raise StateError("Unable to persist repository binding") from None
+
+    def synchronization_baseline(self, target: str, branch: str) -> SynchronizationBaseline | None:
+        """Read the last successful local synchronization result for a branch."""
+        _validate_synchronization_identity(target, branch)
+        try:
+            rows = self._connection.execute(
+                "SELECT target, branch, snapshot_id, commit_sha, synchronized_at "
+                "FROM synchronization_baseline WHERE target = ? AND branch = ?",
+                (target, branch),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read synchronization baseline") from None
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateError("Invalid synchronization baseline")
+        return self._synchronization_baseline_from_row(rows[0])
+
+    def record_synchronization_baseline(
+        self,
+        target: str,
+        branch: str,
+        snapshot_id: str,
+        commit_sha: str,
+        *,
+        synchronized_at: datetime | None = None,
+    ) -> SynchronizationBaseline:
+        """Atomically record a successful local synchronization result."""
+        _validate_synchronization_identity(target, branch, snapshot_id, commit_sha)
+        when = _timestamp(synchronized_at)
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT INTO synchronization_baseline "
+                    "(target, branch, snapshot_id, commit_sha, synchronized_at) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(target, branch) DO UPDATE SET "
+                    "snapshot_id = excluded.snapshot_id, commit_sha = excluded.commit_sha, "
+                    "synchronized_at = excluded.synchronized_at",
+                    (target, branch, snapshot_id, commit_sha, when.isoformat()),
+                )
+            baseline = self.synchronization_baseline(target, branch)
+            if baseline is None:
+                raise StateError("Synchronization baseline was not persisted")
+            return baseline
+        except sqlite3.Error:
+            raise StateError("Unable to persist synchronization baseline") from None
+
+    def _synchronization_baseline_from_row(
+        self, row: tuple[object, ...]
+    ) -> SynchronizationBaseline:
+        if len(row) != 5:
+            raise StateError("Invalid synchronization baseline")
+        target, branch, snapshot_id, commit_sha, synchronized_at = row
+        if (
+            not isinstance(target, str)
+            or not isinstance(branch, str)
+            or not isinstance(snapshot_id, str)
+            or not isinstance(commit_sha, str)
+            or not isinstance(synchronized_at, str)
+        ):
+            raise StateError("Invalid synchronization baseline")
+        _validate_synchronization_identity(target, branch, snapshot_id, commit_sha)
+        return SynchronizationBaseline(
+            target=target,
+            branch=branch,
+            snapshot_id=snapshot_id,
+            commit_sha=commit_sha,
+            synchronized_at=_parse_timestamp(synchronized_at),
+        )
 
     def _work_from_row(self, row: tuple[object, ...]) -> WorkItem:
         if len(row) != 7:

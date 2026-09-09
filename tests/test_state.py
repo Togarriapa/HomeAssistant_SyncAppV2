@@ -65,7 +65,7 @@ def test_state_and_lock_permissions_are_private(tmp_path: Path) -> None:
             assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-@pytest.mark.parametrize("version", [0, 3, 999])
+@pytest.mark.parametrize("version", [0, 5, 999])
 def test_unrecognized_database_is_preserved(tmp_path: Path, version: int) -> None:
     root = tmp_path / "syncapp"
     root.mkdir()
@@ -209,8 +209,11 @@ def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Pat
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE repository_binding")
+        db.execute("DROP TABLE synchronization_baseline")
         db.execute("PRAGMA user_version = 2")
     with StateStore(tmp_path) as store:
         store.bind_repository("Owner/Home", 123)
         assert store.repository_id("Owner/Home") == 123
         assert store.claim_work() is not None
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
