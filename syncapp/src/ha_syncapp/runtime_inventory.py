@@ -155,7 +155,9 @@ def verify_runtime_inventory(artifact: RuntimeInventoryArtifact) -> None:
             node = base / name
             relative = node.relative_to(artifact.root).as_posix()
             if relative not in expected_directories:
-                raise RuntimeInventoryError("runtime inventory directory layout does not match evidence")
+                raise RuntimeInventoryError(
+                    "runtime inventory directory layout does not match evidence"
+                )
             node_stat = _safe_lstat(node)
             if not stat.S_ISDIR(node_stat.st_mode):
                 raise RuntimeInventoryError("runtime inventory contains an unsafe directory entry")
