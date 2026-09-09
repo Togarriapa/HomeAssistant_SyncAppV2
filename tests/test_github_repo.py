@@ -106,6 +106,7 @@ def test_oversized_or_malformed_metadata_is_rejected(monkeypatch: pytest.MonkeyP
             self._body = BytesIO(body)
 
     for body in (b"{" + b"x" * 65536, b"not-json"):
+
         def respond(request: Request, timeout: float, payload: bytes = body) -> RawResponse:
             return RawResponse(payload)
 
