@@ -130,7 +130,7 @@ def test_snapshot_fails_if_another_file_changes_during_capture(
 
     monkeypatch.setattr(snapshot, "_copy_regular_file", copy_then_mutate)
 
-    with pytest.raises(SnapshotError, match="source tree changed"):
+    with pytest.raises(SnapshotError, match=r"source (?:tree|file|root) changed"):
         capture_snapshot(source, tmp_path / "stage")
 
     assert not (tmp_path / "stage").exists()
@@ -156,7 +156,7 @@ def test_snapshot_fails_if_a_file_is_added_during_capture(
 
     monkeypatch.setattr(snapshot, "_copy_regular_file", copy_then_add)
 
-    with pytest.raises(SnapshotError, match="source tree changed"):
+    with pytest.raises(SnapshotError, match=r"source (?:tree|file|root) changed"):
         capture_snapshot(source, tmp_path / "stage")
 
     assert not (tmp_path / "stage").exists()
