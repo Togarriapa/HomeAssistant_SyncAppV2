@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import pytest
-from ha_syncapp import local_sync, main_routing, snapshot as snapshot_module
+from ha_syncapp import local_sync, main_routing
+from ha_syncapp import snapshot as snapshot_module
 
 
 @pytest.mark.parametrize(
