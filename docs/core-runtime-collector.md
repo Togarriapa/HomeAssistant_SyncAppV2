@@ -4,7 +4,8 @@ This increment is derived only from the initial V2 `README.md` at root commit
 `71d284ce447d79b044e332c9bc01ae801dc91947`, specifically its requirement for a generated,
 AI-readable `runtime` branch containing current Home Assistant configuration/state/service and
 registry information. Home Assistant API mechanics are taken from current official Home Assistant
-developer documentation rather than from another SyncApp project.
+developer documentation and current Home Assistant Core source rather than from another SyncApp
+project.
 
 ## Permission boundary
 
@@ -25,6 +26,8 @@ one-shot read-only commands:
 - `config/entity_registry/list`
 - `config/device_registry/list`
 - `config/area_registry/list`
+- `config/floor_registry/list`
+- `config/label_registry/list`
 
 No subscription or mutation command is part of this boundary. Request identifiers are assigned
 monotonically and every result must match the exact request identifier and report `success: true`.
@@ -38,22 +41,23 @@ REST responses are bounded by request timeout and maximum byte count and require
 
 WebSocket messages are likewise bounded by timeout and maximum byte count. Authentication state,
 message type, request ID, success flag, JSON shape, registry identity fields and duplicate
-identities are checked before data is accepted. Registry records are retained byte-for-JSON-field
-and sorted by stable registry identity before they enter deterministic runtime artifact staging.
-Transport and protocol failures are converted to sanitized errors.
+identities are checked before data is accepted. Registry records are retained field-for-field as
+JSON-compatible objects and sorted by stable registry identity before they enter deterministic
+runtime artifact staging. Transport and protocol failures are converted to sanitized errors.
 
 The REST `/api/config` object is retained in the runtime manifest as `core_config`; its `version`,
 state count, and service-domain count are exposed as summary fields. REST states and services fill
 `homeassistant/states.json` and `homeassistant/services.json`. The WebSocket collector fills
-`homeassistant/entities.json`, `homeassistant/devices.json`, and `homeassistant/areas.json`, with
-summary counts in its returned manifest fragment.
+`homeassistant/entities.json`, `homeassistant/devices.json`, `homeassistant/areas.json`,
+`homeassistant/floors.json`, and `homeassistant/labels.json`, with summary counts in its returned
+manifest fragment.
 
 ## Deliberate partial coverage
 
 This is still only part of the README-defined runtime inventory. Integrations/config entries,
-floors, labels, Supervisor data, hardware data, topology/dependency analysis and deployment
-observation require separate, independently justified increments. The current collectors must not
-invent those datasets or infer them from incomplete state data.
+Supervisor data, hardware data, topology/dependency analysis and deployment observation require
+separate, independently justified increments. The current collectors must not invent those
+datasets or infer them from incomplete state data.
 
 This slice does not:
 

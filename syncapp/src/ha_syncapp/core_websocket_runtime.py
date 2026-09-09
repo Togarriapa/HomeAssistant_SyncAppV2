@@ -18,6 +18,8 @@ _COMMANDS: Final[tuple[tuple[str, str, str], ...]] = (
     ("entities", "config/entity_registry/list", "entity_id"),
     ("devices", "config/device_registry/list", "id"),
     ("areas", "config/area_registry/list", "id"),
+    ("floors", "config/floor_registry/list", "id"),
+    ("labels", "config/label_registry/list", "id"),
 )
 _DEFAULT_TIMEOUT_SECONDS: Final = 10.0
 _DEFAULT_MAX_MESSAGE_BYTES: Final = 4 * 1024 * 1024
@@ -85,6 +87,8 @@ def collect_core_websocket_inventory(
             "registry_entity_count": len(_require_list(datasets.get("entities"))),
             "registry_device_count": len(_require_list(datasets.get("devices"))),
             "area_count": len(_require_list(datasets.get("areas"))),
+            "floor_count": len(_require_list(datasets.get("floors"))),
+            "label_count": len(_require_list(datasets.get("labels"))),
         },
         homeassistant=datasets,
     )
