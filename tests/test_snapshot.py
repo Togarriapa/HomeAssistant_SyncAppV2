@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+from ha_syncapp import snapshot
 from ha_syncapp.snapshot import SnapshotError, capture_snapshot
 
 
@@ -106,3 +107,56 @@ def test_log_paths_must_be_safe_relative_paths(tmp_path: Path) -> None:
 
     with pytest.raises(SnapshotError, match="log path"):
         capture_snapshot(source, tmp_path / "stage", log_paths={"../outside.log"})
+
+
+def test_snapshot_fails_if_another_file_changes_during_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "homeassistant"
+    source.mkdir()
+    _write(source, "a.yaml", b"a: 1\n")
+    _write(source, "z.yaml", b"z: 1\n")
+
+    original_copy = snapshot._copy_regular_file
+    mutated = False
+
+    def copy_then_mutate(*args: object, **kwargs: object) -> tuple[str, int]:
+        nonlocal mutated
+        result = original_copy(*args, **kwargs)
+        if not mutated:
+            mutated = True
+            (source / "z.yaml").write_bytes(b"z: 222222\n")
+        return result
+
+    monkeypatch.setattr(snapshot, "_copy_regular_file", copy_then_mutate)
+
+    with pytest.raises(SnapshotError, match="source tree changed"):
+        capture_snapshot(source, tmp_path / "stage")
+
+    assert not (tmp_path / "stage").exists()
+
+
+def test_snapshot_fails_if_a_file_is_added_during_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "homeassistant"
+    source.mkdir()
+    _write(source, "a.yaml", b"a: 1\n")
+
+    original_copy = snapshot._copy_regular_file
+    added = False
+
+    def copy_then_add(*args: object, **kwargs: object) -> tuple[str, int]:
+        nonlocal added
+        result = original_copy(*args, **kwargs)
+        if not added:
+            added = True
+            _write(source, ".storage/new-state", b"new\n")
+        return result
+
+    monkeypatch.setattr(snapshot, "_copy_regular_file", copy_then_add)
+
+    with pytest.raises(SnapshotError, match="source tree changed"):
+        capture_snapshot(source, tmp_path / "stage")
+
+    assert not (tmp_path / "stage").exists()
