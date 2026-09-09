@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import runtime_sync_retrigger, runtime_sync_work
-from ha_syncapp.core_runtime import CoreRuntimeError
+from ha_syncapp.core_runtime_bundle import CoreRuntimeBundleError
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
 from ha_syncapp.runtime_sync import RuntimeSyncDisposition, RuntimeSyncResult
 from ha_syncapp.runtime_sync_work import RuntimeSyncWorkResult
@@ -25,8 +25,19 @@ def _store(tmp_path: Path) -> StateStore:
 
 def _inventory() -> RuntimeInventoryInput:
     return RuntimeInventoryInput(
-        manifest={"home_assistant_version": "2026.9.1"},
-        homeassistant={"states": [], "services": []},
+        manifest={
+            "home_assistant_version": "2026.9.1",
+            "registry_entity_count": 1,
+            "registry_device_count": 1,
+            "area_count": 1,
+        },
+        homeassistant={
+            "states": [],
+            "services": [],
+            "entities": [{"entity_id": "light.one"}],
+            "devices": [{"id": "device-one"}],
+            "areas": [{"id": "kitchen"}],
+        },
     )
 
 
@@ -75,7 +86,7 @@ def test_idle_pass_does_not_collect_or_consume_other_work(
         collected = True
         return _inventory()
 
-    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_inventory", collect)
+    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_bundle", collect)
     try:
         result = _run(store, tmp_path)
         unrelated = store.claim_work()
@@ -88,7 +99,7 @@ def test_idle_pass_does_not_collect_or_consume_other_work(
     assert unrelated is not None and unrelated.work_kind == "candidate"
 
 
-def test_valid_claim_collects_core_data_then_executes_once(
+def test_valid_claim_collects_combined_core_data_then_executes_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -109,6 +120,11 @@ def test_valid_claim_collects_core_data_then_executes_once(
         *args: object,
     ) -> RuntimeSyncWorkResult:
         assert supplied_inventory is inventory
+        assert supplied_inventory.homeassistant["entities"] == [
+            {"entity_id": "light.one"}
+        ]
+        assert supplied_inventory.homeassistant["devices"] == [{"id": "device-one"}]
+        assert supplied_inventory.homeassistant["areas"] == [{"id": "kitchen"}]
         events.append("execute")
         completed = state.complete_work(item)
         return RuntimeSyncWorkResult(
@@ -116,7 +132,7 @@ def test_valid_claim_collects_core_data_then_executes_once(
             _sync_result(RuntimeSyncDisposition.NO_CHANGE),
         )
 
-    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_inventory", collect)
+    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_bundle", collect)
     monkeypatch.setattr(runtime_sync_retrigger, "execute_claimed_runtime_sync_work", execute)
     try:
         result = _run(store, tmp_path)
@@ -128,7 +144,7 @@ def test_valid_claim_collects_core_data_then_executes_once(
     assert result.processed.work.status == "succeeded"
 
 
-def test_core_collection_failure_moves_claim_to_retry_without_leaking_tokens(
+def test_core_bundle_failure_moves_claim_to_retry_without_leaking_tokens(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -138,9 +154,9 @@ def test_core_collection_failure_moves_claim_to_retry_without_leaking_tokens(
     github_secret = "github-super-secret"
 
     def fail(*, token: str | None = None) -> RuntimeInventoryInput:
-        raise CoreRuntimeError(f"collection failed with {token}")
+        raise CoreRuntimeBundleError(f"collection failed with {token}")
 
-    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_inventory", fail)
+    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_bundle", fail)
     try:
         result = _run(
             store,
@@ -172,7 +188,7 @@ def test_mismatched_target_blocks_before_collection_or_publication(
         called = True
         return _inventory()
 
-    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_inventory", collect)
+    monkeypatch.setattr(runtime_sync_retrigger, "collect_core_runtime_bundle", collect)
     try:
         result = _run(store, tmp_path, target="Owner/Another-Home")
     finally:
@@ -195,7 +211,7 @@ def test_retrigger_recovers_interrupted_runtime_work_before_collection(
 
     monkeypatch.setattr(
         runtime_sync_retrigger,
-        "collect_core_runtime_inventory",
+        "collect_core_runtime_bundle",
         lambda **kwargs: _inventory(),
     )
 
@@ -229,7 +245,7 @@ def test_execution_error_is_sanitized(
     secret = "github-super-secret"
     monkeypatch.setattr(
         runtime_sync_retrigger,
-        "collect_core_runtime_inventory",
+        "collect_core_runtime_bundle",
         lambda **kwargs: _inventory(),
     )
 
