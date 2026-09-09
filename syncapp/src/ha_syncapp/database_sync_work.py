@@ -44,7 +44,7 @@ def database_sync_work_key(target: str, source_database: Path) -> str:
     """Return a deterministic identity for one Repo B target and Recorder path."""
     if not isinstance(target, str) or not target:
         raise DatabaseSyncWorkError("database synchronization work identity is invalid")
-    if type(source_database) is not Path or not source_database.is_absolute():
+    if not isinstance(source_database, Path) or not source_database.is_absolute():
         raise DatabaseSyncWorkError("database synchronization source path is invalid")
     payload = f"{target.casefold()}\0{source_database.as_posix()}".encode()
     return hashlib.sha256(payload).hexdigest()
