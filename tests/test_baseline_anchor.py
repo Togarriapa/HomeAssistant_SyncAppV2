@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import pytest
 import ha_syncapp.baseline_anchor as anchor_module
+import pytest
 from ha_syncapp.baseline_anchor import BaselineAnchorError, anchor_trusted_baseline
 from ha_syncapp.git_workspace import GitWorkspace, prepare_git_workspace
 from ha_syncapp.github_repo import BranchHead
