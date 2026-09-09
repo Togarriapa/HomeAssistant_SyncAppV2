@@ -183,9 +183,7 @@ def test_workspace_drift_during_rejected_push_is_reported(
     ) -> str:
         if arguments[0] == "rev-parse":
             return commit_sha
-        (workspace.tree_path / "configuration.yaml").write_text(
-            "homeassistant:\n  name: changed\n"
-        )
+        (workspace.tree_path / "configuration.yaml").write_text("homeassistant:\n  name: changed\n")
         raise GitError("simulated rejection")
 
     monkeypatch.setattr(transport_module, "_run_git", fake_run)
