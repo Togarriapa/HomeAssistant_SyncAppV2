@@ -60,7 +60,9 @@ def _validate_intent(intent: PublicationIntent) -> None:
         raise PublicationResultError("publication intent commit identity is invalid")
     if intent.expect_remote_absent:
         if intent.expected_remote_commit_sha is not None:
-            raise PublicationResultError("publication initialization intent is internally inconsistent")
+            raise PublicationResultError(
+                "publication initialization intent is internally inconsistent"
+            )
     else:
         if (
             intent.expected_remote_commit_sha is None
