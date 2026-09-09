@@ -82,7 +82,11 @@ def test_existing_remote_without_baseline_is_blocked_before_git_commit(
     source, snapshots, workspaces = _paths(tmp_path)
     calls: list[tuple[str, object]] = []
     _install_isolated_staging_fakes(monkeypatch, tmp_path, calls)
-    monkeypatch.setattr(local_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _remote_head())
+    monkeypatch.setattr(
+        local_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _remote_head(),
+    )
     monkeypatch.setattr(
         local_sync,
         "create_snapshot_commit",
@@ -203,7 +207,11 @@ def test_normal_publication_anchors_exact_baseline_before_commit(
     source, snapshots, workspaces = _paths(tmp_path)
     calls: list[tuple[str, object]] = []
     _install_isolated_staging_fakes(monkeypatch, tmp_path, calls)
-    monkeypatch.setattr(local_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _remote_head())
+    monkeypatch.setattr(
+        local_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _remote_head(),
+    )
 
     def anchor(workspace: GitWorkspace, remote: BranchHead, token: str) -> str:
         calls.append(("anchor", remote.commit_sha))
@@ -249,7 +257,11 @@ def test_no_change_never_invokes_publication_transport(
     source, snapshots, workspaces = _paths(tmp_path)
     calls: list[tuple[str, object]] = []
     _install_isolated_staging_fakes(monkeypatch, tmp_path, calls)
-    monkeypatch.setattr(local_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _remote_head())
+    monkeypatch.setattr(
+        local_sync,
+        "fetch_optional_trusted_branch_head",
+        lambda *a, **k: _remote_head(),
+    )
     monkeypatch.setattr(local_sync, "anchor_trusted_baseline", lambda *a, **k: OLD_SHA)
     monkeypatch.setattr(local_sync, "create_snapshot_commit", lambda workspace: None)
     monkeypatch.setattr(
