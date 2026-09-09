@@ -27,7 +27,7 @@ from ha_syncapp.publication_workflow import (
     PublicationWorkflowError,
     complete_authorized_publication,
 )
-from ha_syncapp.snapshot import Snapshot, SnapshotError, capture_snapshot
+from ha_syncapp.snapshot import Snapshot, SnapshotError, capture_snapshot as _capture_snapshot
 from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 
 
@@ -57,6 +57,11 @@ class LocalSyncResult:
     baseline: SynchronizationBaseline | None
 
 
+def capture_snapshot(source: Path, staging_root: Path) -> Snapshot:
+    """Capture only files explicitly routed to Repo B main."""
+    return _capture_snapshot(source, staging_root, include_path=include_in_main)
+
+
 def synchronize_local_configuration(
     store: StateStore,
     source: Path,
@@ -80,7 +85,7 @@ def synchronize_local_configuration(
         if repository_id is None:
             raise LocalSyncError("local synchronization repository is not pinned")
 
-        snapshot = capture_snapshot(source, snapshot_root, include_path=include_in_main)
+        snapshot = capture_snapshot(source, snapshot_root)
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=branch)
 
