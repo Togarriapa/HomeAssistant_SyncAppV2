@@ -136,6 +136,23 @@ def test_recovery_replay_is_idempotent(tmp_path: Path) -> None:
         assert second == first
 
 
+def test_recovery_replay_rejects_snapshot_identity_mismatch(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    intent = build_publication_recovery_intent(_preflight())
+    with StateStore(tmp_path) as store:
+        store.bind_repository("Owner/Home", 42)
+        store.record_synchronization_baseline(
+            "Owner/Home",
+            "main",
+            "e" * 64,
+            LOCAL,
+            synchronized_at=WHEN,
+        )
+
+        with pytest.raises(PublicationRecoveryError, match="snapshot identity"):
+            complete_publication_recovery(store, workspace, intent, _remote())
+
+
 def test_fresh_remote_movement_blocks_recovery_and_preserves_prior_baseline(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     intent = build_publication_recovery_intent(_preflight())
