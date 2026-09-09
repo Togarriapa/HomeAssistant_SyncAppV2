@@ -61,6 +61,24 @@ def _success_responses() -> list[object]:
                 {"id": "attic", "name": "Attic"},
             ],
         },
+        {
+            "id": 4,
+            "type": "result",
+            "success": True,
+            "result": [
+                {"id": "upstairs", "name": "Upstairs"},
+                {"id": "ground", "name": "Ground Floor"},
+            ],
+        },
+        {
+            "id": 5,
+            "type": "result",
+            "success": True,
+            "result": [
+                {"id": "security", "name": "Security"},
+                {"id": "energy", "name": "Energy"},
+            ],
+        },
     ]
 
 
@@ -102,11 +120,15 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
         {"id": 1, "type": "config/entity_registry/list"},
         {"id": 2, "type": "config/device_registry/list"},
         {"id": 3, "type": "config/area_registry/list"},
+        {"id": 4, "type": "config/floor_registry/list"},
+        {"id": 5, "type": "config/label_registry/list"},
     ]
     assert inventory.manifest == {
         "registry_entity_count": 2,
         "registry_device_count": 2,
         "area_count": 2,
+        "floor_count": 2,
+        "label_count": 2,
     }
     assert [entry["entity_id"] for entry in _records(inventory.homeassistant["entities"])] == [
         "light.a",
@@ -119,6 +141,14 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
     assert [entry["id"] for entry in _records(inventory.homeassistant["areas"])] == [
         "attic",
         "kitchen",
+    ]
+    assert [entry["id"] for entry in _records(inventory.homeassistant["floors"])] == [
+        "ground",
+        "upstairs",
+    ]
+    assert [entry["id"] for entry in _records(inventory.homeassistant["labels"])] == [
+        "energy",
+        "security",
     ]
 
 
@@ -198,6 +228,22 @@ def test_rejects_invalid_registry_protocol(response: Any) -> None:
             token="token",
             session_factory=_factory_for(FakeSession(responses)),
         )
+
+
+def test_rejects_duplicate_floor_and_label_identifiers() -> None:
+    for response_index, request_id in ((5, 4), (6, 5)):
+        responses = _success_responses()
+        responses[response_index] = {
+            "id": request_id,
+            "type": "result",
+            "success": True,
+            "result": [{"id": "duplicate"}, {"id": "duplicate"}],
+        }
+        with pytest.raises(CoreWebSocketRuntimeError, match="registry is invalid"):
+            collect_core_websocket_inventory(
+                token="token",
+                session_factory=_factory_for(FakeSession(responses)),
+            )
 
 
 def test_rejects_oversized_message() -> None:
