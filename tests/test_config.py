@@ -13,16 +13,29 @@ def write_options(tmp_path: Path, value: object) -> Path:
 
 def test_defaults_are_passive(tmp_path: Path) -> None:
     assert load_config(write_options(tmp_path, {})) == Config(
-        log_level="info", status_interval_seconds=300
+        log_level="info",
+        status_interval_seconds=300,
+        repo_b=None,
+        github_token=None,
     )
 
 
 def test_explicit_options(tmp_path: Path) -> None:
     config = load_config(
-        write_options(tmp_path, {"log_level": "warning", "status_interval_seconds": 30})
+        write_options(
+            tmp_path,
+            {
+                "log_level": "warning",
+                "status_interval_seconds": 30,
+                "repo_b": "Owner/Home",
+                "github_token": "secret-sentinel",
+            },
+        )
     )
     assert config.log_level == "warning"
     assert config.status_interval_seconds == 30
+    assert config.repo_b == "Owner/Home"
+    assert config.github_token == "secret-sentinel"
 
 
 @pytest.mark.parametrize(
@@ -40,6 +53,15 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"status_interval_seconds": 30.0},
         {"status_interval_seconds": 29},
         {"status_interval_seconds": 3601},
+        {"repo_b": "Owner/Home"},
+        {"github_token": "secret-sentinel"},
+        {"repo_b": "https://github.com/Owner/Home", "github_token": "secret-sentinel"},
+        {"repo_b": "Owner", "github_token": "secret-sentinel"},
+        {"repo_b": "Owner/Home/Extra", "github_token": "secret-sentinel"},
+        {"repo_b": "Owner Home/Repo", "github_token": "secret-sentinel"},
+        {"repo_b": "Owner/Home", "github_token": ""},
+        {"repo_b": "Owner/Home", "github_token": " secret-sentinel"},
+        {"repo_b": "Owner/Home", "github_token": "secret\nsentinel"},
     ],
 )
 def test_invalid_options_fail_without_disclosing_input(tmp_path: Path, value: object) -> None:
