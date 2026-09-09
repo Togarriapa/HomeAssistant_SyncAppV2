@@ -23,7 +23,9 @@ def _initialized_workspace(tmp_path: Path):
     return workspace
 
 
-def test_meaningful_verified_snapshot_creates_one_local_commit_and_then_noop(tmp_path: Path) -> None:
+def test_meaningful_verified_snapshot_creates_one_local_commit_and_then_noop(
+    tmp_path: Path,
+) -> None:
     workspace = _initialized_workspace(tmp_path)
 
     commit = create_snapshot_commit(workspace)
@@ -55,7 +57,9 @@ def test_workspace_tamper_fails_closed_before_commit(tmp_path: Path, tamper: str
         create_snapshot_commit(workspace)
 
 
-def test_nested_git_metadata_in_source_is_rejected_before_workspace_creation(tmp_path: Path) -> None:
+def test_nested_git_metadata_in_source_is_rejected_before_workspace_creation(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "ha"
     snapshots = tmp_path / "snapshots"
     workspaces = tmp_path / "workspaces"
