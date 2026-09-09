@@ -10,6 +10,14 @@ from ha_syncapp.database_snapshot import (
 )
 
 
+def _source_and_staging(tmp_path: Path) -> tuple[Path, Path]:
+    source_root = tmp_path / "homeassistant"
+    staging = tmp_path / "staging"
+    source_root.mkdir()
+    staging.mkdir()
+    return source_root / "home-assistant_v2.db", staging
+
+
 def _create_database(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.execute("PRAGMA journal_mode = WAL")
@@ -20,9 +28,7 @@ def _create_database(path: Path) -> sqlite3.Connection:
 
 
 def test_snapshot_contains_committed_uncheckpointed_wal_state(tmp_path: Path) -> None:
-    source = tmp_path / "home-assistant_v2.db"
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    source, staging = _source_and_staging(tmp_path)
     writer = _create_database(source)
     try:
         writer.execute("INSERT INTO states VALUES ('light.kitchen', 'on')")
@@ -52,9 +58,7 @@ def test_snapshot_contains_committed_uncheckpointed_wal_state(tmp_path: Path) ->
 
 
 def test_snapshot_does_not_modify_source_database_bytes(tmp_path: Path) -> None:
-    source = tmp_path / "home-assistant_v2.db"
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    source, staging = _source_and_staging(tmp_path)
     writer = _create_database(source)
     try:
         writer.execute("INSERT INTO states VALUES ('sensor.temp', '20')")
@@ -72,31 +76,27 @@ def test_snapshot_does_not_modify_source_database_bytes(tmp_path: Path) -> None:
 
 
 def test_symlinked_source_is_rejected_without_following_it(tmp_path: Path) -> None:
-    real = tmp_path / "real.db"
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    source, staging = _source_and_staging(tmp_path)
+    real = source.with_name("real.db")
     connection = sqlite3.connect(real)
     connection.execute("CREATE TABLE test (id INTEGER)")
     connection.commit()
     connection.close()
-    alias = tmp_path / "home-assistant_v2.db"
-    alias.symlink_to(real)
+    source.symlink_to(real)
 
     with pytest.raises(DatabaseSnapshotError, match="safe regular file"):
-        capture_sqlite_snapshot(alias, staging)
+        capture_sqlite_snapshot(source, staging)
 
     assert list(staging.iterdir()) == []
 
 
 def test_hardlinked_source_is_rejected(tmp_path: Path) -> None:
-    source = tmp_path / "home-assistant_v2.db"
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    source, staging = _source_and_staging(tmp_path)
     connection = sqlite3.connect(source)
     connection.execute("CREATE TABLE test (id INTEGER)")
     connection.commit()
     connection.close()
-    os.link(source, tmp_path / "second-link.db")
+    os.link(source, source.with_name("second-link.db"))
 
     with pytest.raises(DatabaseSnapshotError, match="unique regular file"):
         capture_sqlite_snapshot(source, staging)
@@ -105,9 +105,7 @@ def test_hardlinked_source_is_rejected(tmp_path: Path) -> None:
 
 
 def test_non_database_fails_closed_and_cleans_incomplete_stage(tmp_path: Path) -> None:
-    source = tmp_path / "home-assistant_v2.db"
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    source, staging = _source_and_staging(tmp_path)
     source.write_bytes(b"not a sqlite database")
 
     with pytest.raises(DatabaseSnapshotError, match="SQLite backup failed closed") as error:
@@ -135,7 +133,9 @@ def test_staging_inside_source_tree_is_rejected(tmp_path: Path) -> None:
 
 
 def test_symlinked_staging_root_is_rejected(tmp_path: Path) -> None:
-    source = tmp_path / "home-assistant_v2.db"
+    source_root = tmp_path / "homeassistant"
+    source_root.mkdir()
+    source = source_root / "home-assistant_v2.db"
     connection = sqlite3.connect(source)
     connection.execute("CREATE TABLE test (id INTEGER)")
     connection.commit()
