@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from ha_syncapp.git_workspace import GitWorkspace, prepare_git_workspace
 from ha_syncapp.github_repo import BranchAbsence, BranchHead
-from ha_syncapp.local_git import create_snapshot_commit, initialize_repository
+from ha_syncapp.local_git import GitError, create_snapshot_commit, initialize_repository
 from ha_syncapp.publication_intent import (
     PublicationIntentError,
     build_publication_intent,
@@ -190,5 +190,5 @@ def test_normal_publication_rejects_unrelated_local_history(tmp_path: Path) -> N
         baseline_commit_sha=baseline_sha,
     )
 
-    with pytest.raises(Exception, match="does not descend"):
+    with pytest.raises(GitError, match="does not descend"):
         build_publication_intent(workspace, preflight)
