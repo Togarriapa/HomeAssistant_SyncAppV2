@@ -100,6 +100,41 @@ def create_snapshot_commit(workspace: GitWorkspace) -> str | None:
     return commit_sha
 
 
+def verify_fast_forward_ancestry(
+    workspace: GitWorkspace,
+    *,
+    baseline_commit_sha: str,
+    local_commit_sha: str,
+) -> None:
+    """Fail unless the local commit can advance from the trusted baseline without force."""
+    _validate_commit_sha(baseline_commit_sha, "baseline")
+    _validate_commit_sha(local_commit_sha, "local")
+    root, tree = _validate_workspace(workspace)
+    inspect_repository(workspace)
+    verify_workspace_content(workspace)
+    executable = _git_executable()
+    _run_git(
+        executable,
+        tree,
+        root,
+        ("cat-file", "-e", f"{baseline_commit_sha}^{{commit}}"),
+    )
+    _run_git(
+        executable,
+        tree,
+        root,
+        ("cat-file", "-e", f"{local_commit_sha}^{{commit}}"),
+    )
+    if not _is_ancestor(executable, tree, root, baseline_commit_sha, local_commit_sha):
+        raise GitError("local commit does not descend from trusted baseline")
+    verify_workspace_content(workspace)
+
+
+def _validate_commit_sha(commit_sha: str, label: str) -> None:
+    if not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None:
+        raise GitError(f"{label} commit identity is invalid")
+
+
 def _validate_workspace(workspace: GitWorkspace) -> tuple[Path, Path]:
     if type(workspace) is not GitWorkspace:
         raise GitError("Git operations require an isolated GitWorkspace")
@@ -136,8 +171,8 @@ def _git_executable() -> str:
     return executable
 
 
-def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]) -> str:
-    environment = {
+def _git_environment(executable: str, root: Path) -> dict[str, str]:
+    return {
         "PATH": os.path.dirname(executable),
         "HOME": str(root),
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -146,7 +181,10 @@ def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]
         "GCM_INTERACTIVE": "Never",
         "LC_ALL": "C",
     }
-    command = [
+
+
+def _git_command(executable: str, arguments: tuple[str, ...]) -> list[str]:
+    return [
         executable,
         "-c",
         f"core.hooksPath={os.devnull}",
@@ -154,11 +192,44 @@ def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]
         "commit.gpgSign=false",
         *arguments,
     ]
+
+
+def _is_ancestor(
+    executable: str,
+    tree: Path,
+    root: Path,
+    baseline_commit_sha: str,
+    local_commit_sha: str,
+) -> bool:
     try:
         result = subprocess.run(  # nosec B603
-            command,
+            _git_command(
+                executable,
+                ("merge-base", "--is-ancestor", baseline_commit_sha, local_commit_sha),
+            ),
             cwd=tree,
-            env=environment,
+            env=_git_environment(executable, root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GitError("confined Git command could not execute") from exc
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise GitError("confined Git command failed")
+
+
+def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]) -> str:
+    try:
+        result = subprocess.run(  # nosec B603
+            _git_command(executable, arguments),
+            cwd=tree,
+            env=_git_environment(executable, root),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
