@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,13 +48,18 @@ class _SourceFile:
     ctime_ns: int
 
 
-def capture_snapshot(source: Path, staging_root: Path) -> Snapshot:
-    """Capture a stable source tree into isolated staging and bind it to a manifest."""
+def capture_snapshot(
+    source: Path,
+    staging_root: Path,
+    *,
+    include_path: Callable[[str], bool] | None = None,
+) -> Snapshot:
+    """Capture a stable selected source tree into isolated staging and bind a manifest."""
     source = _trusted_directory(source, "source")
     staging_root = _trusted_directory(staging_root, "staging")
     _reject_overlap(source, staging_root)
 
-    initial = _scan_source(source)
+    initial = _scan_source(source, include_path)
     work_root = staging_root / f".snapshot-{uuid.uuid4().hex}.tmp"
     tree_path = work_root / "tree"
     try:
@@ -73,7 +79,7 @@ def capture_snapshot(source: Path, staging_root: Path) -> Snapshot:
                 )
             )
 
-        final = _scan_source(source)
+        final = _scan_source(source, include_path)
         if initial != final:
             raise SnapshotError("source tree changed while snapshot was being captured")
 
@@ -148,7 +154,10 @@ def _reject_overlap(source: Path, staging: Path) -> None:
         raise SnapshotError("source and staging directories must not overlap")
 
 
-def _scan_source(root: Path) -> tuple[_SourceFile, ...]:
+def _scan_source(
+    root: Path,
+    include_path: Callable[[str], bool] | None = None,
+) -> tuple[_SourceFile, ...]:
     files: list[_SourceFile] = []
 
     def walk(directory: Path, relative: Path) -> None:
@@ -158,22 +167,32 @@ def _scan_source(root: Path) -> tuple[_SourceFile, ...]:
             raise SnapshotError("source tree cannot be scanned safely") from exc
         for entry in entries:
             child_relative = relative / entry.name
+            relative_path = child_relative.as_posix()
             try:
                 metadata = entry.stat(follow_symlinks=False)
             except OSError as exc:
                 raise SnapshotError("source entry changed during scan") from exc
-            if stat.S_ISLNK(metadata.st_mode):
-                raise SnapshotError("symbolic links are not accepted in snapshots")
             if stat.S_ISDIR(metadata.st_mode):
                 walk(Path(entry.path), child_relative)
                 continue
+            if include_path is not None:
+                try:
+                    included = include_path(relative_path)
+                except Exception as exc:
+                    raise SnapshotError("snapshot path selection failed") from exc
+                if type(included) is not bool:
+                    raise SnapshotError("snapshot path selection returned an invalid result")
+                if not included:
+                    continue
+            if stat.S_ISLNK(metadata.st_mode):
+                raise SnapshotError("symbolic links are not accepted in snapshots")
             if not stat.S_ISREG(metadata.st_mode):
                 raise SnapshotError("special files are not accepted in snapshots")
             if metadata.st_nlink != 1:
                 raise SnapshotError("hard-linked files are not accepted in snapshots")
             files.append(
                 _SourceFile(
-                    path=child_relative.as_posix(),
+                    path=relative_path,
                     device=metadata.st_dev,
                     inode=metadata.st_ino,
                     mode=metadata.st_mode,

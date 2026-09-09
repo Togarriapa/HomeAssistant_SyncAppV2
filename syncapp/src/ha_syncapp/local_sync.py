@@ -16,6 +16,7 @@ from ha_syncapp.github_repo import (
     fetch_optional_trusted_branch_head,
 )
 from ha_syncapp.local_git import GitError, create_snapshot_commit, initialize_repository
+from ha_syncapp.main_routing import include_in_main
 from ha_syncapp.publication_intent import PublicationIntentError, build_publication_intent
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
@@ -26,7 +27,8 @@ from ha_syncapp.publication_workflow import (
     PublicationWorkflowError,
     complete_authorized_publication,
 )
-from ha_syncapp.snapshot import Snapshot, SnapshotError, capture_snapshot
+from ha_syncapp.snapshot import Snapshot, SnapshotError
+from ha_syncapp.snapshot import capture_snapshot as _capture_snapshot
 from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 
 
@@ -56,6 +58,11 @@ class LocalSyncResult:
     baseline: SynchronizationBaseline | None
 
 
+def capture_snapshot(source: Path, staging_root: Path) -> Snapshot:
+    """Capture only files explicitly routed to Repo B main."""
+    return _capture_snapshot(source, staging_root, include_path=include_in_main)
+
+
 def synchronize_local_configuration(
     store: StateStore,
     source: Path,
@@ -69,6 +76,8 @@ def synchronize_local_configuration(
     """Capture, classify and when authorized publish one stable local configuration snapshot."""
     if type(store) is not StateStore:
         raise LocalSyncError("local synchronization state store is invalid")
+    if branch != "main":
+        raise LocalSyncError("local configuration synchronization only supports main")
 
     snapshot: Snapshot | None = None
     workspace: GitWorkspace | None = None
