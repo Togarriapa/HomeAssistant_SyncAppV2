@@ -43,9 +43,7 @@ def test_trusted_branch_head_reverifies_repo_and_returns_exact_sha(
 
     monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
 
-    head = fetch_trusted_branch_head(
-        "Owner/Home", "secret-sentinel", expected_id=42, branch="main"
-    )
+    head = fetch_trusted_branch_head("Owner/Home", "secret-sentinel", expected_id=42, branch="main")
 
     assert head == BranchHead("Owner/Home", 42, "main", "a" * 40)
     assert [request.full_url for request in requests] == [
@@ -54,8 +52,7 @@ def test_trusted_branch_head_reverifies_repo_and_returns_exact_sha(
     ]
     assert all("secret-sentinel" not in request.full_url for request in requests)
     assert all(
-        request.get_header("Authorization") == "Bearer secret-sentinel"
-        for request in requests
+        request.get_header("Authorization") == "Bearer secret-sentinel" for request in requests
     )
 
 
@@ -73,9 +70,7 @@ def test_branch_name_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
         return next(responses)
 
     monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
-    head = fetch_trusted_branch_head(
-        "Owner/Home", "token", expected_id=42, branch="feature/test"
-    )
+    head = fetch_trusted_branch_head("Owner/Home", "token", expected_id=42, branch="feature/test")
 
     assert head.branch == "feature/test"
     assert requests[-1].full_url.endswith("/branches/feature%2Ftest")
@@ -127,9 +122,7 @@ def test_untrusted_branch_metadata_fails_closed(
             FakeResponse(branch_payload),
         ]
     )
-    monkeypatch.setattr(
-        "ha_syncapp.github_repo.urlopen", lambda request, timeout: next(responses)
-    )
+    monkeypatch.setattr("ha_syncapp.github_repo.urlopen", lambda request, timeout: next(responses))
 
     with pytest.raises(RepositoryVerificationError):
         fetch_trusted_branch_head("Owner/Home", "secret", expected_id=42)
