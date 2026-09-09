@@ -14,4 +14,22 @@ The GitHub credential is used by the Repo B publication lanes. The separate Core
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
-This primitive deliberately does not consume `candidate` or `logs` work. Those README-defined lanes must be added to the cycle only after their own guarded, tested transaction primitives exist. The cycle also does not schedule itself, restore database data, deploy a candidate, mutate Home Assistant, restart Home Assistant, or run Git in the live Home Assistant tree.
+## Cron-invocable same-owner trigger
+
+The service owns `StateStore` for its entire process lifetime and keeps its exclusive filesystem lock. A cron process must therefore **not** open the SQLite state independently or bypass that lock. Instead, the running service exposes a Unix-domain socket at `/data/syncapp/retrigger.sock` (relative to the configured data root). The socket lives inside the existing owner-only `0700` state directory and is itself forced to `0600`.
+
+A cron invocation uses the explicit one-shot CLI mode:
+
+```text
+python -m ha_syncapp --retrigger-once \
+  --home-assistant-root /homeassistant \
+  --recorder-database /homeassistant/home-assistant_v2.db
+```
+
+The one-shot client sends only a bounded protocol version, command name, Home Assistant root and Recorder database path. It does **not** send Repo B, the GitHub credential or `SUPERVISOR_TOKEN`. The state-owning service loads and retains those credentials, re-verifies the durably bound private Repo B identity immediately before each requested cycle, and forwards `SUPERVISOR_TOKEN` only to the runtime lane.
+
+All staging, snapshot and Git workspace roots are derived beneath the protected SyncApp data tree and are rejected if that tree overlaps the supplied Home Assistant source tree. The IPC protocol uses bounded newline-delimited JSON, rejects duplicate keys, control-character/relative paths and oversized messages, and returns only a fixed sanitized completion/failure shape.
+
+This is the **cron-invocable primitive**, not the cron scheduler or cadence. A later packaging increment can install the periodic scheduler only after this one-shot boundary is verified on HAOS.
+
+This primitive deliberately does not consume `candidate` or `logs` work. Those README-defined lanes must be added to the cycle only after their own guarded, tested transaction primitives exist. The cycle also does not restore database data, deploy a candidate, mutate Home Assistant, restart Home Assistant, or run Git in the live Home Assistant tree.
