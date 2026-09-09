@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from ha_syncapp.__main__ import Shutdown, run
+from ha_syncapp.github_repo import RepoIdentity, RepositoryVerificationError
 
 SOURCE = Path(__file__).resolve().parents[1] / "syncapp/src"
 
@@ -97,3 +99,50 @@ def test_invalid_options_do_not_create_state_or_disclose_input(tmp_path: Path) -
     assert "secret-sentinel" not in output
     assert json.loads(output)["reason"] == "configuration_invalid"
     assert not (tmp_path / "syncapp").exists()
+
+
+def test_configured_repo_is_verified_and_bound_before_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    token = "secret-sentinel"
+    (tmp_path / "options.json").write_text(
+        json.dumps({"repo_b": "Owner/Home", "github_token": token})
+    )
+    calls: list[tuple[str, str, int | None]] = []
+
+    def verify(target: str, supplied_token: str, *, expected_id: int | None = None) -> RepoIdentity:
+        calls.append((target, supplied_token, expected_id))
+        return RepoIdentity(target="Owner/Home", repository_id=123)
+
+    monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
+    stop_now = Shutdown()
+    stop_now.requested = True
+    run(tmp_path, stop_now)
+    first_output = capsys.readouterr().out
+    assert token not in first_output
+    assert calls == [("Owner/Home", token, None)]
+
+    run(tmp_path, stop_now)
+    second_output = capsys.readouterr().out
+    assert token not in second_output
+    assert calls[-1] == ("Owner/Home", token, 123)
+
+
+def test_repo_verification_failure_happens_before_run_is_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "options.json").write_text(
+        json.dumps({"repo_b": "Owner/Home", "github_token": "secret-sentinel"})
+    )
+
+    def fail(target: str, token: str, *, expected_id: int | None = None) -> RepoIdentity:
+        raise RepositoryVerificationError("sanitized")
+
+    monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", fail)
+    with pytest.raises(RepositoryVerificationError):
+        run(tmp_path, Shutdown())
+    path = tmp_path / "syncapp/state.sqlite3"
+    with pytest.raises(sqlite3.OperationalError):
+        sqlite3.connect(f"file:{path}?mode=ro", uri=True).execute(
+            "SELECT active_run_id FROM installation"
+        ).fetchone()
