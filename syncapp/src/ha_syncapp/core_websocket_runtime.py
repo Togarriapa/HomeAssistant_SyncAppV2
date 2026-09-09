@@ -20,6 +20,7 @@ _COMMANDS: Final[tuple[tuple[str, str, str], ...]] = (
     ("areas", "config/area_registry/list", "id"),
     ("floors", "config/floor_registry/list", "id"),
     ("labels", "config/label_registry/list", "id"),
+    ("integrations", "config_entries/get", "entry_id"),
 )
 _DEFAULT_TIMEOUT_SECONDS: Final = 10.0
 _DEFAULT_MAX_MESSAGE_BYTES: Final = 4 * 1024 * 1024
@@ -89,6 +90,9 @@ def collect_core_websocket_inventory(
             "area_count": len(_require_list(datasets.get("areas"))),
             "floor_count": len(_require_list(datasets.get("floors"))),
             "label_count": len(_require_list(datasets.get("labels"))),
+            "integration_config_entry_count": len(
+                _require_list(datasets.get("integrations"))
+            ),
         },
         homeassistant=datasets,
     )
