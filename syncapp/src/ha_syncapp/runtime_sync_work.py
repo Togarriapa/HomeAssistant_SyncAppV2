@@ -133,4 +133,6 @@ def _validate_claim(
     if item.work_kind != _WORK_KIND or item.status != "running" or item.attempts < 1:
         raise RuntimeSyncWorkError("runtime synchronization work is not an eligible claimed item")
     if item.work_key != runtime_sync_work_key(target):
-        raise RuntimeSyncWorkError("runtime synchronization work identity does not match the target")
+        raise RuntimeSyncWorkError(
+            "runtime synchronization work identity does not match the target"
+        )
