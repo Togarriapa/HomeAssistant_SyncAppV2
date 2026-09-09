@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from ha_syncapp.core_websocket_runtime import (
@@ -32,7 +32,7 @@ class FakeSession:
 
 def _success_responses() -> list[object]:
     return [
-        {"type": "auth_required"},
+        {"type": "auth_required", "ha_version": "2026.9.0"},
         {"type": "auth_ok", "ha_version": "2026.9.0"},
         {
             "id": 1,
@@ -77,6 +77,10 @@ def _factory_for(
     return factory
 
 
+def _records(value: object) -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], value)
+
+
 def test_collects_only_allowlisted_registries_deterministically() -> None:
     session = FakeSession(_success_responses())
     observed: dict[str, object] = {}
@@ -104,15 +108,15 @@ def test_collects_only_allowlisted_registries_deterministically() -> None:
         "registry_device_count": 2,
         "area_count": 2,
     }
-    assert [entry["entity_id"] for entry in inventory.homeassistant["entities"]] == [
+    assert [entry["entity_id"] for entry in _records(inventory.homeassistant["entities"])] == [
         "light.a",
         "switch.z",
     ]
-    assert [entry["id"] for entry in inventory.homeassistant["devices"]] == [
+    assert [entry["id"] for entry in _records(inventory.homeassistant["devices"])] == [
         "device-a",
         "device-z",
     ]
-    assert [entry["id"] for entry in inventory.homeassistant["areas"]] == [
+    assert [entry["id"] for entry in _records(inventory.homeassistant["areas"])] == [
         "attic",
         "kitchen",
     ]
