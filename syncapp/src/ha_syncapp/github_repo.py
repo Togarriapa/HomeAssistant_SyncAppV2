@@ -31,6 +31,15 @@ class BranchHead:
     commit_sha: str
 
 
+@dataclass(frozen=True)
+class BranchAbsence:
+    """Evidence that one exact branch was absent after Repo B identity verification."""
+
+    target: str
+    repository_id: int
+    branch: str
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -129,8 +138,8 @@ def fetch_optional_trusted_branch_head(
     *,
     expected_id: int,
     branch: str = "main",
-) -> BranchHead | None:
-    """Return a trusted branch head or explicit absence after re-proving Repo B identity."""
+) -> BranchHead | BranchAbsence:
+    """Return trusted branch presence or identity-bound absence after verifying Repo B."""
     if type(expected_id) is not int or expected_id <= 0:
         raise RepositoryVerificationError("Expected repository identity is invalid")
     _validate_branch(branch)
@@ -138,7 +147,11 @@ def fetch_optional_trusted_branch_head(
     branch_url = f"{_metadata_url(identity.target)}/branches/{quote(branch, safe='')}"
     metadata = _read_json(_request(branch_url, token), allow_not_found=True)
     if metadata is None:
-        return None
+        return BranchAbsence(
+            target=identity.target,
+            repository_id=identity.repository_id,
+            branch=branch,
+        )
     if not isinstance(metadata, dict):
         raise RepositoryVerificationError("GitHub returned invalid branch metadata")
     name = metadata.get("name")
@@ -164,12 +177,12 @@ def fetch_trusted_branch_head(
     branch: str = "main",
 ) -> BranchHead:
     """Read one exact Repo B branch head only after re-proving repository identity."""
-    head = fetch_optional_trusted_branch_head(
+    state = fetch_optional_trusted_branch_head(
         target,
         token,
         expected_id=expected_id,
         branch=branch,
     )
-    if head is None:
+    if type(state) is BranchAbsence:
         raise RepositoryVerificationError("Trusted repository branch does not exist")
-    return head
+    return state
