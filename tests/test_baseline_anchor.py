@@ -73,9 +73,7 @@ def test_authentication_environment_keeps_token_out_of_command(tmp_path: Path) -
     environment = anchor_module._git_environment(
         "/usr/bin/git", tmp_path, token=TOKEN, askpass=helper
     )
-    command = anchor_module._command(
-        "/usr/bin/git", ("fetch", "https://github.com/Owner/Home.git")
-    )
+    command = anchor_module._command("/usr/bin/git", ("fetch", "https://github.com/Owner/Home.git"))
 
     assert environment["SYNCAPP_GITHUB_TOKEN"] == TOKEN
     assert environment["GIT_ASKPASS"] == str(helper)
