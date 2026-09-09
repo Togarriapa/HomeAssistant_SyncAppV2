@@ -6,9 +6,10 @@ import os
 import shutil
 import stat
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 _MANIFEST_VERSION = 1
 _COPY_CHUNK_SIZE = 1024 * 1024
