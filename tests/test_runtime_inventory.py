@@ -1,10 +1,13 @@
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from ha_syncapp.runtime_inventory import (
+    RuntimeInventoryArtifact,
     RuntimeInventoryError,
+    RuntimeInventoryFile,
     RuntimeInventoryInput,
     build_runtime_inventory,
     verify_runtime_inventory,
@@ -136,21 +139,50 @@ def test_verify_detects_modified_inserted_and_deleted_files(tmp_path: Path) -> N
         verify_runtime_inventory(deleted)
 
 
-def test_verify_rejects_symlink_and_evidence_tampering(tmp_path: Path) -> None:
+def test_verify_rejects_unexpected_empty_directory(tmp_path: Path) -> None:
+    artifact = build_runtime_inventory(_staging(tmp_path), _inventory())
+    (artifact.root / "unexpected").mkdir()
+
+    with pytest.raises(RuntimeInventoryError, match="directory layout"):
+        verify_runtime_inventory(artifact)
+
+
+def test_verify_rejects_symlink_and_hardlink_substitutions(tmp_path: Path) -> None:
     staging = _staging(tmp_path)
     artifact = build_runtime_inventory(staging, _inventory())
     target = artifact.root / "manifest.json"
     target.unlink()
     target.symlink_to(artifact.root / "homeassistant" / "entities.json")
-    with pytest.raises(RuntimeInventoryError, match="unsafe file"):
+    with pytest.raises(RuntimeInventoryError, match="opened safely"):
         verify_runtime_inventory(artifact)
 
-    other_root = tmp_path / "evidence"
-    other_root.mkdir()
-    clean = build_runtime_inventory(other_root, _inventory())
+    hardlink_root = tmp_path / "hardlink"
+    hardlink_root.mkdir()
+    hardlinked = build_runtime_inventory(hardlink_root, _inventory())
+    manifest = hardlinked.root / "manifest.json"
+    sibling = hardlinked.root / "manifest-copy.json"
+    os.link(manifest, sibling)
+    sibling.unlink()
+    assert manifest.stat().st_nlink == 1
+    os.link(manifest, tmp_path / "outside-hardlink")
+    with pytest.raises(RuntimeInventoryError, match="unsafe file"):
+        verify_runtime_inventory(hardlinked)
+
+
+def test_verify_rejects_evidence_tampering(tmp_path: Path) -> None:
+    staging = _staging(tmp_path)
+    clean = build_runtime_inventory(staging, _inventory())
     tampered = replace(clean, artifact_id="0" * 64)
     with pytest.raises(RuntimeInventoryError, match="evidence is inconsistent"):
         verify_runtime_inventory(tampered)
+
+    unsafe_path = RuntimeInventoryArtifact(
+        root=clean.root,
+        artifact_id="0" * 64,
+        files=(RuntimeInventoryFile("../manifest.json", "0" * 64, 0),),
+    )
+    with pytest.raises(RuntimeInventoryError):
+        verify_runtime_inventory(unsafe_path)
 
 
 def test_artifact_collision_preserves_existing_verified_bytes(tmp_path: Path) -> None:
