@@ -19,3 +19,5 @@ options:
 schema:
   log_level: list(info|warning|error)
   status_interval_seconds: int(30,3600)
+  repo_b: str?
+  github_token: password?

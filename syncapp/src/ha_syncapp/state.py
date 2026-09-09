@@ -15,7 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
@@ -103,6 +103,17 @@ def _validate_work_identity(work_kind: str, work_key: str) -> None:
         raise StateError("Invalid work key")
 
 
+def _validate_repository_binding(target: str, repository_id: int | None = None) -> None:
+    if (
+        not isinstance(target, str)
+        or not 1 <= len(target) <= 200
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in target)
+    ):
+        raise StateError("Invalid repository binding")
+    if repository_id is not None and (type(repository_id) is not int or repository_id <= 0):
+        raise StateError("Invalid repository binding")
+
+
 class StateStore:
     """One service instance owns one store for its entire lifetime."""
 
@@ -183,6 +194,14 @@ class StateStore:
         )
         db.execute("CREATE INDEX work_ready ON work(status, next_attempt_at, created_at)")
 
+    @staticmethod
+    def _create_repository_binding_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE repository_binding ("
+            "target TEXT PRIMARY KEY, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -221,20 +240,28 @@ class StateStore:
                     (str(uuid4()),),
                 )
                 self._create_work_table(db)
+                self._create_repository_binding_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(root_fd)
             finally:
                 os.close(root_fd)
-        elif version == 1:
+        else:
+            if version not in {1, 2, SCHEMA_VERSION}:
+                raise StateError("Unsupported state schema")
             self._identity()
-            with db:
-                db.execute("BEGIN IMMEDIATE")
-                self._create_work_table(db)
-                db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        elif version != SCHEMA_VERSION:
-            raise StateError("Unsupported state schema")
+            if version == 1:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_work_table(db)
+                    db.execute("PRAGMA user_version = 2")
+                version = 2
+            if version == 2:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_repository_binding_table(db)
+                    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
     def _identity(self) -> tuple[str, int, str | None]:
@@ -289,6 +316,43 @@ class StateStore:
             self._active_run = None
         except sqlite3.Error:
             raise StateError("Unable to record shutdown") from None
+
+    def repository_id(self, target: str) -> int | None:
+        """Return the pinned GitHub repository ID for a target, if already verified."""
+        _validate_repository_binding(target)
+        try:
+            rows = self._connection.execute(
+                "SELECT repository_id FROM repository_binding WHERE target = ?", (target,)
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read repository binding") from None
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateError("Invalid repository binding")
+        repository_id = rows[0][0]
+        if type(repository_id) is not int or repository_id <= 0:
+            raise StateError("Invalid repository binding")
+        return repository_id
+
+    def bind_repository(self, target: str, repository_id: int) -> None:
+        """Pin a verified repository ID; reject replacement at the same target."""
+        _validate_repository_binding(target, repository_id)
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT repository_id FROM repository_binding WHERE target = ?", (target,)
+                ).fetchone()
+                if current is None:
+                    db.execute(
+                        "INSERT INTO repository_binding (target, repository_id) VALUES (?, ?)",
+                        (target, repository_id),
+                    )
+                elif len(current) != 1 or current[0] != repository_id:
+                    raise StateError("Repository identity changed unexpectedly")
+        except sqlite3.Error:
+            raise StateError("Unable to persist repository binding") from None
 
     def _work_from_row(self, row: tuple[object, ...]) -> WorkItem:
         if len(row) != 7:

@@ -1,4 +1,4 @@
-"""Passive app lifecycle; no external systems are accessed."""
+"""App lifecycle with fail-closed Repo B trust establishment."""
 
 import argparse
 import json
@@ -12,6 +12,7 @@ from types import FrameType
 
 from . import __version__
 from .config import ConfigError, load_config
+from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .state import AlreadyRunning, StateError, StateStore
 
 
@@ -45,6 +46,14 @@ class Shutdown:
 def run(data_dir: Path, stop: Shutdown) -> None:
     config = load_config(data_dir / "options.json")
     with StateStore(data_dir) as store:
+        if config.repo_b is not None and config.github_token is not None:
+            expected_id = store.repository_id(config.repo_b)
+            identity = fetch_and_verify_private_repository(
+                config.repo_b,
+                config.github_token,
+                expected_id=expected_id,
+            )
+            store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
         fields = {**asdict(boot), "version": __version__, "mode": "passive"}
         level = "warning" if boot.interrupted_run_id else "info"
@@ -77,11 +86,13 @@ def main() -> int:
     except AlreadyRunning:
         emit("service_failed", level="error", reason="already_running")
         return 3
+    except RepositoryVerificationError:
+        emit("service_failed", level="error", reason="repo_b_untrusted")
+        return 5
     except StateError:
         emit("service_failed", level="error", reason="state_unavailable")
         return 4
     except Exception:
-        # Unexpected errors also fail closed without disclosing private data.
         emit("service_failed", level="error", reason="internal_error")
         return 1
     return 0

@@ -65,7 +65,7 @@ def test_state_and_lock_permissions_are_private(tmp_path: Path) -> None:
             assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-@pytest.mark.parametrize("version", [0, 2, 999])
+@pytest.mark.parametrize("version", [0, 3, 999])
 def test_unrecognized_database_is_preserved(tmp_path: Path, version: int) -> None:
     root = tmp_path / "syncapp"
     root.mkdir()
@@ -168,3 +168,49 @@ def test_failed_start_transaction_preserves_previous_run(tmp_path: Path) -> None
         assert second.boot_count == 2
         assert second.installation_id == first.installation_id
         assert second.interrupted_run_id == first.run_id
+
+
+def test_repository_binding_is_stable_and_idempotent(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        assert store.repository_id("Owner/Home") is None
+        store.bind_repository("Owner/Home", 12345)
+        store.bind_repository("Owner/Home", 12345)
+        assert store.repository_id("Owner/Home") == 12345
+    with StateStore(tmp_path) as store:
+        assert store.repository_id("Owner/Home") == 12345
+        with pytest.raises(StateError):
+            store.bind_repository("Owner/Home", 99999)
+        assert store.repository_id("Owner/Home") == 12345
+
+
+def test_distinct_repository_target_can_have_its_own_binding(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        store.bind_repository("Owner/First", 1)
+        store.bind_repository("Owner/Second", 2)
+        assert store.repository_id("Owner/First") == 1
+        assert store.repository_id("Owner/Second") == 2
+
+
+@pytest.mark.parametrize(
+    ("target", "repository_id"),
+    [("", 1), ("x\nsecret-sentinel", 1), ("Owner/Home", 0), ("Owner/Home", True)],
+)
+def test_invalid_repository_binding_fails_without_disclosure(
+    tmp_path: Path, target: str, repository_id: object
+) -> None:
+    with StateStore(tmp_path) as store, pytest.raises(StateError) as error:
+        store.bind_repository(target, repository_id)  # type: ignore[arg-type]
+    assert "secret-sentinel" not in str(error.value)
+
+
+def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        store.enqueue_work("runtime", "existing", now=None)
+    path = tmp_path / "syncapp/state.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE repository_binding")
+        db.execute("PRAGMA user_version = 2")
+    with StateStore(tmp_path) as store:
+        store.bind_repository("Owner/Home", 123)
+        assert store.repository_id("Owner/Home") == 123
+        assert store.claim_work() is not None
