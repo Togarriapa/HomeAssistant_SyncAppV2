@@ -158,9 +158,7 @@ def _default_transport(
                 if int(content_length) > max_response_bytes:
                     raise CoreRuntimeError("Home Assistant Core response exceeds size limit")
             except ValueError:
-                raise CoreRuntimeError(
-                    "Home Assistant Core response metadata is invalid"
-                ) from None
+                raise CoreRuntimeError("Home Assistant Core response metadata is invalid") from None
         body = response.read(max_response_bytes + 1)
         status = int(response.status)
     except CoreRuntimeError:
