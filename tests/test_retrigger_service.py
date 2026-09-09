@@ -100,7 +100,10 @@ def test_retrigger_reverifies_repo_and_forwards_isolated_paths_and_credentials(
     protected = (data / "syncapp").resolve()
     home = request.home_assistant_root.resolve()
     assert all(protected in path.parents for path in work_paths)
-    assert all(home != path and home not in path.parents and path not in home.parents for path in work_paths)
+    assert all(
+        home != path and home not in path.parents and path not in home.parents
+        for path in work_paths
+    )
     assert CORE_CREDENTIAL not in args
 
 
