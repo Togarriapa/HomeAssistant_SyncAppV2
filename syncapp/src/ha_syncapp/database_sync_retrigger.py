@@ -38,7 +38,9 @@ def run_database_sync_retrigger_pass(
 ) -> DatabaseSyncRetriggerResult:
     """Recover interrupted work and process at most one eligible database item."""
     if type(store) is not StateStore:
-        raise DatabaseSyncRetriggerError("database synchronization retrigger state store is invalid")
+        raise DatabaseSyncRetriggerError(
+            "database synchronization retrigger state store is invalid"
+        )
 
     try:
         recovered = store.recover_interrupted_work()
@@ -63,4 +65,6 @@ def run_database_sync_retrigger_pass(
         )
         return DatabaseSyncRetriggerResult(recovered_interrupted=recovered, processed=processed)
     except (StateError, DatabaseSyncWorkError) as exc:
-        raise DatabaseSyncRetriggerError("database synchronization retrigger pass failed closed") from exc
+        raise DatabaseSyncRetriggerError(
+            "database synchronization retrigger pass failed closed"
+        ) from exc
