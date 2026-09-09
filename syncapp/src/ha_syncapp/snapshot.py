@@ -6,11 +6,11 @@ import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final, Literal, TypeAlias
+from typing import Final, Literal
 
 _CHUNK_SIZE: Final = 1024 * 1024
 Route = Literal["main", "logs"]
-FileFingerprint: TypeAlias = tuple[int, int, int, int, int, int, int]
+type FileFingerprint = tuple[int, int, int, int, int, int, int]
 
 
 class SnapshotError(RuntimeError):
@@ -166,7 +166,9 @@ def _walk_and_copy(
         if stat.S_ISLNK(expected.st_mode):
             raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
         if stat.S_ISDIR(expected.st_mode):
-            child_descriptor = _open_child_directory(directory_descriptor, child.name, relative, expected)
+            child_descriptor = _open_child_directory(
+                directory_descriptor, child.name, relative, expected
+            )
             try:
                 _walk_and_copy(
                     child_descriptor,
@@ -211,7 +213,9 @@ def _scan_tree(
         if stat.S_ISLNK(expected.st_mode):
             raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
         if stat.S_ISDIR(expected.st_mode):
-            child_descriptor = _open_child_directory(directory_descriptor, child.name, relative, expected)
+            child_descriptor = _open_child_directory(
+                directory_descriptor, child.name, relative, expected
+            )
             try:
                 _scan_tree(child_descriptor, relative, tree_state)
                 if _fingerprint(os.fstat(child_descriptor)) != _fingerprint(expected):
