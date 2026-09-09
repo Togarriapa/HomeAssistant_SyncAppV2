@@ -95,6 +95,7 @@ def build_runtime_inventory(
     payloads = _inventory_payloads(inventory)
     temporary = Path(tempfile.mkdtemp(prefix=".runtime-inventory-", dir=staging_root))
     destination_root: Path | None = None
+    owns_destination = False
     try:
         evidence: list[RuntimeInventoryFile] = []
         for relative_path, payload in sorted(payloads.items()):
@@ -115,13 +116,14 @@ def build_runtime_inventory(
         if destination_root.exists() or destination_root.is_symlink():
             raise RuntimeInventoryError("runtime inventory artifact destination already exists")
         os.replace(temporary, destination_root)
+        owns_destination = True
         artifact = RuntimeInventoryArtifact(destination_root, artifact_id, files)
         verify_runtime_inventory(artifact)
         return artifact
     except Exception as exc:
         if temporary.exists():
             shutil.rmtree(temporary, ignore_errors=True)
-        if destination_root is not None and destination_root.exists():
+        if owns_destination and destination_root is not None and destination_root.exists():
             shutil.rmtree(destination_root, ignore_errors=True)
         if isinstance(exc, RuntimeInventoryError):
             raise
