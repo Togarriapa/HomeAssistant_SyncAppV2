@@ -121,11 +121,7 @@ def _validate_recovery_intent(intent: PublicationRecoveryIntent) -> None:
         raise PublicationRecoveryError("publication recovery intent evidence is invalid")
     if type(intent.repository_id) is not int or intent.repository_id <= 0:
         raise PublicationRecoveryError("publication recovery repository identity is invalid")
-    if (
-        not _valid_target(intent.target)
-        or not isinstance(intent.branch, str)
-        or not intent.branch
-    ):
+    if not _valid_target(intent.target) or not isinstance(intent.branch, str) or not intent.branch:
         raise PublicationRecoveryError("publication recovery branch identity is invalid")
     if (
         _COMMIT_SHA.fullmatch(intent.local_commit_sha) is None
