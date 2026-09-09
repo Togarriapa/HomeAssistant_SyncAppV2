@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+
 from ha_syncapp.github_repo import BranchHead
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
