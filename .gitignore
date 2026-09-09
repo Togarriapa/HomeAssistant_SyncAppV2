@@ -1,3 +1,6 @@
+# Repo A development artifacts only.
+# These rules do NOT define Repo B/Home Assistant synchronization policy.
+# Repo B complete-tree visibility is governed by README.md and issue #10.
 .venv/
 __pycache__/
 *.py[cod]
