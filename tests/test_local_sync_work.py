@@ -88,9 +88,12 @@ def test_local_sync_claim_respects_retry_time(tmp_path: Path) -> None:
     assert retry.next_attempt_at == start + timedelta(seconds=60)
 
     try:
-        assert local_sync_work.claim_local_sync_work(
-            store, now=start + timedelta(seconds=59)
-        ) is None
+        assert (
+            local_sync_work.claim_local_sync_work(
+                store, now=start + timedelta(seconds=59)
+            )
+            is None
+        )
         reclaimed = local_sync_work.claim_local_sync_work(
             store, now=start + timedelta(seconds=60)
         )
@@ -119,8 +122,12 @@ def test_local_sync_claim_preserves_order_within_kind(tmp_path: Path) -> None:
     )
 
     try:
-        first = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
-        second = local_sync_work.claim_local_sync_work(store, now=start + timedelta(seconds=1))
+        first = local_sync_work.claim_local_sync_work(
+            store, now=start + timedelta(seconds=1)
+        )
+        second = local_sync_work.claim_local_sync_work(
+            store, now=start + timedelta(seconds=1)
+        )
     finally:
         store.__exit__(None, None, None)
 
@@ -130,7 +137,9 @@ def test_local_sync_claim_preserves_order_within_kind(tmp_path: Path) -> None:
     assert second.work_key == local_sync_work.local_sync_work_key(second_target)
 
 
-def test_local_sync_claim_returns_none_when_only_other_kinds_are_ready(tmp_path: Path) -> None:
+def test_local_sync_claim_returns_none_when_only_other_kinds_are_ready(
+    tmp_path: Path,
+) -> None:
     store = _open_store(tmp_path)
     store.enqueue_work("runtime", "inventory")
     try:
