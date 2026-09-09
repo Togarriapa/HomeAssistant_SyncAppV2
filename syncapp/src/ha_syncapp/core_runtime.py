@@ -69,7 +69,11 @@ def collect_core_runtime_inventory(
     config = payloads["config"]
     states = payloads["states"]
     services = payloads["services"]
-    if not isinstance(config, dict) or not isinstance(states, list) or not isinstance(services, list):
+    if (
+        not isinstance(config, dict)
+        or not isinstance(states, list)
+        or not isinstance(services, list)
+    ):
         raise CoreRuntimeError("Home Assistant Core API response shape is invalid")
 
     manifest: dict[str, object] = {
@@ -119,9 +123,14 @@ def _request_json(
         raise CoreRuntimeError(f"Home Assistant Core {name} response exceeds size limit")
 
     try:
-        payload = json.loads(response.body.decode("utf-8"), parse_constant=_reject_json_constant)
+        payload = json.loads(
+            response.body.decode("utf-8"),
+            parse_constant=_reject_json_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
-        raise CoreRuntimeError(f"Home Assistant Core {name} response contains invalid JSON") from None
+        raise CoreRuntimeError(
+            f"Home Assistant Core {name} response contains invalid JSON"
+        ) from None
     if not isinstance(payload, expected_type):
         raise CoreRuntimeError(f"Home Assistant Core {name} response shape is invalid")
     return payload
@@ -149,7 +158,9 @@ def _default_transport(
                 if int(content_length) > max_response_bytes:
                     raise CoreRuntimeError("Home Assistant Core response exceeds size limit")
             except ValueError:
-                raise CoreRuntimeError("Home Assistant Core response metadata is invalid") from None
+                raise CoreRuntimeError(
+                    "Home Assistant Core response metadata is invalid"
+                ) from None
         body = response.read(max_response_bytes + 1)
         status = int(response.status)
     except CoreRuntimeError:
@@ -171,7 +182,7 @@ def _resolve_token(token: str | None) -> str:
 
 
 def _validate_limits(timeout_seconds: float, max_response_bytes: int) -> None:
-    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int | float):
         raise CoreRuntimeError("Home Assistant Core API timeout is invalid")
     if timeout_seconds <= 0 or timeout_seconds > 60:
         raise CoreRuntimeError("Home Assistant Core API timeout is invalid")
