@@ -57,8 +57,16 @@ used for synchronization decisions, SyncApp re-verifies that the configured targ
 is still the expected private repository with the previously bound repository ID.
 Branch-head inspection is read-only, validates the exact requested branch and
 commit identity, and deliberately performs no clone, fetch, pull, push, repository
-mutation or Home Assistant write. Later publication must use this evidence to detect
-divergence rather than overwriting an unexpected remote state.
+mutation or Home Assistant write.
+
+Before a future push is even eligible, publication preflight compares three pieces
+of evidence: the verified local commit, the last successful synchronization
+baseline and the trusted current remote branch head. Only an unchanged remote
+baseline with a different verified local commit is `safe_to_publish`. Equal state
+is a no-op; a remote head already equal to the local commit is recoverable as an
+interrupted already-published operation; unrelated remote movement is divergence;
+and an existing remote branch without a baseline is blocked. These classifications
+are side-effect free and cannot themselves publish anything.
 
 Remote `candidate` content remains deployment input rather than trusted live state.
 Nothing in the local synchronization path bypasses the root README's validation,
