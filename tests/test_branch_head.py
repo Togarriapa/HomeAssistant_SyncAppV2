@@ -7,6 +7,7 @@ import pytest
 from ha_syncapp.github_repo import (
     BranchHead,
     RepositoryVerificationError,
+    fetch_optional_trusted_branch_head,
     fetch_trusted_branch_head,
 )
 
@@ -54,6 +55,85 @@ def test_trusted_branch_head_reverifies_repo_and_returns_exact_sha(
     assert all(
         request.get_header("Authorization") == "Bearer secret-sentinel" for request in requests
     )
+
+
+def test_optional_branch_absence_is_returned_only_after_repo_reverification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Request] = []
+    responses: list[object] = [
+        FakeResponse({"id": 42, "full_name": "Owner/Home", "private": True}),
+        HTTPError("https://api.github.com", 404, "not found", {}, None),
+    ]
+
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        requests.append(request)
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        assert isinstance(response, FakeResponse)
+        return response
+
+    monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
+
+    head = fetch_optional_trusted_branch_head("Owner/Home", "secret", expected_id=42)
+
+    assert head is None
+    assert [request.full_url for request in requests] == [
+        "https://api.github.com/repos/Owner/Home",
+        "https://api.github.com/repos/Owner/Home/branches/main",
+    ]
+
+
+def test_strict_branch_lookup_rejects_explicit_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses: list[object] = [
+        FakeResponse({"id": 42, "full_name": "Owner/Home", "private": True}),
+        HTTPError("https://api.github.com", 404, "not found", {}, None),
+    ]
+
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        assert isinstance(response, FakeResponse)
+        return response
+
+    monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
+
+    with pytest.raises(RepositoryVerificationError, match="branch does not exist"):
+        fetch_trusted_branch_head("Owner/Home", "secret", expected_id=42)
+
+
+def test_repository_404_is_not_treated_as_branch_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        raise HTTPError(request.full_url, 404, "secret-sentinel", {}, None)
+
+    monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
+
+    with pytest.raises(RepositoryVerificationError) as caught:
+        fetch_optional_trusted_branch_head("Owner/Home", "secret-sentinel", expected_id=42)
+    assert "secret-sentinel" not in str(caught.value)
+
+
+def test_optional_branch_auth_failure_is_not_treated_as_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses: list[object] = [
+        FakeResponse({"id": 42, "full_name": "Owner/Home", "private": True}),
+        HTTPError("https://api.github.com", 401, "secret-sentinel", {}, None),
+    ]
+
+    def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        assert isinstance(response, FakeResponse)
+        return response
+
+    monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
+    with pytest.raises(RepositoryVerificationError) as caught:
+        fetch_optional_trusted_branch_head("Owner/Home", "secret-sentinel", expected_id=42)
+    assert "secret-sentinel" not in str(caught.value)
 
 
 def test_branch_name_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
