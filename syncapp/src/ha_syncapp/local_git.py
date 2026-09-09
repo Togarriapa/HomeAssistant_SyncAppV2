@@ -8,9 +8,10 @@ import subprocess  # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 
-from ha_syncapp.git_workspace import GitWorkspace
+from ha_syncapp.git_workspace import GitWorkspace, verify_workspace_content
 
 _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _USER_NAME = "Home Assistant SyncApp"
 _USER_EMAIL = "syncapp@localhost"
 
@@ -73,6 +74,32 @@ def inspect_repository(workspace: GitWorkspace) -> LocalGitRepository:
     )
 
 
+def create_snapshot_commit(workspace: GitWorkspace) -> str | None:
+    """Commit only content that still exactly matches the accepted snapshot identity."""
+    root, tree = _validate_workspace(workspace)
+    inspect_repository(workspace)
+    verify_workspace_content(workspace)
+    executable = _git_executable()
+    _run_git(executable, tree, root, ("add", "--all", "--", "."))
+    status = _run_git(
+        executable,
+        tree,
+        root,
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+    )
+    if not status:
+        verify_workspace_content(workspace)
+        return None
+
+    message = f"Sync verified snapshot {workspace.snapshot_id}"
+    _run_git(executable, tree, root, ("commit", "--no-gpg-sign", "--no-verify", "-m", message))
+    verify_workspace_content(workspace)
+    commit_sha = _run_git(executable, tree, root, ("rev-parse", "--verify", "HEAD"))
+    if _COMMIT_SHA.fullmatch(commit_sha) is None:
+        raise GitError("resulting Git commit identity is invalid")
+    return commit_sha
+
+
 def _validate_workspace(workspace: GitWorkspace) -> tuple[Path, Path]:
     if type(workspace) is not GitWorkspace:
         raise GitError("Git operations require an isolated GitWorkspace")
@@ -119,9 +146,17 @@ def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]
         "GCM_INTERACTIVE": "Never",
         "LC_ALL": "C",
     }
+    command = [
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "commit.gpgSign=false",
+        *arguments,
+    ]
     try:
         result = subprocess.run(  # nosec B603
-            [executable, *arguments],
+            command,
             cwd=tree,
             env=environment,
             stdin=subprocess.DEVNULL,
