@@ -2,8 +2,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
 from ha_syncapp.state import StateError, StateStore, WorkItem
+import pytest
 
 
 NOW = datetime(2026, 9, 9, 18, 0, tzinfo=UTC)
@@ -40,7 +40,9 @@ def test_transient_failure_uses_bounded_backoff(tmp_path: Path) -> None:
         assert store.claim_work(now=NOW + timedelta(seconds=59)) is None
         claimed_again = store.claim_work(now=NOW + timedelta(seconds=60))
         assert claimed_again is not None
-        retry_again = store.fail_work(claimed_again, transient=True, now=NOW + timedelta(seconds=60))
+        retry_again = store.fail_work(
+            claimed_again, transient=True, now=NOW + timedelta(seconds=60)
+        )
         assert retry_again.next_attempt_at == NOW + timedelta(seconds=180)
 
 
@@ -83,7 +85,13 @@ def test_permanent_failure_blocks_and_success_is_not_reexecuted(tmp_path: Path) 
 
 def test_invalid_work_identity_and_stale_transition_fail_closed(tmp_path: Path) -> None:
     with StateStore(tmp_path) as store:
-        for kind, key in (("", "x"), ("UPPER", "x"), ("candidate", ""), ("candidate", "x\nsecret")):
+        invalid = (
+            ("", "x"),
+            ("UPPER", "x"),
+            ("candidate", ""),
+            ("candidate", "x\nsecret"),
+        )
+        for kind, key in invalid:
             with pytest.raises(StateError):
                 store.enqueue_work(kind, key, now=NOW)
         store.enqueue_work("candidate", "sha", now=NOW)
@@ -98,6 +106,7 @@ def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> Non
     root = tmp_path / "syncapp"
     root.mkdir()
     path = root / "state.sqlite3"
+    installation_id = "11111111-1111-1111-1111-111111111111"
     with sqlite3.connect(path) as db:
         db.execute(
             "CREATE TABLE installation ("
@@ -105,14 +114,18 @@ def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> Non
             "installation_id TEXT NOT NULL, boot_count INTEGER NOT NULL CHECK (boot_count >= 0), "
             "active_run_id TEXT, last_started_at TEXT, last_stopped_at TEXT)"
         )
-        db.execute("INSERT INTO installation VALUES (1, '11111111-1111-1111-1111-111111111111', 7, NULL, NULL, NULL)")
+        db.execute(
+            "INSERT INTO installation VALUES (1, ?, 7, NULL, NULL, NULL)",
+            (installation_id,),
+        )
         db.execute("PRAGMA user_version = 1")
     with StateStore(tmp_path) as store:
         boot = store.start_run()
-        assert boot.installation_id == "11111111-1111-1111-1111-111111111111"
+        assert boot.installation_id == installation_id
         assert boot.boot_count == 8
         queued = store.enqueue_work("local_sync", "stable-change", now=NOW)
         assert queued.status == "pending"
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert db.execute("SELECT installation_id FROM installation").fetchone()[0] == "11111111-1111-1111-1111-111111111111"
+        stored_id = db.execute("SELECT installation_id FROM installation").fetchone()[0]
+        assert stored_id == installation_id
