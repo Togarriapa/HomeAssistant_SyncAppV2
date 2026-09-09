@@ -8,6 +8,26 @@ import pytest
 from ha_syncapp.state import AlreadyRunning, StateError, StateStore
 
 
+def test_schema_four_preserves_existing_work_binding_and_baseline(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        before = store.start_run()
+        store.bind_repository("Owner/Home", 123)
+        store.enqueue_work("runtime", "queued-before-upgrade")
+        store.record_synchronization_baseline("Owner/Home", "main", "a" * 64, "b" * 40)
+    with sqlite3.connect(tmp_path / "syncapp/state.sqlite3") as db:
+        for name in ("values_store", "jobs", "events"):
+            db.execute(f"DROP TABLE {name}")
+        db.execute("PRAGMA user_version = 4")
+    with StateStore(tmp_path) as store:
+        after = store.start_run()
+        assert after.installation_id == before.installation_id
+        assert after.interrupted_run_id == before.run_id
+        assert store.repository_id("Owner/Home") == 123
+        assert store.claim_work().work_key == "queued-before-upgrade"
+        assert store.synchronization_baseline("Owner/Home", "main").commit_sha == "b" * 40
+        assert store.connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+
+
 def test_foundation_schema_migrates_without_losing_identity_or_interrupted_run(
     tmp_path: Path,
 ) -> None:
@@ -18,13 +38,16 @@ def test_foundation_schema_migrates_without_losing_identity_or_interrupted_run(
         db.execute("DROP TABLE values_store")
         db.execute("DROP TABLE jobs")
         db.execute("DROP TABLE events")
+        db.execute("DROP TABLE work")
+        db.execute("DROP TABLE repository_binding")
+        db.execute("DROP TABLE synchronization_baseline")
         db.execute("PRAGMA user_version = 1")
     with StateStore(tmp_path) as store:
         after = store.start_run()
         assert after.installation_id == before.installation_id
         assert after.interrupted_run_id == before.run_id
         assert after.boot_count == 2
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
         store.finish_run()
 
 
@@ -85,7 +108,7 @@ def test_state_and_lock_permissions_are_private(tmp_path: Path) -> None:
             assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-@pytest.mark.parametrize("version", [0, 2, 999])
+@pytest.mark.parametrize("version", [0, 5, 999])
 def test_unrecognized_database_is_preserved(tmp_path: Path, version: int) -> None:
     root = tmp_path / "syncapp"
     root.mkdir()
@@ -188,3 +211,55 @@ def test_failed_start_transaction_preserves_previous_run(tmp_path: Path) -> None
         assert second.boot_count == 2
         assert second.installation_id == first.installation_id
         assert second.interrupted_run_id == first.run_id
+
+
+def test_repository_binding_is_stable_and_idempotent(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        assert store.repository_id("Owner/Home") is None
+        store.bind_repository("Owner/Home", 12345)
+        store.bind_repository("Owner/Home", 12345)
+        assert store.repository_id("Owner/Home") == 12345
+    with StateStore(tmp_path) as store:
+        assert store.repository_id("Owner/Home") == 12345
+        with pytest.raises(StateError):
+            store.bind_repository("Owner/Home", 99999)
+        assert store.repository_id("Owner/Home") == 12345
+
+
+def test_distinct_repository_target_can_have_its_own_binding(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        store.bind_repository("Owner/First", 1)
+        store.bind_repository("Owner/Second", 2)
+        assert store.repository_id("Owner/First") == 1
+        assert store.repository_id("Owner/Second") == 2
+
+
+@pytest.mark.parametrize(
+    ("target", "repository_id"),
+    [("", 1), ("x\nsecret-sentinel", 1), ("Owner/Home", 0), ("Owner/Home", True)],
+)
+def test_invalid_repository_binding_fails_without_disclosure(
+    tmp_path: Path, target: str, repository_id: object
+) -> None:
+    with StateStore(tmp_path) as store, pytest.raises(StateError) as error:
+        store.bind_repository(target, repository_id)  # type: ignore[arg-type]
+    assert "secret-sentinel" not in str(error.value)
+
+
+def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        store.enqueue_work("runtime", "existing", now=None)
+    path = tmp_path / "syncapp/state.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE repository_binding")
+        db.execute("DROP TABLE synchronization_baseline")
+        db.execute("DROP TABLE values_store")
+        db.execute("DROP TABLE jobs")
+        db.execute("DROP TABLE events")
+        db.execute("PRAGMA user_version = 2")
+    with StateStore(tmp_path) as store:
+        store.bind_repository("Owner/Home", 123)
+        assert store.repository_id("Owner/Home") == 123
+        assert store.claim_work() is not None
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5

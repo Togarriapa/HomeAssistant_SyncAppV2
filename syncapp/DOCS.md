@@ -70,6 +70,10 @@ invalid types and unsafe repository names prevent startup. Repository identity
 becomes bound during verification; changing the option cannot silently redirect
 private configuration. Migration to a different Repo B is not implemented.
 
+The earlier optional pair, `repo_b` / `github_token`, remains accepted for upgrade
+compatibility and is used only for repository metadata authentication. Use one
+option pair at a time. Existing repository identity pins remain enforced.
+
 ## Synchronization and recovery
 
 Snapshots preserve raw bytes, including hidden .storage data, CRLF, binaries and
@@ -106,9 +110,12 @@ mutations with a per-process CSRF token and serializes every action on one worke
 
 The app owns /data/syncapp with directory mode 0700 and sensitive files mode 0600.
 Credentials and internal state never come from Repo B. Cold app backups stop the
-service while copying its state. Schema 1 migrates transactionally to schema 2
-without losing installation identity or interrupted-run information. Downgrading
-to 0.1.0 with schema 2 is refused; restore its matching app backup.
+service while copying its state. Schemas 1–4 migrate sequentially to schema 5,
+preserving installation identity, queued work, repository pins and synchronization
+baselines. Schema 5 adds phase/payload records and audit events for the active SSH
+worker. Existing lower-level V2 components remain available; their scheduling
+primitives do not run a second worker. Downgrading with schema 5 is refused;
+restore the matching app backup.
 
 | Failure | Action |
 | --- | --- |

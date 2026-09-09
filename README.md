@@ -1,20 +1,5 @@
 # HomeAssistant_SyncAppV2
 
-## Implementation status
-
-The **0.2.0 experimental increment** adds SSH deploy key generation/testing/refresh,
-an admin setup panel, explicit five-branch initialization, byte-preserving local
-configuration sync, durable retries and hourly recovery scans. Automatic sync is
-blocked until initialization succeeds. Configuration remains mounted read-only:
-candidate deployment, backup/rollback and database/runtime/log exports are still
-in development. The sections below define the full target, not a claim that every
-target capability is implemented.
-
-See [app documentation](syncapp/DOCS.md), [development instructions](docs/development.md)
-and [architecture and next increments](docs/architecture.md). Initial delivery is
-tracked in [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1);
-MVP work continues in [epic #7](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/7).
-
 ## Overview
 
 HomeAssistant_SyncAppV2 is a Home Assistant App that provides a safe, automated and observable synchronization layer between a Home Assistant OS installation and a user-provided private GitHub repository.

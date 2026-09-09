@@ -36,5 +36,7 @@ schema:
   status_interval_seconds: int(30,3600)
   repository: str
   github_metadata_token: password
+  repo_b: str?
+  github_token: password?
   sync_interval_seconds: int(30,3600)
   retrigger_interval_seconds: int(60,86400)

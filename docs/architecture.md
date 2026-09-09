@@ -1,5 +1,9 @@
 # Architecture through 0.2.0
 
+The initial V2 README remains unchanged as the product baseline. Deploy-key setup
+and explicit initialization implement the user's additional direct request. This
+document describes implementation choices, not an alternative specification.
+
 ## Implemented boundary
 
 Supervisor options → strict validation → exclusive state store → admin ingress
@@ -14,7 +18,7 @@ the lifetime process lock. `__main__.py` handles lifecycle and sanitized logging
 Signal handlers only set a flag; they never take Python threading locks. The
 idle wait checks that flag at most every 250 ms using monotonic time.
 
-## Protected state and schema 2
+## Protected state and schema 5
 
 `/data/syncapp` is app-owned (0700). State, key and snapshot files are 0600; Git's
 object store is contained by an app-owned 0700 directory. The data root and
@@ -27,14 +31,15 @@ attacker with the same UID or host privileges.
 lifetime. It is never unlinked. SQLite closes before the lock descriptor closes.
 SIGKILL and reboots release the OS lock, avoiding unsafe age-based lock stealing.
 
-`state.sqlite3` uses SQLite transactions, `synchronous=FULL` and schema version 2
+`state.sqlite3` uses SQLite transactions, `synchronous=FULL` and schema version 5
 in `PRAGMA user_version`. Creation of the schema, initial identity and schema
 version is one transaction. Existing unknown versions, empty/truncated databases,
 integrity failures, orphaned SQLite recovery files and missing/invalid identities
 fail closed. Initialization
 is only allowed for a newly created database; there is no automatic reset or
-destructive reset. Schema 1 migrates transactionally, retaining its installation
-record. A failure during the first initialization may require
+destructive reset. Existing schemas migrate sequentially, retaining installation,
+work, repository-binding and synchronization-baseline records. Schema 5 adds the
+active worker's durable operation payloads and audit events. A failure during initialization may require
 operator investigation instead of silently creating a second identity.
 
 The single `installation` record contains:
@@ -49,7 +54,7 @@ The single `installation` record contains:
 | `last_stopped_at` | UTC timestamp of the latest clean stop |
 
 A committed start reports the prior active UUID before replacing it with the new
-one. Schema 2 adds key/value state, unique operation records and audit events.
+one. Schema 5 adds key/value state, unique operation records and audit events.
 Jobs persist kind, idempotency key, attempts, due time, phase, safe failure code
 and internal payload. Planned commits and verified snapshots are recorded before
 pushes; retries reconcile the same commit IDs using ref leases. Completed job/event

@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from .errors import Failure
+from .main_routing import include_in_main
 
 MAX_BYTES = 128 * 1024 * 1024
 MAX_FILES = 10000
@@ -36,7 +37,7 @@ def excluded(name: str) -> bool:
     return (
         any(p in (".git", "__pycache__") for p in parts)
         or parts[-1].endswith((".pyc", ".pyo"))
-        or parts[0].startswith(("home-assistant_v2.db", "home-assistant.log"))
+        or not include_in_main(name)
     )
 
 

@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import stat
+import subprocess  # nosec B404
+from dataclasses import dataclass
+from pathlib import Path
+
+from ha_syncapp.git_workspace import GitWorkspace, verify_workspace_content
+
+_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_USER_NAME = "Home Assistant SyncApp"
+_USER_EMAIL = "syncapp@localhost"
+
+
+class GitError(RuntimeError):
+    """Raised when a confined local Git operation cannot be trusted."""
+
+
+@dataclass(frozen=True, slots=True)
+class LocalGitRepository:
+    tree_path: Path
+    default_branch: str
+    user_name: str
+    user_email: str
+
+
+def initialize_repository(
+    workspace: GitWorkspace, *, default_branch: str = "main"
+) -> LocalGitRepository:
+    """Initialize machine-owned Git metadata inside an isolated mutable workspace."""
+    root, tree = _validate_workspace(workspace)
+    _validate_branch(default_branch)
+    git_path = tree / ".git"
+    if git_path.exists() or os.path.lexists(git_path):
+        repository = inspect_repository(workspace)
+        if repository.default_branch != default_branch:
+            raise GitError("existing repository branch does not match requested branch")
+        return repository
+
+    executable = _git_executable()
+    _run_git(executable, tree, root, ("init", "--initial-branch", default_branch))
+    _run_git(executable, tree, root, ("config", "--local", "user.name", _USER_NAME))
+    _run_git(executable, tree, root, ("config", "--local", "user.email", _USER_EMAIL))
+    return inspect_repository(workspace)
+
+
+def inspect_repository(workspace: GitWorkspace) -> LocalGitRepository:
+    """Inspect only the local repository metadata of one isolated workspace."""
+    root, tree = _validate_workspace(workspace)
+    git_path = tree / ".git"
+    try:
+        metadata = git_path.lstat()
+    except OSError as exc:
+        raise GitError("workspace Git metadata is unavailable") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or git_path.is_symlink():
+        raise GitError("workspace Git metadata is unsafe")
+
+    executable = _git_executable()
+    branch = _run_git(executable, tree, root, ("symbolic-ref", "--short", "HEAD"))
+    name = _run_git(executable, tree, root, ("config", "--local", "--get", "user.name"))
+    email = _run_git(executable, tree, root, ("config", "--local", "--get", "user.email"))
+    _validate_branch(branch)
+    if name != _USER_NAME or email != _USER_EMAIL:
+        raise GitError("workspace Git identity is not the expected machine identity")
+    return LocalGitRepository(
+        tree_path=tree,
+        default_branch=branch,
+        user_name=name,
+        user_email=email,
+    )
+
+
+def create_snapshot_commit(workspace: GitWorkspace) -> str | None:
+    """Commit only content that still exactly matches the accepted snapshot identity."""
+    root, tree = _validate_workspace(workspace)
+    inspect_repository(workspace)
+    verify_workspace_content(workspace)
+    executable = _git_executable()
+    _run_git(executable, tree, root, ("add", "--all", "--", "."))
+    status = _run_git(
+        executable,
+        tree,
+        root,
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+    )
+    if not status:
+        verify_workspace_content(workspace)
+        return None
+
+    message = f"Sync verified snapshot {workspace.snapshot_id}"
+    _run_git(executable, tree, root, ("commit", "--no-gpg-sign", "--no-verify", "-m", message))
+    verify_workspace_content(workspace)
+    commit_sha = _run_git(executable, tree, root, ("rev-parse", "--verify", "HEAD"))
+    if _COMMIT_SHA.fullmatch(commit_sha) is None:
+        raise GitError("resulting Git commit identity is invalid")
+    return commit_sha
+
+
+def verify_fast_forward_ancestry(
+    workspace: GitWorkspace,
+    *,
+    baseline_commit_sha: str,
+    local_commit_sha: str,
+) -> None:
+    """Fail unless the local commit can advance from the trusted baseline without force."""
+    _validate_commit_sha(baseline_commit_sha, "baseline")
+    _validate_commit_sha(local_commit_sha, "local")
+    root, tree = _validate_workspace(workspace)
+    inspect_repository(workspace)
+    verify_workspace_content(workspace)
+    executable = _git_executable()
+    _run_git(
+        executable,
+        tree,
+        root,
+        ("cat-file", "-e", f"{baseline_commit_sha}^{{commit}}"),
+    )
+    _run_git(
+        executable,
+        tree,
+        root,
+        ("cat-file", "-e", f"{local_commit_sha}^{{commit}}"),
+    )
+    if not _is_ancestor(executable, tree, root, baseline_commit_sha, local_commit_sha):
+        raise GitError("local commit does not descend from trusted baseline")
+    verify_workspace_content(workspace)
+
+
+def _validate_commit_sha(commit_sha: str, label: str) -> None:
+    if not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None:
+        raise GitError(f"{label} commit identity is invalid")
+
+
+def _validate_workspace(workspace: GitWorkspace) -> tuple[Path, Path]:
+    if type(workspace) is not GitWorkspace:
+        raise GitError("Git operations require an isolated GitWorkspace")
+    root = _real_directory(workspace.root, "workspace root")
+    tree = _real_directory(workspace.tree_path, "workspace tree")
+    if tree != root / "tree" or root.name.startswith(".git-workspace-") is False:
+        raise GitError("workspace layout is not recognized")
+    if not root.name.endswith(".tmp"):
+        raise GitError("workspace layout is not recognized")
+    return root, tree
+
+
+def _real_directory(path: Path, label: str) -> Path:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise GitError(f"{label} is unavailable") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or path.is_symlink():
+        raise GitError(f"{label} must be a real directory")
+    return path.resolve(strict=True)
+
+
+def _validate_branch(branch: str) -> None:
+    if not isinstance(branch, str) or _BRANCH.fullmatch(branch) is None:
+        raise GitError("invalid local Git branch")
+    if branch in {".", ".."} or branch.endswith((".", ".lock")) or ".." in branch:
+        raise GitError("invalid local Git branch")
+
+
+def _git_executable() -> str:
+    executable = shutil.which("git")
+    if executable is None or not os.path.isabs(executable):
+        raise GitError("Git executable is unavailable")
+    return executable
+
+
+def _git_environment(executable: str, root: Path) -> dict[str, str]:
+    return {
+        "PATH": os.path.dirname(executable),
+        "HOME": str(root),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+        "LC_ALL": "C",
+    }
+
+
+def _git_command(executable: str, arguments: tuple[str, ...]) -> list[str]:
+    return [
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "commit.gpgSign=false",
+        *arguments,
+    ]
+
+
+def _is_ancestor(
+    executable: str,
+    tree: Path,
+    root: Path,
+    baseline_commit_sha: str,
+    local_commit_sha: str,
+) -> bool:
+    try:
+        result = subprocess.run(  # nosec B603
+            _git_command(
+                executable,
+                ("merge-base", "--is-ancestor", baseline_commit_sha, local_commit_sha),
+            ),
+            cwd=tree,
+            env=_git_environment(executable, root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GitError("confined Git command could not execute") from exc
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise GitError("confined Git command failed")
+
+
+def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]) -> str:
+    try:
+        result = subprocess.run(  # nosec B603
+            _git_command(executable, arguments),
+            cwd=tree,
+            env=_git_environment(executable, root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GitError("confined Git command could not execute") from exc
+    if result.returncode != 0:
+        raise GitError("confined Git command failed")
+    return result.stdout.strip()

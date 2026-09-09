@@ -1,4 +1,4 @@
-"""Exclusive, versioned lifecycle state in app-owned storage.
+"""Exclusive, versioned lifecycle and recoverable-work state in app-owned storage.
 
 The process lock is held until the SQLite connection closes. Its file must never
 be deleted to recover a lock: the kernel releases flock when the process exits.
@@ -6,17 +6,21 @@ be deleted to recover a lock: the kernel releases flock when the process exits.
 
 import fcntl
 import os
+import re
 import sqlite3
 import stat
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 from uuid import UUID, uuid4
 
 from .journal import migrate
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
+_WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class StateError(RuntimeError):
@@ -33,6 +37,30 @@ class Boot:
     run_id: str
     boot_count: int
     interrupted_run_id: str | None
+
+
+@dataclass(frozen=True)
+class WorkItem:
+    """Durable identity and lifecycle metadata for one idempotent unit of work."""
+
+    work_kind: str
+    work_key: str
+    status: str
+    attempts: int
+    created_at: datetime
+    updated_at: datetime
+    next_attempt_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SynchronizationBaseline:
+    """Last successful local synchronization evidence for one repository branch."""
+
+    target: str
+    branch: str
+    snapshot_id: str
+    commit_sha: str
+    synchronized_at: datetime
 
 
 def _private_file(path: Path, *, create: bool = False) -> int:
@@ -60,8 +88,85 @@ def _valid_uuid(value: object) -> bool:
         return False
 
 
+def _timestamp(value: datetime | None = None) -> datetime:
+    current = value or datetime.now(UTC)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise StateError("State timestamps must include a timezone")
+    return current.astimezone(UTC)
+
+
+def _parse_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise StateError("Invalid state timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise StateError("Invalid state timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise StateError("Invalid state timestamp")
+    return parsed.astimezone(UTC)
+
+
+def _validate_work_kind(work_kind: str) -> None:
+    if not isinstance(work_kind, str) or _WORK_KIND.fullmatch(work_kind) is None:
+        raise StateError("Invalid work kind")
+
+
+def _validate_work_identity(work_kind: str, work_key: str) -> None:
+    _validate_work_kind(work_kind)
+    if (
+        not isinstance(work_key, str)
+        or not 1 <= len(work_key) <= 256
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in work_key)
+    ):
+        raise StateError("Invalid work key")
+
+
+def _validate_repository_binding(target: str, repository_id: int | None = None) -> None:
+    if (
+        not isinstance(target, str)
+        or not 1 <= len(target) <= 200
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in target)
+    ):
+        raise StateError("Invalid repository binding")
+    if repository_id is not None and (type(repository_id) is not int or repository_id <= 0):
+        raise StateError("Invalid repository binding")
+
+
+def _validate_branch(branch: str) -> None:
+    forbidden = ("..", "//", "@{")
+    if (
+        not isinstance(branch, str)
+        or not 1 <= len(branch) <= 200
+        or branch.startswith(("/", "."))
+        or branch.endswith(("/", ".", ".lock"))
+        or any(token in branch for token in forbidden)
+        or any(character.isspace() or character in "~^:?*[\\" for character in branch)
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in branch)
+    ):
+        raise StateError("Invalid synchronization branch")
+
+
+def _validate_synchronization_identity(
+    target: str, branch: str, snapshot_id: str | None = None, commit_sha: str | None = None
+) -> None:
+    _validate_repository_binding(target)
+    _validate_branch(branch)
+    if snapshot_id is not None and (
+        not isinstance(snapshot_id, str) or _HEX_64.fullmatch(snapshot_id) is None
+    ):
+        raise StateError("Invalid synchronization snapshot")
+    if commit_sha is not None and (
+        not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None
+    ):
+        raise StateError("Invalid synchronization commit")
+
+
 class StateStore:
     """One service instance owns one store for its entire lifetime."""
+
+    MAX_WORK_ATTEMPTS = 8
+    MAX_WORK_BACKOFF_SECONDS = 3600
 
     def __init__(self, data_dir: Path) -> None:
         self._data_dir = data_dir
@@ -126,12 +231,41 @@ class StateStore:
 
     @property
     def connection(self) -> sqlite3.Connection:
-        """Internal journal access while the lifetime lock is held."""
+        """Journal access under the existing lifetime process lock."""
         return self._connection
+
+    @staticmethod
+    def _create_work_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE work ("
+            "work_kind TEXT NOT NULL, work_key TEXT NOT NULL, "
+            "status TEXT NOT NULL CHECK (status IN ("
+            "'pending','running','retry','blocked','succeeded')), "
+            "attempts INTEGER NOT NULL CHECK (attempts >= 0), "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, "
+            "PRIMARY KEY (work_kind, work_key))"
+        )
+        db.execute("CREATE INDEX work_ready ON work(status, next_attempt_at, created_at)")
+
+    @staticmethod
+    def _create_repository_binding_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE repository_binding ("
+            "target TEXT PRIMARY KEY, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0))"
+        )
+
+    @staticmethod
+    def _create_synchronization_baseline_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE synchronization_baseline ("
+            "target TEXT NOT NULL, branch TEXT NOT NULL, snapshot_id TEXT NOT NULL, "
+            "commit_sha TEXT NOT NULL, synchronized_at TEXT NOT NULL, "
+            "PRIMARY KEY (target, branch))"
+        )
 
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
-        # Check sidecars before SQLite can follow them during crash recovery.
         for suffix in ("-journal", "-wal", "-shm"):
             sidecar = path.with_name(path.name + suffix)
             if os.path.lexists(sidecar):
@@ -148,14 +282,13 @@ class StateStore:
         self._db = sqlite3.connect(path, timeout=5)
         db = self._connection
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, SCHEMA_VERSION) and not (created and version == 0):
-            raise StateError("Unsupported state schema")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
         db.execute("PRAGMA synchronous = FULL")
         if created:
+            if version != 0:
+                raise StateError("Unsupported state schema")
             with db:
-                # Explicit BEGIN keeps DDL, seed and schema version atomic.
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
                     "CREATE TABLE installation ("
@@ -165,23 +298,56 @@ class StateStore:
                     "active_run_id TEXT, last_started_at TEXT, last_stopped_at TEXT)"
                 )
                 db.execute(
-                    "INSERT INTO installation VALUES (1, ?, 0, NULL, NULL, NULL)", (str(uuid4()),)
+                    "INSERT INTO installation VALUES (1, ?, 0, NULL, NULL, NULL)",
+                    (str(uuid4()),),
                 )
-                db.execute("PRAGMA user_version = 1")
-            # Persist the new file's directory entry as well as its contents.
+                self._create_work_table(db)
+                self._create_repository_binding_table(db)
+                self._create_synchronization_baseline_table(db)
+                db.execute("PRAGMA user_version = 4")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(root_fd)
             finally:
                 os.close(root_fd)
+        else:
+            if version not in {1, 2, 3, 4, SCHEMA_VERSION}:
+                raise StateError("Unsupported state schema")
+            self._identity()
+            if version == 1:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_work_table(db)
+                    db.execute("PRAGMA user_version = 2")
+                version = 2
+            if version == 2:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_repository_binding_table(db)
+                    db.execute("PRAGMA user_version = 3")
+                version = 3
+            if version == 3:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_synchronization_baseline_table(db)
+                    db.execute("PRAGMA user_version = 4")
         self._identity()
-        if db.execute("PRAGMA user_version").fetchone()[0] == 1:
+        if db.execute("PRAGMA user_version").fetchone()[0] == 4:
             migrate(db)
+        db.execute(
+            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+            "next_attempt_at FROM work LIMIT 0"
+        )
+        db.execute("SELECT target, repository_id FROM repository_binding LIMIT 0")
+        db.execute(
+            "SELECT target, branch, snapshot_id, commit_sha, synchronized_at "
+            "FROM synchronization_baseline LIMIT 0"
+        )
         db.execute("SELECT key, value FROM values_store LIMIT 0")
         db.execute("SELECT id, time, event, details FROM events LIMIT 0")
         db.execute(
-            "SELECT id, kind, job_key, status, attempts, due, phase, payload, error, created "
-            "FROM jobs LIMIT 0"
+            "SELECT id, kind, job_key, status, attempts, due, phase, payload, error, "
+            "created FROM jobs LIMIT 0"
         )
 
     def _identity(self) -> tuple[str, int, str | None]:
@@ -236,6 +402,303 @@ class StateStore:
             self._active_run = None
         except sqlite3.Error:
             raise StateError("Unable to record shutdown") from None
+
+    def repository_id(self, target: str) -> int | None:
+        """Return the pinned GitHub repository ID for a target, if already verified."""
+        _validate_repository_binding(target)
+        try:
+            rows = self._connection.execute(
+                "SELECT repository_id FROM repository_binding WHERE target = ?", (target,)
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read repository binding") from None
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateError("Invalid repository binding")
+        repository_id = rows[0][0]
+        if type(repository_id) is not int or repository_id <= 0:
+            raise StateError("Invalid repository binding")
+        return repository_id
+
+    def bind_repository(self, target: str, repository_id: int) -> None:
+        """Pin a verified repository ID; reject replacement at the same target."""
+        _validate_repository_binding(target, repository_id)
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT repository_id FROM repository_binding WHERE target = ?", (target,)
+                ).fetchone()
+                if current is None:
+                    db.execute(
+                        "INSERT INTO repository_binding (target, repository_id) VALUES (?, ?)",
+                        (target, repository_id),
+                    )
+                elif len(current) != 1 or current[0] != repository_id:
+                    raise StateError("Repository identity changed unexpectedly")
+        except sqlite3.Error:
+            raise StateError("Unable to persist repository binding") from None
+
+    def synchronization_baseline(self, target: str, branch: str) -> SynchronizationBaseline | None:
+        """Read the last successful local synchronization result for a branch."""
+        _validate_synchronization_identity(target, branch)
+        try:
+            rows = self._connection.execute(
+                "SELECT target, branch, snapshot_id, commit_sha, synchronized_at "
+                "FROM synchronization_baseline WHERE target = ? AND branch = ?",
+                (target, branch),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read synchronization baseline") from None
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateError("Invalid synchronization baseline")
+        return self._synchronization_baseline_from_row(rows[0])
+
+    def record_synchronization_baseline(
+        self,
+        target: str,
+        branch: str,
+        snapshot_id: str,
+        commit_sha: str,
+        *,
+        synchronized_at: datetime | None = None,
+    ) -> SynchronizationBaseline:
+        """Atomically record a successful local synchronization result."""
+        _validate_synchronization_identity(target, branch, snapshot_id, commit_sha)
+        when = _timestamp(synchronized_at)
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT INTO synchronization_baseline "
+                    "(target, branch, snapshot_id, commit_sha, synchronized_at) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(target, branch) DO UPDATE SET "
+                    "snapshot_id = excluded.snapshot_id, commit_sha = excluded.commit_sha, "
+                    "synchronized_at = excluded.synchronized_at",
+                    (target, branch, snapshot_id, commit_sha, when.isoformat()),
+                )
+            baseline = self.synchronization_baseline(target, branch)
+            if baseline is None:
+                raise StateError("Synchronization baseline was not persisted")
+            return baseline
+        except sqlite3.Error:
+            raise StateError("Unable to persist synchronization baseline") from None
+
+    def _synchronization_baseline_from_row(
+        self, row: tuple[object, ...]
+    ) -> SynchronizationBaseline:
+        if len(row) != 5:
+            raise StateError("Invalid synchronization baseline")
+        target, branch, snapshot_id, commit_sha, synchronized_at = row
+        if (
+            not isinstance(target, str)
+            or not isinstance(branch, str)
+            or not isinstance(snapshot_id, str)
+            or not isinstance(commit_sha, str)
+            or not isinstance(synchronized_at, str)
+        ):
+            raise StateError("Invalid synchronization baseline")
+        _validate_synchronization_identity(target, branch, snapshot_id, commit_sha)
+        return SynchronizationBaseline(
+            target=target,
+            branch=branch,
+            snapshot_id=snapshot_id,
+            commit_sha=commit_sha,
+            synchronized_at=_parse_timestamp(synchronized_at),
+        )
+
+    def _work_from_row(self, row: tuple[object, ...]) -> WorkItem:
+        if len(row) != 7:
+            raise StateError("Invalid work record")
+        work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at = row
+        if (
+            not isinstance(work_kind, str)
+            or not isinstance(work_key, str)
+            or status not in {"pending", "running", "retry", "blocked", "succeeded"}
+            or type(attempts) is not int
+            or attempts < 0
+        ):
+            raise StateError("Invalid work record")
+        _validate_work_identity(work_kind, work_key)
+        return WorkItem(
+            work_kind=work_kind,
+            work_key=work_key,
+            status=status,
+            attempts=attempts,
+            created_at=_parse_timestamp(created_at),
+            updated_at=_parse_timestamp(updated_at),
+            next_attempt_at=(
+                None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
+            ),
+        )
+
+    def _get_work(self, work_kind: str, work_key: str) -> WorkItem:
+        rows = self._connection.execute(
+            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+            "next_attempt_at FROM work WHERE work_kind = ? AND work_key = ?",
+            (work_kind, work_key),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateError("Work record is missing")
+        return self._work_from_row(rows[0])
+
+    def enqueue_work(
+        self,
+        work_kind: str,
+        work_key: str,
+        *,
+        now: datetime | None = None,
+    ) -> WorkItem:
+        """Create one deterministic work item, or return its existing durable state."""
+        _validate_work_identity(work_kind, work_key)
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT OR IGNORE INTO work (work_kind, work_key, status, attempts, "
+                    "created_at, updated_at, next_attempt_at) "
+                    "VALUES (?, ?, 'pending', 0, ?, ?, ?)",
+                    (work_kind, work_key, current, current, current),
+                )
+            return self._get_work(work_kind, work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to enqueue work") from None
+
+    def claim_work(self, *, now: datetime | None = None) -> WorkItem | None:
+        """Atomically claim the oldest eligible pending/retry item."""
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+                    "next_attempt_at FROM work WHERE status IN ('pending','retry') "
+                    "AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1",
+                    (current,),
+                ).fetchone()
+                if row is None:
+                    return None
+                item = self._work_from_row(row)
+                result = db.execute(
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
+                    "updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.status, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work claim changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to claim work") from None
+
+    def claim_work_kind(
+        self,
+        work_kind: str,
+        *,
+        now: datetime | None = None,
+    ) -> WorkItem | None:
+        """Atomically claim the oldest eligible item of exactly one work kind."""
+        _validate_work_kind(work_kind)
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
+                    "next_attempt_at FROM work WHERE work_kind = ? "
+                    "AND status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_key LIMIT 1",
+                    (work_kind, current),
+                ).fetchone()
+                if row is None:
+                    return None
+                item = self._work_from_row(row)
+                result = db.execute(
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
+                    "updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.status, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work claim changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to claim work") from None
+
+    def recover_interrupted_work(self, *, now: datetime | None = None) -> int:
+        """Make work left running by an interrupted process immediately retryable."""
+        current = _timestamp(now).isoformat()
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? "
+                    "WHERE status = 'running'",
+                    (current, current),
+                )
+            return result.rowcount
+        except sqlite3.Error:
+            raise StateError("Unable to recover interrupted work") from None
+
+    def fail_work(
+        self,
+        item: WorkItem,
+        *,
+        transient: bool,
+        now: datetime | None = None,
+    ) -> WorkItem:
+        """Record a failed running attempt as retryable or permanently blocked."""
+        current_time = _timestamp(now)
+        current = current_time.isoformat()
+        if item.status != "running" or item.attempts < 1:
+            raise StateError("Only running work can fail")
+        if transient and item.attempts < self.MAX_WORK_ATTEMPTS:
+            delay = min(60 * (2 ** (item.attempts - 1)), self.MAX_WORK_BACKOFF_SECONDS)
+            status = "retry"
+            next_attempt = (current_time + timedelta(seconds=delay)).isoformat()
+        else:
+            status = "blocked"
+            next_attempt = None
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = ?, updated_at = ?, next_attempt_at = ? "
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
+                    "AND attempts = ?",
+                    (status, current, next_attempt, item.work_kind, item.work_key, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work transition changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to record work failure") from None
+
+    def complete_work(self, item: WorkItem, *, now: datetime | None = None) -> WorkItem:
+        """Durably mark one running attempt successful."""
+        current = _timestamp(now).isoformat()
+        if item.status != "running" or item.attempts < 1:
+            raise StateError("Only running work can complete")
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = 'succeeded', updated_at = ?, next_attempt_at = NULL "
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
+                    "AND attempts = ?",
+                    (current, item.work_kind, item.work_key, item.attempts),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work transition changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to complete work") from None
 
     def _close(self) -> None:
         try:

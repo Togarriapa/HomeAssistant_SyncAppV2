@@ -102,6 +102,12 @@ class GitHubGuard:
         ):
             raise Failure("repository_identity_changed")
         bound = self.journal.value("repository_id")
+        previous_bindings = self.journal.db.execute(
+            "SELECT repository_id FROM repository_binding WHERE lower(target) = lower(?)",
+            (self.repository,),
+        ).fetchall()
+        if any(row[0] != info["id"] for row in previous_bindings):
+            raise Failure("repository_identity_changed")
         if bound is not None and bound != info["id"]:
             raise Failure("repository_identity_changed")
         if bound is None:

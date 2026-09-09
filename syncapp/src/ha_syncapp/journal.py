@@ -25,7 +25,7 @@ def migrate(db: sqlite3.Connection) -> None:
             "CREATE TABLE events (id INTEGER PRIMARY KEY, time REAL NOT NULL, "
             "event TEXT NOT NULL, details TEXT NOT NULL)"
         )
-        db.execute("PRAGMA user_version = 2")
+        db.execute("PRAGMA user_version = 5")
 
 
 @dataclass(frozen=True)

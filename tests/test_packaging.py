@@ -53,4 +53,4 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     config = load_config(path)
     assert config.log_level == "info"
     assert config.status_interval_seconds == 300
-    assert manifest["options"].keys() == manifest["schema"].keys()
+    assert manifest["schema"].keys() - manifest["options"].keys() == {"repo_b", "github_token"}

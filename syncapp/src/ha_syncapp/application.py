@@ -44,9 +44,9 @@ class Application:
         self.publish()
 
     def repository(self, identity: SSHIdentity | None = None) -> GitRepository:
-        if not self.config.repository or not self.config.github_metadata_token:
+        if not self.config.repository_target or not self.config.metadata_token:
             raise Failure("repository_setup_incomplete")
-        guard = GitHubGuard(self.config.repository, self.config.github_metadata_token, self.journal)
+        guard = GitHubGuard(self.config.repository_target, self.config.metadata_token, self.journal)
         return GitRepository(
             self.directory / "repository.git",
             guard.remote,
@@ -59,8 +59,8 @@ class Application:
             {
                 **self.engine.status(),
                 "keys": self.keys.status(),
-                "repository": self.config.repository,
-                "configured": bool(self.config.repository and self.config.github_metadata_token),
+                "repository": self.config.repository_target,
+                "configured": bool(self.config.repository_target and self.config.metadata_token),
                 "busy": busy,
                 "action": self.last_action,
                 "recovered_jobs": self.recovered_jobs,
@@ -73,7 +73,7 @@ class Application:
             self.keys.generate()
         elif name == "test":
             self.keys.test(
-                self.config.repository,
+                self.config.repository_target,
                 lambda key: self.repository(key).test_access(key.private_key.name),
             )
         elif name == "activate":
@@ -83,7 +83,7 @@ class Application:
                 for j in self.journal.jobs()
             ):
                 raise Failure("recovery_must_finish_before_key_activation")
-            self.keys.activate(self.config.repository)
+            self.keys.activate(self.config.repository_target)
         elif name == "initialize":
             self.repository()  # Require a configured repository and active key before enqueuing.
             self.engine.request_initialize()

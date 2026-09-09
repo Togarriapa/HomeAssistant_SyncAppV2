@@ -16,6 +16,7 @@ from . import __version__
 from .application import Application
 from .config import ConfigError, load_config
 from .control import make_server
+from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .homeassistant import HomeAssistant
 from .journal import Journal
 from .state import AlreadyRunning, StateError, StateStore
@@ -51,6 +52,11 @@ class Shutdown:
 def run(data_dir: Path, stop: Shutdown, config_dir: Path = Path("/homeassistant")) -> None:
     config = load_config(data_dir / "options.json")
     with StateStore(data_dir) as store:
+        if config.repo_b is not None and config.github_token is not None:
+            identity = fetch_and_verify_private_repository(
+                config.repo_b, config.github_token, expected_id=store.repository_id(config.repo_b)
+            )
+            store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
         token = os.environ.get("SUPERVISOR_TOKEN", "")
         mode = "setup" if token else "passive"
@@ -116,6 +122,9 @@ def main() -> int:
     except StateError:
         emit("service_failed", level="error", reason="state_unavailable")
         return 4
+    except RepositoryVerificationError:
+        emit("service_failed", level="error", reason="repo_b_untrusted")
+        return 5
     except Exception:
         # Unexpected errors also fail closed without disclosing private data.
         emit("service_failed", level="error", reason="internal_error")
