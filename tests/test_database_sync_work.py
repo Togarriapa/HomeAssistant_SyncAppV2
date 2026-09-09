@@ -2,8 +2,12 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import database_sync_work
-from ha_syncapp.database_sync import DatabaseSyncDisposition, DatabaseSyncError, DatabaseSyncResult
-from ha_syncapp.state import StateStore
+from ha_syncapp.database_sync import (
+    DatabaseSyncDisposition,
+    DatabaseSyncError,
+    DatabaseSyncResult,
+)
+from ha_syncapp.state import StateStore, WorkItem
 
 TARGET = "Owner/Private-Home"
 REPOSITORY_ID = 123
@@ -43,7 +47,7 @@ def _result(disposition: DatabaseSyncDisposition) -> DatabaseSyncResult:
 
 def _execute(
     store: StateStore,
-    item,
+    item: WorkItem,
     database: Path,
     tmp_path: Path,
 ) -> database_sync_work.DatabaseSyncWorkResult:
@@ -106,7 +110,11 @@ def test_successful_database_outcomes_complete_work(
     database_sync_work.enqueue_database_sync_work(store, TARGET, database)
     item = database_sync_work.claim_database_sync_work(store)
     assert item is not None
-    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", lambda *a, **k: _result(disposition))
+
+    def synchronize(*args: object, **kwargs: object) -> DatabaseSyncResult:
+        return _result(disposition)
+
+    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", synchronize)
     try:
         result = _execute(store, item, database, tmp_path)
     finally:
@@ -135,7 +143,11 @@ def test_deterministic_database_refusals_block_work(
     database_sync_work.enqueue_database_sync_work(store, TARGET, database)
     item = database_sync_work.claim_database_sync_work(store)
     assert item is not None
-    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", lambda *a, **k: _result(disposition))
+
+    def synchronize(*args: object, **kwargs: object) -> DatabaseSyncResult:
+        return _result(disposition)
+
+    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", synchronize)
     try:
         result = _execute(store, item, database, tmp_path)
         assert database_sync_work.claim_database_sync_work(store) is None
@@ -199,5 +211,11 @@ def test_claim_identity_must_match_explicit_database_path(tmp_path: Path) -> Non
 
 
 def test_work_key_rejects_relative_database_path() -> None:
-    with pytest.raises(database_sync_work.DatabaseSyncWorkError, match="source path is invalid"):
-        database_sync_work.database_sync_work_key(TARGET, Path("home-assistant_v2.db"))
+    with pytest.raises(
+        database_sync_work.DatabaseSyncWorkError,
+        match="source path is invalid",
+    ):
+        database_sync_work.database_sync_work_key(
+            TARGET,
+            Path("home-assistant_v2.db"),
+        )
