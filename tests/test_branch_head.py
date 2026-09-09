@@ -53,7 +53,10 @@ def test_trusted_branch_head_reverifies_repo_and_returns_exact_sha(
         "https://api.github.com/repos/Owner/Home/branches/main",
     ]
     assert all("secret-sentinel" not in request.full_url for request in requests)
-    assert all(request.get_header("Authorization") == "Bearer secret-sentinel" for request in requests)
+    assert all(
+        request.get_header("Authorization") == "Bearer secret-sentinel"
+        for request in requests
+    )
 
 
 def test_branch_name_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,7 +83,18 @@ def test_branch_name_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize(
     "branch",
-    ["", ".", "..", "bad..name", "bad name", "bad\\name", "/main", "main/", "a//b", "x.lock"],
+    [
+        "",
+        ".",
+        "..",
+        "bad..name",
+        "bad name",
+        "bad\\name",
+        "/main",
+        "main/",
+        "a//b",
+        "x.lock",
+    ],
 )
 def test_invalid_branch_is_rejected_before_network(branch: str) -> None:
     with pytest.raises(RepositoryVerificationError):
