@@ -79,9 +79,7 @@ def test_repository_target_case_only_difference_is_accepted_and_canonicalized() 
         (_remote(commit_sha="c" * 40), "commit"),
     ],
 )
-def test_unexpected_trusted_remote_state_fails_closed(
-    remote: BranchHead, message: str
-) -> None:
+def test_unexpected_trusted_remote_state_fails_closed(remote: BranchHead, message: str) -> None:
     with pytest.raises(PublicationResultError, match=message):
         verify_publication_result(_normal_intent(), remote)
 
