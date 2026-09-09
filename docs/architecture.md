@@ -8,16 +8,17 @@
 ## Implemented boundary
 
 Supervisor options → strict config validation → exclusive protected state store →
-passive lifecycle and durable work bookkeeping. Validation happens before the
-state directory is created. The app currently requests no Home Assistant
-configuration mount or API privilege and performs no synchronization or deployment.
+optional private Repo B identity verification → passive lifecycle and durable work
+bookkeeping. The app currently requests no Home Assistant configuration mount or
+API privilege and performs no synchronization or deployment.
 
 `syncapp/src/ha_syncapp/config.py` handles bounded options parsing and rejects
-coercions, ambiguous JSON and unsupported settings. `state.py` owns SQLite, the
-lifetime process lock, installation identity and recoverable work state.
-`__main__.py` handles lifecycle and sanitized logging. Signal handlers only set a
-flag; they never take Python threading locks. The idle wait checks that flag at
-most every 250 ms using monotonic time.
+coercions, ambiguous JSON and unsupported settings. `github_repo.py` performs the
+bounded authenticated GitHub metadata check for an explicitly configured Repo B.
+`state.py` owns SQLite, the lifetime process lock, installation identity, repository
+identity pins and recoverable work state. `__main__.py` handles lifecycle and
+sanitized logging. Signal handlers only set a flag; they never take Python threading
+locks. The idle wait checks that flag at most every 250 ms using monotonic time.
 
 ## Protected state
 
@@ -34,9 +35,10 @@ SIGKILL and reboots release the OS lock, avoiding unsafe age-based lock stealing
 `state.sqlite3` uses SQLite transactions and `synchronous=FULL`. Unknown schemas,
 empty/truncated databases, integrity failures, orphaned SQLite recovery files and
 missing/invalid identities fail closed. Initialization is allowed only for a newly
-created database. The shipped schema-1 foundation is migrated transactionally to
-schema 2; the installation identity is validated before migration and is preserved.
-There is no destructive reset fallback.
+created database. Migrations are sequential and non-destructive: schema 1 adds the
+recoverable-work table at schema 2; schema 2 adds repository identity bindings at
+schema 3. Installation identity and existing work are preserved. There is no
+destructive reset fallback.
 
 The single `installation` record contains:
 
@@ -74,10 +76,30 @@ can be represented by a different deterministic key, while an explicit future
 administrative retry can be designed as a separate controlled transition.
 
 This establishes the durable substrate required by the initial README's
-**Retrigger Work Cron Job**, but does not implement the scheduler itself. Future
-workers for local synchronization, pending pushes, candidate processing, runtime
-collection, database snapshots, log synchronization and deployment orchestration
-can use this state machine without inventing independent retry loops.
+**Retrigger Work Cron Job**, but does not implement the scheduler itself.
+
+## Private Repo B trust gate
+
+Repo B configuration is optional while the app remains passive. When enabled, the
+administrator supplies an exact `owner/repository` target and GitHub token together
+through Home Assistant App options. The token is rendered as a password option and
+is held only in the protected app-options boundary; it is not copied into SQLite,
+repository URLs, logs or Repo B.
+
+Before a configured service run is recorded, SyncApp sends one bounded authenticated
+request to GitHub's repository metadata endpoint. The response is accepted only if
+it is valid JSON, names the configured target, has a positive stable repository ID
+and explicitly reports the repository as private. Response bodies and transport
+exception text are never surfaced in application errors.
+
+Schema 3 pins the verified GitHub repository ID by configured target. A later
+verification of the same `owner/repository` must return the same stable ID; a
+replacement repository at the same path fails closed. A separately configured
+target may establish its own independent binding.
+
+This trust gate performs no Git clone/fetch/pull/push and does not grant access to
+the Home Assistant configuration tree. It is a prerequisite for later repository
+operations, not synchronization itself.
 
 ## Safety boundary still in force
 
@@ -95,15 +117,15 @@ The initial README does not require these to be implemented in a fixed order.
 Each capability must receive its own tracked acceptance criteria and TDD increment.
 High-value remaining prerequisites include:
 
-1. Verify the user-supplied Repo B identity and that it is private while keeping
-   SyncApp authentication credentials in protected app state.
-2. Build stable local staging snapshots outside the live configuration tree with
+1. Build stable local staging snapshots outside the live configuration tree with
    byte-for-byte content verification and the README-defined branch separation for
    configuration, Recorder database, runtime data and logs.
-3. Connect the durable work state machine to event-driven scheduling plus the
+2. Connect the durable work state machine to event-driven scheduling plus the
    separate Retrigger Work Cron Job.
-4. Collect normalized runtime inventory and topology information required for AI
+3. Collect normalized runtime inventory and topology information required for AI
    analysis of entities, devices, integrations, areas, services and dependencies.
+4. Implement isolated Repo B Git transport only after the verified-repository
+   identity can be carried into least-privilege fetch/push operations.
 5. Implement candidate integrity/diff/conflict analysis, risk classification and
    static/Home Assistant validation without live writes.
 6. Add recoverable backup, guarded apply, reload/restart, observation, rollback,
@@ -111,5 +133,5 @@ High-value remaining prerequisites include:
    transaction.
 7. Add consistent Recorder snapshots and bounded log retention/history management.
 
-A working foundation or recovery primitive is not evidence that bidirectional
-synchronization or controlled deployment is complete.
+A working foundation, trust gate or recovery primitive is not evidence that
+bidirectional synchronization or controlled deployment is complete.
