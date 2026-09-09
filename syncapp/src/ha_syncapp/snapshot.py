@@ -123,48 +123,37 @@ def _walk_and_copy(
     entries: list[SnapshotEntry],
 ) -> None:
     try:
-        children = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        with os.scandir(directory) as iterator:
+            children = sorted(iterator, key=lambda entry: entry.name)
     except OSError as exc:
         raise SnapshotError("unable to enumerate source tree") from exc
 
-    with _closing_scandir(children):
-        for child in children:
-            source_path = directory / child.name
-            relative = source_path.relative_to(source_root).as_posix()
-            try:
-                info = child.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise SnapshotError(f"unable to inspect source path: {relative}") from exc
+    for child in children:
+        source_path = directory / child.name
+        relative = source_path.relative_to(source_root).as_posix()
+        try:
+            info = child.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to inspect source path: {relative}") from exc
 
-            if stat.S_ISLNK(info.st_mode):
-                raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
-            if stat.S_ISDIR(info.st_mode):
-                _walk_and_copy(source_root, source_path, stage, log_paths, entries)
-                continue
-            if not stat.S_ISREG(info.st_mode):
-                raise SnapshotError(f"special file is not allowed in snapshot: {relative}")
-            if info.st_nlink != 1:
-                raise SnapshotError(f"hardlink is not allowed in snapshot: {relative}")
+        if stat.S_ISLNK(info.st_mode):
+            raise SnapshotError(f"symlink is not allowed in snapshot: {relative}")
+        if stat.S_ISDIR(info.st_mode):
+            _walk_and_copy(source_root, source_path, stage, log_paths, entries)
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise SnapshotError(f"special file is not allowed in snapshot: {relative}")
+        if info.st_nlink != 1:
+            raise SnapshotError(f"hardlink is not allowed in snapshot: {relative}")
 
-            route: Route = "logs" if relative in log_paths else "main"
-            digest, size = _copy_regular_file(source_path, stage / route / relative, info)
-            entries.append(SnapshotEntry(relative, route, size, digest))
-
-
-class _closing_scandir:
-    """Compatibility wrapper for a materialized scandir sequence."""
-
-    def __init__(self, entries: list[os.DirEntry[str]]) -> None:
-        self._entries = entries
-
-    def __enter__(self) -> list[os.DirEntry[str]]:
-        return self._entries
-
-    def __exit__(self, *_args: object) -> None:
-        return None
+        route: Route = "logs" if relative in log_paths else "main"
+        digest, size = _copy_regular_file(source_path, stage / route / relative, info)
+        entries.append(SnapshotEntry(relative, route, size, digest))
 
 
-def _copy_regular_file(source: Path, destination: Path, expected: os.stat_result) -> tuple[str, int]:
+def _copy_regular_file(
+    source: Path, destination: Path, expected: os.stat_result
+) -> tuple[str, int]:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
