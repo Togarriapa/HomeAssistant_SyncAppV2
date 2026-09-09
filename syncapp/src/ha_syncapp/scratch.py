@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,10 +84,8 @@ def _open_owned_directory(path: Path) -> int:
 
 
 def _ensure_private_child(root_fd: int, name: str) -> None:
-    try:
+    with suppress(FileExistsError):
         os.mkdir(name, mode=0o700, dir_fd=root_fd)
-    except FileExistsError:
-        pass
     child_fd = _open_private_child(root_fd, name)
     try:
         os.fchmod(child_fd, 0o700)
