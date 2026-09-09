@@ -22,7 +22,10 @@ from ha_syncapp.publication_preflight import (
     PublicationPreflightError,
     assess_publication_preflight,
 )
-from ha_syncapp.publication_workflow import PublicationWorkflowError, complete_authorized_publication
+from ha_syncapp.publication_workflow import (
+    PublicationWorkflowError,
+    complete_authorized_publication,
+)
 from ha_syncapp.snapshot import Snapshot, SnapshotError, capture_snapshot
 from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 
