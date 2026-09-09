@@ -41,7 +41,12 @@ class LocalSyncWorkResult:
 
 def local_sync_work_key(target: str, branch: str = "main") -> str:
     """Return a deterministic bounded identity for one repository branch."""
-    if not isinstance(target, str) or not target or not isinstance(branch, str) or not branch:
+    if (
+        not isinstance(target, str)
+        or not target
+        or not isinstance(branch, str)
+        or not branch
+    ):
         raise LocalSyncWorkError("local synchronization work identity is invalid")
     payload = f"{target.casefold()}\0{branch}".encode()
     return hashlib.sha256(payload).hexdigest()
@@ -59,7 +64,9 @@ def enqueue_local_sync_work(
     try:
         return store.enqueue_work(_WORK_KIND, local_sync_work_key(target, branch))
     except StateError as exc:
-        raise LocalSyncWorkError("local synchronization work could not be enqueued") from exc
+        raise LocalSyncWorkError(
+            "local synchronization work could not be enqueued"
+        ) from exc
 
 
 def claim_local_sync_work(
@@ -94,10 +101,14 @@ def claim_local_sync_work(
                 (current, item.work_kind, item.work_key, item.status, item.attempts),
             )
             if result.rowcount != 1:
-                raise LocalSyncWorkError("local synchronization work claim changed unexpectedly")
+                raise LocalSyncWorkError(
+                    "local synchronization work claim changed unexpectedly"
+                )
         return store._get_work(item.work_kind, item.work_key)
     except sqlite3.Error as exc:
-        raise LocalSyncWorkError("local synchronization work could not be claimed") from exc
+        raise LocalSyncWorkError(
+            "local synchronization work could not be claimed"
+        ) from exc
     except StateError as exc:
         raise LocalSyncWorkError("local synchronization work claim is invalid") from exc
 
@@ -140,7 +151,9 @@ def execute_claimed_local_sync_work(
         elif synchronization.disposition in _BLOCKING_DISPOSITIONS:
             transitioned = store.fail_work(item, transient=False)
         else:
-            raise LocalSyncWorkError("local synchronization returned an unknown disposition")
+            raise LocalSyncWorkError(
+                "local synchronization returned an unknown disposition"
+            )
     except StateError as exc:
         raise LocalSyncWorkError(
             "local synchronization work outcome could not be recorded"
@@ -148,12 +161,18 @@ def execute_claimed_local_sync_work(
     return LocalSyncWorkResult(transitioned, synchronization)
 
 
-def _validate_claim(store: StateStore, item: WorkItem, target: str, branch: str) -> None:
+def _validate_claim(
+    store: StateStore, item: WorkItem, target: str, branch: str
+) -> None:
     if type(store) is not StateStore:
         raise LocalSyncWorkError("local synchronization work state store is invalid")
     if type(item) is not WorkItem:
         raise LocalSyncWorkError("local synchronization work evidence is invalid")
     if item.work_kind != _WORK_KIND or item.status != "running" or item.attempts < 1:
-        raise LocalSyncWorkError("local synchronization work is not an eligible claimed item")
+        raise LocalSyncWorkError(
+            "local synchronization work is not an eligible claimed item"
+        )
     if item.work_key != local_sync_work_key(target, branch):
-        raise LocalSyncWorkError("local synchronization work identity does not match the target")
+        raise LocalSyncWorkError(
+            "local synchronization work identity does not match the target"
+        )
