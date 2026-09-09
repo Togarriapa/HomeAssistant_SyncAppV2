@@ -102,6 +102,19 @@ def test_invalid_work_identity_and_stale_transition_fail_closed(tmp_path: Path) 
             store.fail_work(claimed, transient=True, now=NOW)
 
 
+def test_corrupt_work_record_fails_closed(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store:
+        store.enqueue_work("candidate", "corrupt", now=NOW)
+    path = tmp_path / "syncapp/state.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE work SET created_at = 'not-a-timestamp' "
+            "WHERE work_kind = 'candidate' AND work_key = 'corrupt'"
+        )
+    with StateStore(tmp_path) as store, pytest.raises(StateError):
+        store.claim_work(now=NOW)
+
+
 def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> None:
     root = tmp_path / "syncapp"
     root.mkdir()
