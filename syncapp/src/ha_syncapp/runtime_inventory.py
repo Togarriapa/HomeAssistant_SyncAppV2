@@ -153,28 +153,20 @@ def verify_runtime_inventory(artifact: RuntimeInventoryArtifact) -> None:
             node = base / name
             node_stat = _safe_lstat(node)
             if not stat.S_ISDIR(node_stat.st_mode):
-                raise RuntimeInventoryError(
-                    "runtime inventory contains an unsafe directory entry"
-                )
+                raise RuntimeInventoryError("runtime inventory contains an unsafe directory entry")
         for name in file_names:
             node = base / name
             relative = node.relative_to(artifact.root).as_posix()
             if relative in observed or relative not in expected:
-                raise RuntimeInventoryError(
-                    "runtime inventory file layout does not match evidence"
-                )
+                raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
             observed.add(relative)
             node_stat = _safe_lstat(node)
             if not stat.S_ISREG(node_stat.st_mode) or node_stat.st_nlink != 1:
-                raise RuntimeInventoryError(
-                    "runtime inventory contains an unsafe file entry"
-                )
+                raise RuntimeInventoryError("runtime inventory contains an unsafe file entry")
             data = node.read_bytes()
             entry = expected[relative]
             if len(data) != entry.size or hashlib.sha256(data).hexdigest() != entry.sha256:
-                raise RuntimeInventoryError(
-                    "runtime inventory staged bytes do not match evidence"
-                )
+                raise RuntimeInventoryError("runtime inventory staged bytes do not match evidence")
     if observed != set(expected):
         raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
 
@@ -205,14 +197,10 @@ def _add_section(
     defaults: Mapping[str, object],
 ) -> None:
     if any(not isinstance(key, str) for key in supplied):
-        raise RuntimeInventoryError(
-            "runtime inventory section contains unsupported dataset keys"
-        )
+        raise RuntimeInventoryError("runtime inventory section contains unsupported dataset keys")
     unknown = set(supplied) - set(defaults)
     if unknown:
-        raise RuntimeInventoryError(
-            "runtime inventory section contains unsupported dataset keys"
-        )
+        raise RuntimeInventoryError("runtime inventory section contains unsupported dataset keys")
     for name, default in defaults.items():
         payloads[f"{directory}/{name}.json"] = supplied.get(name, default)
 
@@ -292,6 +280,4 @@ def _safe_lstat(path: Path) -> os.stat_result:
     try:
         return path.lstat()
     except OSError as exc:
-        raise RuntimeInventoryError(
-            "runtime inventory filesystem evidence is unavailable"
-        ) from exc
+        raise RuntimeInventoryError("runtime inventory filesystem evidence is unavailable") from exc
