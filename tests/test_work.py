@@ -138,6 +138,6 @@ def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> Non
         queued = store.enqueue_work("local_sync", "stable-change", now=NOW)
         assert queued.status == "pending"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         stored_id = db.execute("SELECT installation_id FROM installation").fetchone()[0]
         assert stored_id == installation_id
