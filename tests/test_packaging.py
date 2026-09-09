@@ -72,9 +72,16 @@ def test_runtime_dependency_is_exactly_pinned_and_hashed() -> None:
         "websockets==17.1 \\",
         "--hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23",
     ]
-    assert (ROOT / "requirements-dev.txt").read_text().splitlines()[0] == (
-        "-r syncapp/requirements.txt"
+    assert "websockets" not in (ROOT / "requirements-dev.txt").read_text()
+
+
+def test_quality_ci_installs_runtime_hashes_separately() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert (
+        "python -m pip install --require-hashes -r syncapp/requirements.txt"
+        in workflow
     )
+    assert "python -m pip install -r requirements-dev.txt" in workflow
 
 
 def test_container_installs_only_locked_runtime_requirements() -> None:
