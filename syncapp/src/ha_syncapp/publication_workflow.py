@@ -42,7 +42,9 @@ def complete_authorized_publication(
         )
         pushed_commit = push_publication_intent(workspace, intent, before, token)
         if pushed_commit != intent.local_commit_sha:
-            raise PublicationWorkflowError("publication transport returned unexpected commit evidence")
+            raise PublicationWorkflowError(
+                "publication transport returned unexpected commit evidence"
+            )
 
         after = fetch_trusted_branch_head(
             intent.target,
