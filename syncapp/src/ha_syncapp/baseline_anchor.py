@@ -7,6 +7,7 @@ import re
 import shutil
 import stat
 import subprocess  # nosec B404
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 
@@ -85,10 +86,8 @@ def anchor_trusted_baseline(
         raise BaselineAnchorError("trusted baseline acquisition failed") from exc
     finally:
         _delete_fetch_ref(executable, tree, root)
-        try:
+        with suppress(OSError):
             askpass.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def _validate_remote(remote: BranchHead) -> None:
@@ -142,7 +141,13 @@ esac
     return path
 
 
-def _git_environment(executable: str, root: Path, *, token: str | None = None, askpass: Path | None = None) -> dict[str, str]:
+def _git_environment(
+    executable: str,
+    root: Path,
+    *,
+    token: str | None = None,
+    askpass: Path | None = None,
+) -> dict[str, str]:
     environment = {
         "PATH": os.path.dirname(executable),
         "HOME": str(root),
@@ -159,7 +164,14 @@ def _git_environment(executable: str, root: Path, *, token: str | None = None, a
 
 
 def _command(executable: str, arguments: tuple[str, ...]) -> list[str]:
-    return [executable, "-c", f"core.hooksPath={os.devnull}", "-c", "credential.helper=", *arguments]
+    return [
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        *arguments,
+    ]
 
 
 def _run_git(
@@ -211,7 +223,7 @@ def _branch_exists(executable: str, tree: Path, root: Path, branch: str) -> bool
 
 
 def _delete_fetch_ref(executable: str, tree: Path, root: Path) -> None:
-    try:
+    with suppress(OSError, subprocess.SubprocessError):
         subprocess.run(  # nosec B603
             _command(executable, ("update-ref", "-d", _FETCH_REF)),
             cwd=tree,
@@ -222,5 +234,3 @@ def _delete_fetch_ref(executable: str, tree: Path, root: Path) -> None:
             check=False,
             timeout=30,
         )
-    except (OSError, subprocess.SubprocessError):
-        pass
