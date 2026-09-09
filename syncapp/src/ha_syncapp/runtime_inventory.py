@@ -1,0 +1,268 @@
+"""Deterministic, integrity-bound staging for the README-defined runtime branch."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import stat
+import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+
+_HOMEASSISTANT_DEFAULTS: dict[str, object] = {
+    "entities": [],
+    "devices": [],
+    "integrations": [],
+    "areas": [],
+    "floors": [],
+    "labels": [],
+    "services": [],
+    "states": [],
+}
+_SUPERVISOR_DEFAULTS: dict[str, object] = {
+    "apps": [],
+    "repositories": [],
+    "backups": [],
+    "system": {},
+}
+_HARDWARE_DEFAULTS: dict[str, object] = {
+    "system": {},
+    "storage": {},
+    "network": {},
+}
+_ANALYSIS_DEFAULTS: dict[str, object] = {
+    "topology": {},
+    "dependencies": {},
+    "unavailable_entities": [],
+    "unknown_entities": [],
+    "orphan_entities": [],
+    "orphan_devices": [],
+    "integration_health": {},
+}
+_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+_MAX_JSON_DEPTH = 64
+
+
+class RuntimeInventoryError(RuntimeError):
+    """Runtime inventory evidence cannot be created or trusted safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeInventoryInput:
+    """Explicit already-collected datasets for one runtime inventory artifact."""
+
+    manifest: Mapping[str, object]
+    homeassistant: Mapping[str, object] = field(default_factory=dict)
+    supervisor: Mapping[str, object] = field(default_factory=dict)
+    hardware: Mapping[str, object] = field(default_factory=dict)
+    analysis: Mapping[str, object] = field(default_factory=dict)
+    deployments: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeInventoryFile:
+    """Integrity evidence for one staged runtime JSON file."""
+
+    path: str
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeInventoryArtifact:
+    """Immutable evidence for a complete staged runtime inventory."""
+
+    root: Path
+    artifact_id: str
+    files: tuple[RuntimeInventoryFile, ...]
+
+
+def build_runtime_inventory(
+    staging_root: Path,
+    inventory: RuntimeInventoryInput,
+) -> RuntimeInventoryArtifact:
+    """Build and verify one isolated deterministic runtime inventory artifact."""
+    _validate_staging_root(staging_root)
+    if type(inventory) is not RuntimeInventoryInput:
+        raise RuntimeInventoryError("runtime inventory input is invalid")
+
+    payloads = _inventory_payloads(inventory)
+    temporary = Path(tempfile.mkdtemp(prefix=".runtime-inventory-", dir=staging_root))
+    try:
+        evidence: list[RuntimeInventoryFile] = []
+        for relative_path, payload in sorted(payloads.items()):
+            encoded = _canonical_json(payload)
+            destination = temporary / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _write_file(destination, encoded)
+            evidence.append(
+                RuntimeInventoryFile(
+                    path=relative_path,
+                    sha256=hashlib.sha256(encoded).hexdigest(),
+                    size=len(encoded),
+                )
+            )
+        files = tuple(evidence)
+        artifact_id = _artifact_id(files)
+        destination_root = staging_root / artifact_id
+        if destination_root.exists() or destination_root.is_symlink():
+            raise RuntimeInventoryError("runtime inventory artifact destination already exists")
+        os.replace(temporary, destination_root)
+        artifact = RuntimeInventoryArtifact(destination_root, artifact_id, files)
+        verify_runtime_inventory(artifact)
+        return artifact
+    except Exception as exc:
+        if temporary.exists():
+            shutil.rmtree(temporary, ignore_errors=True)
+        if isinstance(exc, RuntimeInventoryError):
+            raise
+        raise RuntimeInventoryError("runtime inventory staging failed closed") from exc
+
+
+def verify_runtime_inventory(artifact: RuntimeInventoryArtifact) -> None:
+    """Reverify staged bytes and layout against immutable runtime evidence."""
+    if type(artifact) is not RuntimeInventoryArtifact:
+        raise RuntimeInventoryError("runtime inventory artifact evidence is invalid")
+    if not _COMMIT_SHA.fullmatch(artifact.artifact_id):
+        raise RuntimeInventoryError("runtime inventory artifact identifier is invalid")
+    if _artifact_id(artifact.files) != artifact.artifact_id:
+        raise RuntimeInventoryError("runtime inventory artifact evidence is inconsistent")
+
+    root_stat = _safe_lstat(artifact.root)
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise RuntimeInventoryError("runtime inventory root is not a safe directory")
+
+    expected = {entry.path: entry for entry in artifact.files}
+    observed: set[str] = set()
+    for directory, directory_names, file_names in os.walk(artifact.root, followlinks=False):
+        base = Path(directory)
+        for name in directory_names:
+            node = base / name
+            node_stat = _safe_lstat(node)
+            if not stat.S_ISDIR(node_stat.st_mode):
+                raise RuntimeInventoryError("runtime inventory contains an unsafe directory entry")
+        for name in file_names:
+            node = base / name
+            relative = node.relative_to(artifact.root).as_posix()
+            if relative in observed or relative not in expected:
+                raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
+            observed.add(relative)
+            node_stat = _safe_lstat(node)
+            if not stat.S_ISREG(node_stat.st_mode) or node_stat.st_nlink != 1:
+                raise RuntimeInventoryError("runtime inventory contains an unsafe file entry")
+            data = node.read_bytes()
+            entry = expected[relative]
+            if len(data) != entry.size or hashlib.sha256(data).hexdigest() != entry.sha256:
+                raise RuntimeInventoryError("runtime inventory staged bytes do not match evidence")
+    if observed != set(expected):
+        raise RuntimeInventoryError("runtime inventory file layout does not match evidence")
+
+
+def _inventory_payloads(inventory: RuntimeInventoryInput) -> dict[str, object]:
+    payloads: dict[str, object] = {"manifest.json": dict(inventory.manifest)}
+    _add_section(payloads, "homeassistant", inventory.homeassistant, _HOMEASSISTANT_DEFAULTS)
+    _add_section(payloads, "supervisor", inventory.supervisor, _SUPERVISOR_DEFAULTS)
+    _add_section(payloads, "hardware", inventory.hardware, _HARDWARE_DEFAULTS)
+    _add_section(payloads, "analysis", inventory.analysis, _ANALYSIS_DEFAULTS)
+
+    for commit_sha, payload in inventory.deployments.items():
+        if not isinstance(commit_sha, str) or not _COMMIT_SHA.fullmatch(commit_sha):
+            raise RuntimeInventoryError("runtime deployment record commit is invalid")
+        payloads[f"deployments/{commit_sha}.json"] = payload
+    return payloads
+
+
+def _add_section(
+    payloads: dict[str, object],
+    directory: str,
+    supplied: Mapping[str, object],
+    defaults: Mapping[str, object],
+) -> None:
+    unknown = set(supplied) - set(defaults)
+    if unknown or any(not isinstance(key, str) for key in supplied):
+        raise RuntimeInventoryError("runtime inventory section contains unsupported dataset keys")
+    for name, default in defaults.items():
+        payloads[f"{directory}/{name}.json"] = supplied.get(name, default)
+
+
+def _canonical_json(value: object) -> bytes:
+    _validate_json_value(value, depth=0)
+    try:
+        rendered = json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RuntimeInventoryError("runtime inventory contains invalid JSON data") from exc
+    return (rendered + "\n").encode("utf-8")
+
+
+def _validate_json_value(value: object, *, depth: int) -> None:
+    if depth > _MAX_JSON_DEPTH:
+        raise RuntimeInventoryError("runtime inventory JSON nesting is too deep")
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise RuntimeInventoryError("runtime inventory contains a non-finite number")
+        return
+    if isinstance(value, list):
+        for item in value:
+            _validate_json_value(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise RuntimeInventoryError("runtime inventory object keys must be strings")
+            _validate_json_value(item, depth=depth + 1)
+        return
+    raise RuntimeInventoryError("runtime inventory contains a non-JSON value")
+
+
+def _artifact_id(files: tuple[RuntimeInventoryFile, ...]) -> str:
+    digest = hashlib.sha1(usedforsecurity=False)
+    for entry in files:
+        digest.update(entry.path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(entry.sha256.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(entry.size).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _write_file(path: Path, data: bytes) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as destination:
+            destination.write(data)
+            destination.flush()
+            os.fsync(destination.fileno())
+    finally:
+        os.close(descriptor)
+
+
+def _validate_staging_root(staging_root: Path) -> None:
+    if not isinstance(staging_root, Path) or not staging_root.is_absolute():
+        raise RuntimeInventoryError("runtime inventory staging root is invalid")
+    node_stat = _safe_lstat(staging_root)
+    if not stat.S_ISDIR(node_stat.st_mode):
+        raise RuntimeInventoryError("runtime inventory staging root is not a safe directory")
+
+
+def _safe_lstat(path: Path) -> os.stat_result:
+    try:
+        return path.lstat()
+    except OSError as exc:
+        raise RuntimeInventoryError("runtime inventory filesystem evidence is unavailable") from exc
