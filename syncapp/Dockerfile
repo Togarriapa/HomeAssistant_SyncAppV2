@@ -1,6 +1,6 @@
 FROM python:3.12.14-slim-bookworm
 
-ARG BUILD_VERSION=0.1.0
+ARG BUILD_VERSION=0.2.0
 ARG BUILD_ARCH
 
 LABEL io.hass.version="${BUILD_VERSION}" \
@@ -11,6 +11,10 @@ LABEL io.hass.version="${BUILD_VERSION}" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y git openssh-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY src/ /app/

@@ -2,15 +2,18 @@
 
 ## Implementation status
 
-The initial **0.1.0 experimental foundation** implements strict app options,
-protected persistent lifecycle state, exclusive process locking, restart
-detection, structured logs and automated tests/CI. It is a passive service;
-synchronization, candidate deployment, backup/rollback and the Retrigger Work
-Cron Job are not implemented yet. The sections below define the full target.
+The **0.2.0 experimental increment** adds SSH deploy key generation/testing/refresh,
+an admin setup panel, explicit five-branch initialization, byte-preserving local
+configuration sync, durable retries and hourly recovery scans. Automatic sync is
+blocked until initialization succeeds. Configuration remains mounted read-only:
+candidate deployment, backup/rollback and database/runtime/log exports are still
+in development. The sections below define the full target, not a claim that every
+target capability is implemented.
 
 See [app documentation](syncapp/DOCS.md), [development instructions](docs/development.md)
 and [architecture and next increments](docs/architecture.md). Initial delivery is
-tracked in [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1).
+tracked in [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1);
+MVP work continues in [epic #7](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/7).
 
 ## Overview
 

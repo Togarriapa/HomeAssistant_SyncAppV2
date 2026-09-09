@@ -1,9 +1,11 @@
-"""Passive app lifecycle; no external systems are accessed."""
+"""Signal-safe lifecycle and serialized worker with an admin ingress control panel."""
 
 import argparse
 import json
+import os
 import signal
 import sys
+import threading
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -11,7 +13,11 @@ from pathlib import Path
 from types import FrameType
 
 from . import __version__
+from .application import Application
 from .config import ConfigError, load_config
+from .control import make_server
+from .homeassistant import HomeAssistant
+from .journal import Journal
 from .state import AlreadyRunning, StateError, StateStore
 
 
@@ -42,25 +48,55 @@ class Shutdown:
         return self.requested
 
 
-def run(data_dir: Path, stop: Shutdown) -> None:
+def run(data_dir: Path, stop: Shutdown, config_dir: Path = Path("/homeassistant")) -> None:
     config = load_config(data_dir / "options.json")
     with StateStore(data_dir) as store:
         boot = store.start_run()
-        fields = {**asdict(boot), "version": __version__, "mode": "passive"}
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        mode = "setup" if token else "passive"
+        application = None
+        server = None
+        thread = None
+        if token:
+            application = Application(
+                config,
+                data_dir / "syncapp",
+                config_dir,
+                Journal(store.connection),
+                HomeAssistant(token),
+            )
+            # Only the Supervisor ingress peer is accepted by the HTTP handler.
+            server = make_server(application.control, ("0.0.0.0", 8099))  # nosec B104
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+        fields = {**asdict(boot), "version": __version__, "mode": mode}
         level = "warning" if boot.interrupted_run_id else "info"
         if config.log_level == "info" or (config.log_level == "warning" and level == "warning"):
             emit("service_started", level=level, **fields)
-        while not stop.wait(config.status_interval_seconds):
-            if config.log_level == "info":
-                emit("service_idle", run_id=boot.run_id, mode="passive")
+        next_status = time.monotonic() + config.status_interval_seconds
+        try:
+            while not stop.wait(0.25 if application else config.status_interval_seconds):
+                if application:
+                    application.step()
+                if time.monotonic() >= next_status:
+                    if config.log_level == "info":
+                        emit("service_idle", run_id=boot.run_id, mode=mode)
+                    next_status = time.monotonic() + config.status_interval_seconds
+        finally:
+            if server:
+                server.shutdown()
+                server.server_close()
+            if thread:
+                thread.join(timeout=5)
         store.finish_run()
         if config.log_level == "info":
             emit("service_stopped", run_id=boot.run_id)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Home Assistant SyncApp foundation service")
+    parser = argparse.ArgumentParser(description="Home Assistant SyncApp V2")
     parser.add_argument("--data-dir", type=Path, default=Path("/data"))
+    parser.add_argument("--config-dir", type=Path, default=Path("/homeassistant"))
     args = parser.parse_args()
     stop = Shutdown()
 
@@ -70,7 +106,7 @@ def main() -> int:
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, request_stop)
     try:
-        run(args.data_dir, stop)
+        run(args.data_dir, stop, args.config_dir)
     except ConfigError:
         emit("service_failed", level="error", reason="configuration_invalid")
         return 2

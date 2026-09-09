@@ -68,3 +68,35 @@ def test_malformed_or_ambiguous_options_are_rejected(tmp_path: Path, contents: b
 def test_missing_options_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         load_config(tmp_path / "missing.json")
+
+
+def test_repository_options_and_secret_representation(tmp_path: Path) -> None:
+    config = load_config(
+        write_options(
+            tmp_path,
+            {
+                "repository": "owner/repo",
+                "github_metadata_token": "secret_sentinel",
+                "sync_interval_seconds": 60,
+                "retrigger_interval_seconds": 3600,
+            },
+        )
+    )
+    assert config.repository == "owner/repo"
+    assert config.github_metadata_token == "secret_sentinel"
+    assert "secret_sentinel" not in repr(config)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"repository": "https://github.com/owner/repo"},
+        {"repository": "a/.."},
+        {"github_metadata_token": "bad\nheader"},
+        {"sync_interval_seconds": True},
+        {"retrigger_interval_seconds": 0},
+    ],
+)
+def test_unsafe_repository_options_are_rejected(tmp_path: Path, options: dict) -> None:
+    with pytest.raises(ConfigError):
+        load_config(write_options(tmp_path, options))

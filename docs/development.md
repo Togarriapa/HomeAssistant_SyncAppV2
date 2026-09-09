@@ -8,8 +8,8 @@ by [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1),
 ## Local checks
 
 Use Linux and Python 3.12. Linux file locking is part of the runtime contract.
-The service uses only the Python standard library. Development dependencies are
-pinned separately and are not installed in the app image.
+The service uses the Python standard library plus Git and OpenSSH command-line
+programs installed in the image. Development dependencies are pinned separately.
 
 ```sh
 python3 -m venv .venv
@@ -41,9 +41,10 @@ python3 scripts/container_smoke.py
 ```
 
 Use `BUILD_ARCH=aarch64` on an arm64 Linux host. CI builds natively on both
-architectures, starts the image without networking, stops it and restarts it with
-the same `/data` to verify identity persistence. These are container tests, not
-Supervisor or physical Raspberry Pi certification.
+architectures, verifies identity persistence across restarts, and exercises offline
+setup, Ed25519 generation, raw Git transfers and non-ingress denial in the actual
+image. These are container tests, not physical Home Assistant OS certification.
+Never add real credentials or configuration fixtures to this public repository.
 
 ## TDD and integration
 

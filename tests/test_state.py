@@ -8,6 +8,26 @@ import pytest
 from ha_syncapp.state import AlreadyRunning, StateError, StateStore
 
 
+def test_foundation_schema_migrates_without_losing_identity_or_interrupted_run(
+    tmp_path: Path,
+) -> None:
+    with StateStore(tmp_path) as store:
+        before = store.start_run()
+    path = tmp_path / "syncapp/state.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE values_store")
+        db.execute("DROP TABLE jobs")
+        db.execute("DROP TABLE events")
+        db.execute("PRAGMA user_version = 1")
+    with StateStore(tmp_path) as store:
+        after = store.start_run()
+        assert after.installation_id == before.installation_id
+        assert after.interrupted_run_id == before.run_id
+        assert after.boot_count == 2
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        store.finish_run()
+
+
 def test_identity_and_clean_shutdown_survive_reopening(tmp_path: Path) -> None:
     with StateStore(tmp_path) as store:
         first = store.start_run()

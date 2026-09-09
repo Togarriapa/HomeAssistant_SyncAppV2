@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SyncApp · Repo B</title><link rel="stylesheet" href="app.css"><script src="app.js" defer></script></head>
+<body><main>
+<header><div><p class="eyebrow">HOME ASSISTANT SYNCAPP V2</p><h1>Your home, safely in sync.</h1>
+<p id="repository">Loading repository settings…</p></div><span id="state" class="badge">Connecting</span></header>
+<p id="notice" role="status" aria-live="polite">Connecting to SyncApp…</p>
+<section><div class="section-heading"><span class="step">1</span><div><h2>Connect a private repository</h2>
+<p>Create an empty private GitHub repository. Set <code>repository</code> to <code>owner/name</code> in this app’s Configuration tab.</p></div></div>
+<p>Set <code>github_metadata_token</code> to a fine-grained token restricted to this repository with read-only Metadata permission. It checks privacy and repository identity. All Git transfers use your SSH deploy key.</p></section>
+<section><div class="section-heading"><span class="step">2</span><div><h2>Set up the deploy key</h2>
+<p>Generate a key, then add its public key in Repo B → Settings → Deploy keys. Select “Allow write access”.</p></div></div>
+<div class="buttons"><button data-action="generate">Generate Key</button><button data-action="test">Test Key</button><button data-action="activate">Activate Tested Key</button><button class="secondary" data-action="refresh">Refresh Key</button></div>
+<label for="public-key">Public key to add to GitHub</label><textarea id="public-key" rows="4" readonly spellcheck="false" placeholder="Generate a deploy key to begin"></textarea>
+<button id="copy" class="secondary">Copy public key</button><p id="fingerprint" class="mono"></p>
+<p id="active-key"></p><p id="previous-key"></p>
+<p class="hint">Refresh prepares a replacement. The current key stays active until the replacement passes its test and you activate it. The private key stays inside SyncApp.</p></section>
+<section><div class="section-heading"><span class="step">3</span><div><h2>Initialize Repo B</h2>
+<p>Make the initial push of your running configuration and create <code>main</code>, <code>candidate</code>, <code>database</code>, <code>runtime</code> and <code>logs</code>.</p></div></div>
+<button data-action="initialize">Initialize Repo</button><p class="hint">Automatic synchronization stays blocked until initialization succeeds. Repo B must be empty and private; Home Assistant must be healthy.</p></section>
+<section><h2>Operations</h2><dl><div><dt>Current main</dt><dd id="main-sha">—</dd></div><div><dt>Candidate</dt><dd id="candidate-sha">—</dd></div></dl>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Status</th><th>Details</th><th>Action</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+<footer>Proposals belong on <code>candidate</code>. Repo B contains your real configuration and secrets: keep it private.</footer>
+</main></body></html>

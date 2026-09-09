@@ -1,7 +1,7 @@
 name: Home Assistant SyncApp V2
-version: "0.1.0"
+version: "0.2.0"
 slug: homeassistant_syncapp_v2
-description: Experimental passive foundation for safe Home Assistant synchronization
+description: Private SSH repository setup and byte-preserving configuration synchronization
 url: https://github.com/Togarriapa/HomeAssistant_SyncAppV2
 arch:
   - aarch64
@@ -13,9 +13,28 @@ init: true
 apparmor: true
 backup: cold
 timeout: 15
+map:
+  - type: homeassistant_config
+    read_only: true
+    path: /homeassistant
+hassio_api: true
+homeassistant_api: true
+hassio_role: homeassistant
+ingress: true
+ingress_port: 8099
+panel_admin: true
+panel_icon: mdi:source-repository
 options:
   log_level: info
   status_interval_seconds: 300
+  repository: ""
+  github_metadata_token: ""
+  sync_interval_seconds: 60
+  retrigger_interval_seconds: 3600
 schema:
   log_level: list(info|warning|error)
   status_interval_seconds: int(30,3600)
+  repository: str
+  github_metadata_token: password
+  sync_interval_seconds: int(30,3600)
+  retrigger_interval_seconds: int(60,86400)

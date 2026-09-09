@@ -14,7 +14,9 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 1
+from .journal import migrate
+
+SCHEMA_VERSION = 2
 
 
 class StateError(RuntimeError):
@@ -122,6 +124,11 @@ class StateStore:
             raise StateError("State is not open")
         return self._db
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Internal journal access while the lifetime lock is held."""
+        return self._connection
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         # Check sidecars before SQLite can follow them during crash recovery.
@@ -141,7 +148,7 @@ class StateStore:
         self._db = sqlite3.connect(path, timeout=5)
         db = self._connection
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (created and version == 0):
+        if version not in (1, SCHEMA_VERSION) and not (created and version == 0):
             raise StateError("Unsupported state schema")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
@@ -168,6 +175,14 @@ class StateStore:
             finally:
                 os.close(root_fd)
         self._identity()
+        if db.execute("PRAGMA user_version").fetchone()[0] == 1:
+            migrate(db)
+        db.execute("SELECT key, value FROM values_store LIMIT 0")
+        db.execute("SELECT id, time, event, details FROM events LIMIT 0")
+        db.execute(
+            "SELECT id, kind, job_key, status, attempts, due, phase, payload, error, created "
+            "FROM jobs LIMIT 0"
+        )
 
     def _identity(self) -> tuple[str, int, str | None]:
         rows = self._connection.execute(
