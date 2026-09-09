@@ -95,6 +95,10 @@ def complete_publication_recovery(
         current = store.synchronization_baseline(intent.target, intent.branch)
         if current is None or current.commit_sha != intent.prior_baseline_commit_sha:
             if current is not None and current.commit_sha == intent.local_commit_sha:
+                if current.snapshot_id != snapshot_id:
+                    raise PublicationRecoveryError(
+                        "publication recovery persisted snapshot identity changed"
+                    )
                 return current
             raise PublicationRecoveryError("publication recovery baseline changed unexpectedly")
         recorded = store.record_synchronization_baseline(
