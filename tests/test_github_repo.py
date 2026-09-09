@@ -106,8 +106,9 @@ def test_oversized_or_malformed_metadata_is_rejected(monkeypatch: pytest.MonkeyP
             self._body = BytesIO(body)
 
     for body in (b"{" + b"x" * 65536, b"not-json"):
-        monkeypatch.setattr(
-            "ha_syncapp.github_repo.urlopen", lambda request, timeout: RawResponse(body)
-        )
+        def respond(request: Request, timeout: float, payload: bytes = body) -> RawResponse:
+            return RawResponse(payload)
+
+        monkeypatch.setattr("ha_syncapp.github_repo.urlopen", respond)
         with pytest.raises(RepositoryVerificationError):
             fetch_and_verify_private_repository("Owner/Home", "secret-sentinel")
