@@ -70,5 +70,7 @@ def record_verified_publication(
         or baseline.snapshot_id != snapshot_id
         or baseline.commit_sha != trusted_result.commit_sha
     ):
-        raise PublicationStateError("persisted publication baseline does not match verified evidence")
+        raise PublicationStateError(
+            "persisted publication baseline does not match verified evidence"
+        )
     return baseline
