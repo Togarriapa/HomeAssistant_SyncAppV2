@@ -5,6 +5,7 @@ from urllib.request import Request
 
 import pytest
 from ha_syncapp.github_repo import (
+    BranchAbsence,
     BranchHead,
     RepositoryVerificationError,
     fetch_optional_trusted_branch_head,
@@ -57,7 +58,7 @@ def test_trusted_branch_head_reverifies_repo_and_returns_exact_sha(
     )
 
 
-def test_optional_branch_absence_is_returned_only_after_repo_reverification(
+def test_optional_branch_absence_is_identity_bound_after_repo_reverification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[Request] = []
@@ -76,9 +77,9 @@ def test_optional_branch_absence_is_returned_only_after_repo_reverification(
 
     monkeypatch.setattr("ha_syncapp.github_repo.urlopen", fake_urlopen)
 
-    head = fetch_optional_trusted_branch_head("Owner/Home", "secret", expected_id=42)
+    state = fetch_optional_trusted_branch_head("Owner/Home", "secret", expected_id=42)
 
-    assert head is None
+    assert state == BranchAbsence("Owner/Home", 42, "main")
     assert [request.full_url for request in requests] == [
         "https://api.github.com/repos/Owner/Home",
         "https://api.github.com/repos/Owner/Home/branches/main",
