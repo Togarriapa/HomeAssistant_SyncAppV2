@@ -41,7 +41,7 @@ def local_sync_work_key(target: str, branch: str = "main") -> str:
     """Return a deterministic bounded identity for one repository branch."""
     if not isinstance(target, str) or not target or not isinstance(branch, str) or not branch:
         raise LocalSyncWorkError("local synchronization work identity is invalid")
-    payload = f"{target.casefold()}\0{branch}".encode("utf-8")
+    payload = f"{target.casefold()}\0{branch}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -87,7 +87,9 @@ def execute_claimed_local_sync_work(
         try:
             failed = store.fail_work(item, transient=True)
         except StateError as exc:
-            raise LocalSyncWorkError("local synchronization retry state could not be recorded") from exc
+            raise LocalSyncWorkError(
+                "local synchronization retry state could not be recorded"
+            ) from exc
         return LocalSyncWorkResult(failed, None)
 
     try:
@@ -98,7 +100,9 @@ def execute_claimed_local_sync_work(
         else:
             raise LocalSyncWorkError("local synchronization returned an unknown disposition")
     except StateError as exc:
-        raise LocalSyncWorkError("local synchronization work outcome could not be recorded") from exc
+        raise LocalSyncWorkError(
+            "local synchronization work outcome could not be recorded"
+        ) from exc
     return LocalSyncWorkResult(transitioned, synchronization)
 
 
