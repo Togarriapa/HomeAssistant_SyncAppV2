@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from ha_syncapp.local_sync import (
@@ -70,34 +69,8 @@ def claim_local_sync_work(
     """Atomically claim only the oldest eligible Local-sync item."""
     if type(store) is not StateStore:
         raise LocalSyncWorkError("local synchronization work state store is invalid")
-    current_time = now or datetime.now(UTC)
-    if current_time.tzinfo is None or current_time.utcoffset() is None:
-        raise LocalSyncWorkError("local synchronization claim time is invalid")
-    current = current_time.astimezone(UTC).isoformat()
     try:
-        with store._connection as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
-                "next_attempt_at FROM work WHERE work_kind = ? "
-                "AND status IN ('pending','retry') AND next_attempt_at <= ? "
-                "ORDER BY next_attempt_at, created_at, work_key LIMIT 1",
-                (_WORK_KIND, current),
-            ).fetchone()
-            if row is None:
-                return None
-            item = store._work_from_row(row)
-            result = db.execute(
-                "UPDATE work SET status = 'running', attempts = attempts + 1, "
-                "updated_at = ?, next_attempt_at = NULL "
-                "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
-                (current, item.work_kind, item.work_key, item.status, item.attempts),
-            )
-            if result.rowcount != 1:
-                raise LocalSyncWorkError("local synchronization work claim changed unexpectedly")
-        return store._get_work(item.work_kind, item.work_key)
-    except sqlite3.Error as exc:
-        raise LocalSyncWorkError("local synchronization work could not be claimed") from exc
+        return store.claim_work_kind(_WORK_KIND, now=now)
     except StateError as exc:
         raise LocalSyncWorkError("local synchronization work claim is invalid") from exc
 
