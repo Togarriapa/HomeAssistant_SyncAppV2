@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 
 import pytest
-
 from ha_syncapp.github_repo import BranchHead
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
@@ -9,7 +8,6 @@ from ha_syncapp.publication_preflight import (
     assess_publication_preflight,
 )
 from ha_syncapp.state import SynchronizationBaseline
-
 
 LOCAL = "b" * 40
 BASELINE = "a" * 40
