@@ -63,7 +63,7 @@ def assess_publication_preflight(
     if baseline is None:
         disposition = (
             PublicationDisposition.SAFE_TO_INITIALIZE
-            if type(remote) is BranchAbsence
+            if isinstance(remote, BranchAbsence)
             else PublicationDisposition.BASELINE_REQUIRED
         )
         return PublicationPreflight(
@@ -85,7 +85,7 @@ def assess_publication_preflight(
     if _COMMIT_SHA.fullmatch(baseline.commit_sha) is None:
         raise PublicationPreflightError("baseline commit identity is invalid")
 
-    if type(remote) is BranchAbsence:
+    if isinstance(remote, BranchAbsence):
         return PublicationPreflight(
             disposition=PublicationDisposition.REMOTE_MISSING,
             target=remote.target,
@@ -119,7 +119,7 @@ def assess_publication_preflight(
 
 
 def _validate_remote_evidence(remote: BranchHead | BranchAbsence) -> None:
-    if type(remote) not in {BranchHead, BranchAbsence}:
+    if not isinstance(remote, (BranchHead, BranchAbsence)):
         raise PublicationPreflightError("trusted remote branch evidence is invalid")
     if type(remote.repository_id) is not int or remote.repository_id <= 0:
         raise PublicationPreflightError("trusted remote repository identity is invalid")
@@ -127,11 +127,11 @@ def _validate_remote_evidence(remote: BranchHead | BranchAbsence) -> None:
         raise PublicationPreflightError("trusted remote repository target is invalid")
     if not all(remote.target.split("/")) or not isinstance(remote.branch, str) or not remote.branch:
         raise PublicationPreflightError("trusted remote branch identity is invalid")
-    if type(remote) is BranchHead and _COMMIT_SHA.fullmatch(remote.commit_sha) is None:
+    if isinstance(remote, BranchHead) and _COMMIT_SHA.fullmatch(remote.commit_sha) is None:
         raise PublicationPreflightError("trusted remote commit identity is invalid")
 
 
 def _remote_commit_sha(remote: BranchHead | BranchAbsence) -> str | None:
-    if type(remote) is BranchHead:
+    if isinstance(remote, BranchHead):
         return remote.commit_sha
     return None
