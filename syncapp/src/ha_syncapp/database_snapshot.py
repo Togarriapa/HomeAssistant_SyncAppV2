@@ -36,7 +36,8 @@ def capture_sqlite_snapshot(source: Path, staging_root: Path) -> DatabaseSnapsho
         canonical_source = source.resolve(strict=True)
         _verify_path_identity(source, source_identity)
         staging = _trusted_directory(staging_root, "database staging")
-        if staging == canonical_source.parent or staging in canonical_source.parents:
+        source_root = canonical_source.parent
+        if staging == source_root or source_root in staging.parents or staging in source_root.parents:
             raise DatabaseSnapshotError("database staging overlaps the source tree")
 
         work_root = staging / f".snapshot-database-{uuid.uuid4().hex}.tmp"
