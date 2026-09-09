@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 MAX_OPTIONS_BYTES = 65536
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
@@ -88,11 +89,9 @@ def load_config(path: Path) -> Config:
         raise ConfigError("Invalid Repo B target")
     if github_token is not None and not _valid_token(github_token):
         raise ConfigError("Invalid GitHub authentication")
-    assert repo_b is None or isinstance(repo_b, str)
-    assert github_token is None or isinstance(github_token, str)
     return Config(
         log_level=level,
         status_interval_seconds=interval,
-        repo_b=repo_b,
-        github_token=github_token,
+        repo_b=cast(str | None, repo_b),
+        github_token=cast(str | None, github_token),
     )
