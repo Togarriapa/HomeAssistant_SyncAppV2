@@ -116,7 +116,12 @@ def test_readme_path_examples_establish_risk_floor(path: str, expected: str) -> 
 
     assert result.level == expected
     assert result.changed_paths == (path,)
-    verify_candidate_risk_classification(result, dependencies, _impact(dependencies, runtime), runtime)
+    verify_candidate_risk_classification(
+        result,
+        dependencies,
+        _impact(dependencies, runtime),
+        runtime,
+    )
 
 
 def test_dynamic_candidate_reference_raises_low_path_to_high() -> None:
