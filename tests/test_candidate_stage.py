@@ -74,7 +74,7 @@ def test_stages_exact_candidate_tree_and_reverifies_integrity(
     home_sentinel = home_root / "configuration.yaml"
     home_sentinel.write_text("live: untouched\n", encoding="utf-8")
     raw_tree = (
-        f"100644 blob {OID_A}\tconfiguration.yaml\0100755 blob {OID_B}\tscripts/tool.sh\0"
+        f"100644 blob {OID_A}\tconfiguration.yaml\x00100755 blob {OID_B}\tscripts/tool.sh\x00"
     ).encode()
     calls = _install_git_fakes(
         monkeypatch,
@@ -107,7 +107,7 @@ def test_manifest_and_entries_are_deterministic_regardless_of_git_tree_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fetch_root, staging_root, home_root = _roots(tmp_path)
-    raw_tree = (f"100644 blob {OID_B}\tz.yaml\0100644 blob {OID_A}\ta.yaml\0").encode()
+    raw_tree = (f"100644 blob {OID_B}\tz.yaml\x00100644 blob {OID_A}\ta.yaml\x00").encode()
     _install_git_fakes(
         monkeypatch,
         raw_tree=raw_tree,
@@ -128,7 +128,7 @@ def test_stage_verification_detects_staged_file_tampering(
     fetch_root, staging_root, home_root = _roots(tmp_path)
     _install_git_fakes(
         monkeypatch,
-        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\x00".encode(),
         blobs={OID_A: b"safe\n"},
     )
     stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
@@ -145,7 +145,7 @@ def test_stage_verification_detects_manifest_tampering(
     fetch_root, staging_root, home_root = _roots(tmp_path)
     _install_git_fakes(
         monkeypatch,
-        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\x00".encode(),
         blobs={OID_A: b"safe\n"},
     )
     stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
@@ -162,7 +162,7 @@ def test_stage_verification_rejects_unexpected_empty_directory(
     fetch_root, staging_root, home_root = _roots(tmp_path)
     _install_git_fakes(
         monkeypatch,
-        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\x00".encode(),
         blobs={OID_A: b"safe\n"},
     )
     stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
@@ -181,7 +181,7 @@ def test_stage_verification_rejects_hardlinked_file(
     fetch_root, staging_root, home_root = _roots(tmp_path)
     _install_git_fakes(
         monkeypatch,
-        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\x00".encode(),
         blobs={OID_A: b"safe\n"},
     )
     stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
@@ -199,14 +199,14 @@ def test_stage_verification_rejects_hardlinked_file(
 @pytest.mark.parametrize(
     "raw_tree",
     [
-        f"120000 blob {OID_A}\tlink\0".encode(),
-        f"160000 commit {OID_A}\tcustom_components/dep\0".encode(),
-        f"100644 blob {OID_A}\t../escape\0".encode(),
-        f"100644 blob {OID_A}\t/configuration.yaml\0".encode(),
-        f"100644 blob {OID_A}\t.storage/.git/config\0".encode(),
-        f"100644 blob {OID_A}\ta//b\0".encode(),
-        f"100644 blob {OID_A}\ta/./b\0".encode(),
-        f"100644 blob {OID_A}\ta/../b\0".encode(),
+        f"120000 blob {OID_A}\tlink\x00".encode(),
+        f"160000 commit {OID_A}\tcustom_components/dep\x00".encode(),
+        f"100644 blob {OID_A}\t../escape\x00".encode(),
+        f"100644 blob {OID_A}\t/configuration.yaml\x00".encode(),
+        f"100644 blob {OID_A}\t.storage/.git/config\x00".encode(),
+        f"100644 blob {OID_A}\ta//b\x00".encode(),
+        f"100644 blob {OID_A}\ta/./b\x00".encode(),
+        f"100644 blob {OID_A}\ta/../b\x00".encode(),
     ],
 )
 def test_rejects_unsafe_or_unsupported_tree_entries_and_cleans_up(
@@ -228,7 +228,7 @@ def test_rejects_duplicate_tree_paths_and_cleans_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fetch_root, staging_root, home_root = _roots(tmp_path)
-    raw_tree = (f"100644 blob {OID_A}\ta.yaml\0100644 blob {OID_B}\ta.yaml\0").encode()
+    raw_tree = (f"100644 blob {OID_A}\ta.yaml\x00100644 blob {OID_B}\ta.yaml\x00").encode()
     _install_git_fakes(monkeypatch, raw_tree=raw_tree, blobs={OID_A: b"a", OID_B: b"b"})
 
     with pytest.raises(CandidateStageError, match="duplicate path"):
@@ -240,9 +240,9 @@ def test_rejects_duplicate_tree_paths_and_cleans_up(
 @pytest.mark.parametrize(
     "raw_tree",
     [
-        b"not-a-tree-record\0",
-        b"100644 blob bad\tconfig.yaml\0",
-        b"100644 blob " + OID_A.encode() + b"\tbad\xffname\0",
+        b"not-a-tree-record\x00",
+        b"100644 blob bad\tconfig.yaml\x00",
+        b"100644 blob " + OID_A.encode() + b"\tbad\xffname\x00",
     ],
 )
 def test_rejects_malformed_git_tree_output(
@@ -264,7 +264,7 @@ def test_blob_failure_cleans_partial_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fetch_root, staging_root, home_root = _roots(tmp_path)
-    raw_tree = (f"100644 blob {OID_A}\ta.yaml\0100644 blob {OID_B}\tb.yaml\0").encode()
+    raw_tree = (f"100644 blob {OID_A}\ta.yaml\x00100644 blob {OID_B}\tb.yaml\x00").encode()
     _install_git_fakes(monkeypatch, raw_tree=raw_tree, blobs={OID_A: b"a"})
 
     with pytest.raises(CandidateStageError, match="Git command failed"):
@@ -318,7 +318,7 @@ def test_shared_private_parent_can_hold_fetch_and_stage_siblings(
     home_root.chmod(0o700)
     _install_git_fakes(
         monkeypatch,
-        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\x00".encode(),
         blobs={OID_A: b"safe\n"},
     )
 
