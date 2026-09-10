@@ -91,9 +91,7 @@ def test_configured_service_starts_bridge_after_trust_and_normal_bootstraps(
         return bridge
 
     monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
-    monkeypatch.setattr(
-        "ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap
-    )
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap)
     monkeypatch.setattr("ha_syncapp.__main__._runtime_event_bridge_if_configured", build_bridge)
 
     run(tmp_path, stop)
