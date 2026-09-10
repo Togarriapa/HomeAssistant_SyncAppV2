@@ -112,10 +112,8 @@ class RuntimeEventWorker:
             loop = self._loop
             stop = self._async_stop
         if loop is not None and stop is not None:
-            try:
+            with suppress(RuntimeError):
                 loop.call_soon_threadsafe(stop.set)
-            except RuntimeError:
-                pass
 
     def join(
         self,
@@ -141,13 +139,7 @@ class RuntimeEventWorker:
         try:
             result = asyncio.run(self._run())
         except BaseException:
-            result = RuntimeEventWorkerResult(
-                reason=RuntimeEventWorkerReason.FAILED,
-                attempts=0,
-                reconnects=0,
-                events_forwarded=0,
-                readiness_signals=0,
-            )
+            result = _result(RuntimeEventWorkerReason.FAILED, 0, 0, 0, 0)
         with self._lock:
             self._loop = None
             self._async_stop = None
