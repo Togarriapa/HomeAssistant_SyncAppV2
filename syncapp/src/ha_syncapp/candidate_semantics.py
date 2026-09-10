@@ -34,7 +34,7 @@ from .runtime_inventory import RuntimeInventoryInput
 # Updated together with the pinned official Core image and actual-image CI fixtures.
 BUNDLED_CORE_VERSION = "2026.9.1"
 _VALIDATOR = "homeassistant.check_config.fail_on_warnings"
-_CORE_PYTHON = "/usr/local/bin/python3"
+_VALIDATOR_PYTHON = "/opt/syncapp-validator/python3"
 _TIMEOUT_SECONDS = 180
 _MAX_STAGE_BYTES = 128 * 1024 * 1024
 _MAX_YAML_BYTES = 4 * 1024 * 1024
@@ -237,7 +237,7 @@ def _verify_copy(stage: CandidateStage, config: Path) -> None:
 def _run_validator(config: Path, version: str) -> None:
     nonce = secrets.token_hex(32)
     command = [
-        _CORE_PYTHON,
+        _VALIDATOR_PYTHON,
         "-I",
         "-B",
         str(Path(__file__).with_name("_validator_child.py")),
@@ -254,8 +254,9 @@ def _run_validator(config: Path, version: str) -> None:
         "OMP_NUM_THREADS": "1",
     }
     # The helper suppresses Core output at the descriptor level and writes one tiny receipt.
-    # A file, not a pipe, also bounds memory if a broken helper emits excessive output.
-    with tempfile.TemporaryFile() as receipt:
+    # Keep that file under the disposable candidate parent so the child AppArmor profile needs
+    # no access to unrelated /tmp content.
+    with tempfile.TemporaryFile(dir=config.parent) as receipt:
         with subprocess.Popen(  # nosec B603
             command,
             stdin=subprocess.DEVNULL,
