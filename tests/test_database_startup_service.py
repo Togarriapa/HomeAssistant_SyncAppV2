@@ -148,9 +148,7 @@ def test_service_orders_database_between_local_and_runtime(
     order: list[str] = []
     stop_after_runtime = service.Shutdown()
 
-    def verify(
-        target: str, token: str, *, expected_id: int | None = None
-    ) -> RepoIdentity:
+    def verify(target: str, token: str, *, expected_id: int | None = None) -> RepoIdentity:
         assert target == TARGET
         assert token == TOKEN
         order.append("trust")
@@ -196,9 +194,7 @@ def test_shutdown_after_database_bootstrap_skips_runtime(
     monkeypatch.setattr(
         service,
         "fetch_and_verify_private_repository",
-        lambda target, token, expected_id=None: RepoIdentity(
-            target=target, repository_id=123
-        ),
+        lambda target, token, expected_id=None: RepoIdentity(target=target, repository_id=123),
     )
     monkeypatch.setattr(service, "_run_startup_local_if_configured", lambda *args: None)
 
