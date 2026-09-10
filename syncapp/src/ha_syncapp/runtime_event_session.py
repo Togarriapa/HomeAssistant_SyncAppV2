@@ -28,7 +28,9 @@ class RuntimeEventSession:
         try:
             schedule_runtime_sync_generation(self._store, self._target, now=now)
         except RuntimeSyncScheduleError as exc:
-            raise RuntimeEventSessionError("runtime event baseline scheduling failed closed") from exc
+            raise RuntimeEventSessionError(
+                "runtime event baseline scheduling failed closed"
+            ) from exc
 
     async def event(
         self,
