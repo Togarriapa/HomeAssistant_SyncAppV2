@@ -12,8 +12,11 @@ from .candidate_stage import CandidateStage, CandidateStageEntry, CandidateStage
 from .runtime_inventory import RuntimeInventoryInput
 
 _OBJECT_REFERENCE = re.compile(r"(?<![A-Za-z0-9_])([a-z0-9_]+\.[a-z0-9_]+)(?![A-Za-z0-9_])")
+_OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _DYNAMIC_MARKERS = ("{{", "{%", "{#", "!include", "!secret")
 _MAX_ANALYSIS_BYTES = 1024 * 1024
+_ANALYSIS_METHOD = "best_effort_lexical"
 _ALLOWED_DISPOSITIONS = {
     "analyzed_text",
     "deleted",
@@ -46,6 +49,7 @@ class CandidateDependencyAnalysis:
     baseline_sha: str
     candidate_sha: str
     stage_manifest_sha256: str
+    analysis_method: str
     files: tuple[CandidateDependencyFile, ...]
     known_entity_references: tuple[str, ...]
     unknown_object_references: tuple[str, ...]
@@ -64,6 +68,8 @@ def analyze_candidate_dependencies(
         stage_module.verify_candidate_stage(stage)
         known_entities = _runtime_entities(runtime)
         entries = {entry.path: entry for entry in stage.entries}
+        if len(entries) != len(stage.entries):
+            raise CandidateDependencyError("candidate staged path evidence is invalid")
         files = tuple(
             _analyze_path(path, entries.get(path), stage, known_entities)
             for path in integrity.changed_paths
@@ -85,9 +91,7 @@ def analyze_candidate_dependencies(
     )
     dynamic_paths = tuple(item.path for item in files if item.dynamic_reference)
     unanalyzed_paths = tuple(
-        item.path
-        for item in files
-        if item.disposition in {"non_utf8_or_binary", "oversize"}
+        item.path for item in files if item.disposition in {"non_utf8_or_binary", "oversize"}
     )
     result = CandidateDependencyAnalysis(
         target=integrity.target,
@@ -95,6 +99,7 @@ def analyze_candidate_dependencies(
         baseline_sha=integrity.baseline_sha,
         candidate_sha=integrity.candidate_sha,
         stage_manifest_sha256=integrity.stage_manifest_sha256,
+        analysis_method=_ANALYSIS_METHOD,
         files=files,
         known_entity_references=known_references,
         unknown_object_references=unknown_references,
@@ -125,11 +130,14 @@ def _validate_inputs(
     ):
         raise CandidateDependencyError("candidate dependency bindings do not match")
     if (
-        not integrity.changed_paths
-        and integrity.changed_paths != ()
+        not integrity.target
+        or integrity.repository_id <= 0
+        or _OBJECT_ID.fullmatch(integrity.baseline_sha) is None
+        or _OBJECT_ID.fullmatch(integrity.candidate_sha) is None
+        or _DIGEST.fullmatch(integrity.stage_manifest_sha256) is None
         or tuple(sorted(set(integrity.changed_paths))) != integrity.changed_paths
     ):
-        raise CandidateDependencyError("candidate dependency paths are invalid")
+        raise CandidateDependencyError("candidate dependency integrity evidence is invalid")
 
 
 def _runtime_entities(runtime: RuntimeInventoryInput) -> frozenset[str]:
@@ -200,15 +208,13 @@ def _validate_files(
         ):
             raise CandidateDependencyError("candidate dependency file evidence is invalid")
         if item.disposition != "analyzed_text" and (
-            item.known_entity_references
-            or item.unknown_object_references
-            or item.dynamic_reference
+            item.known_entity_references or item.unknown_object_references or item.dynamic_reference
         ):
             raise CandidateDependencyError("candidate dependency file evidence is invalid")
 
 
 def _validate_result(result: CandidateDependencyAnalysis) -> None:
-    if type(result) is not CandidateDependencyAnalysis:
+    if type(result) is not CandidateDependencyAnalysis or result.analysis_method != _ANALYSIS_METHOD:
         raise CandidateDependencyError("candidate dependency result is invalid")
     if tuple(sorted(set(result.known_entity_references))) != result.known_entity_references:
         raise CandidateDependencyError("candidate dependency result is invalid")
