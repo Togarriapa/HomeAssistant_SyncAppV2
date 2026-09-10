@@ -49,7 +49,17 @@ def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
     rules = [(Path(p), read_file | read_dir) for p in ("/usr", "/lib", "/lib64", "/etc/ssl")]
     rules += [
         (Path(p), read_file)
-        for p in ("/etc/localtime", "/etc/passwd", "/etc/mime.types", "/dev/urandom")
+        for p in (
+            "/etc/localtime",
+            "/etc/passwd",
+            "/etc/mime.types",
+            "/dev/urandom",
+            # Core uses these fixed marker files to identify the official/container runtime.
+            # Grant the files themselves only; do not expose their parent directories.
+            "/OFFICIAL_IMAGE",
+            "/.dockerenv",
+            "/run/.containerenv",
+        )
     ]
     # Home Assistant's checker resolves its dependency site using this exact interpreter.
     # No other executable is granted Landlock EXECUTE permission.
