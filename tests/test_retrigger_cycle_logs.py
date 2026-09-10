@@ -90,7 +90,10 @@ def test_cycle_rejects_partial_logs_root_configuration(tmp_path: Path) -> None:
     store = StateStore(data)
     store.__enter__()
     try:
-        with pytest.raises(retrigger_cycle.RetriggerCycleError, match="logs work roots are incomplete"):
+        with pytest.raises(
+            retrigger_cycle.RetriggerCycleError,
+            match="logs work roots are incomplete",
+        ):
             retrigger_cycle.run_retrigger_cycle(
                 store,
                 tmp_path / "home",

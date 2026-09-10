@@ -66,7 +66,9 @@ def run_retrigger_cycle(
     if type(store) is not StateStore:
         raise RetriggerCycleError("retrigger cycle state store is invalid")
     log_roots = (log_artifact_root, log_snapshot_root, log_workspace_root)
-    if any(root is not None for root in log_roots) and not all(root is not None for root in log_roots):
+    if any(root is not None for root in log_roots) and not all(
+        root is not None for root in log_roots
+    ):
         raise RetriggerCycleError("retrigger logs work roots are incomplete")
 
     try:

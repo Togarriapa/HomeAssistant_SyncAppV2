@@ -82,7 +82,9 @@ def enqueue_log_sync_work(
         load_log_artifact(artifact_root, artifact_id)
         return store.enqueue_work(_WORK_KIND, log_sync_work_key(target, artifact_id))
     except LogArtifactLoadError as exc:
-        raise LogSyncWorkError("logs synchronization artifact could not be enqueued safely") from exc
+        raise LogSyncWorkError(
+            "logs synchronization artifact could not be enqueued safely"
+        ) from exc
     except StateError as exc:
         raise LogSyncWorkError("logs synchronization work could not be enqueued") from exc
 
@@ -130,7 +132,9 @@ def execute_claimed_log_sync_work(
         try:
             failed = store.fail_work(item, transient=True)
         except StateError as exc:
-            raise LogSyncWorkError("logs synchronization retry state could not be recorded") from exc
+            raise LogSyncWorkError(
+                "logs synchronization retry state could not be recorded"
+            ) from exc
         return LogSyncWorkResult(failed, None)
 
     try:
