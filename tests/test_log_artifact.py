@@ -14,7 +14,6 @@ from ha_syncapp.log_artifact import (
     verify_log_artifact,
 )
 
-
 REFERENCE = datetime(2026, 9, 10, 3, 0, tzinfo=UTC)
 
 
