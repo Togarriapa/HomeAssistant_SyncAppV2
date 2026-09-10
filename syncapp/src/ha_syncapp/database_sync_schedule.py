@@ -26,4 +26,6 @@ def schedule_database_sync_generation(
         work_key = database_sync_work_key(target, source_database)
         return schedule_routine_work(store, "database", work_key, now=now)
     except (DatabaseSyncWorkError, RoutineWorkScheduleError) as exc:
-        raise DatabaseSyncScheduleError("database synchronization scheduling failed closed") from exc
+        raise DatabaseSyncScheduleError(
+            "database synchronization scheduling failed closed"
+        ) from exc
