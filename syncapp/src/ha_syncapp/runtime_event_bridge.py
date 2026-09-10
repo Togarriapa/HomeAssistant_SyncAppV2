@@ -141,7 +141,9 @@ class RuntimeEventBridge:
             self._worker.request_stop()
             result = self._worker.join(timeout_seconds=timeout_seconds)
         except RuntimeEventWorkerError as exc:
-            raise RuntimeEventBridgeError("runtime event bridge transport did not stop safely") from exc
+            raise RuntimeEventBridgeError(
+                "runtime event bridge transport did not stop safely"
+            ) from exc
         self._stopped = True
         if result.reason is not RuntimeEventWorkerReason.STOPPED:
             raise RuntimeEventBridgeError("runtime event bridge transport terminated unexpectedly")
@@ -151,7 +153,9 @@ class RuntimeEventBridge:
         try:
             result = self._worker.result_if_finished()
         except RuntimeEventWorkerError as exc:
-            raise RuntimeEventBridgeError("runtime event bridge transport state is invalid") from exc
+            raise RuntimeEventBridgeError(
+                "runtime event bridge transport state is invalid"
+            ) from exc
         if result is not None:
             raise RuntimeEventBridgeError("runtime event bridge transport terminated unexpectedly")
 
