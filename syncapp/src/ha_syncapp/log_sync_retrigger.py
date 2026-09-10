@@ -5,14 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ha_syncapp.log_sync_work import (
-    LogSyncWorkError,
-    LogSyncWorkResult,
-    claim_log_sync_work,
-    execute_claimed_log_sync_work,
-    log_sync_artifact_id,
-)
-from ha_syncapp.state import StateError, StateStore
+from .log_sync_process import LogSyncProcessError, run_log_sync_process
+from .log_sync_work import LogSyncWorkResult
+from .state import StateError, StateStore
 
 
 class LogSyncRetriggerError(RuntimeError):
@@ -35,32 +30,23 @@ def run_log_sync_retrigger_pass(
     target: str,
     token: str,
 ) -> LogSyncRetriggerResult:
-    """Recover interrupted work and process at most one eligible exact log artifact."""
+    """Recover interrupted work, then delegate one normal logs processing attempt."""
     if type(store) is not StateStore:
         raise LogSyncRetriggerError("logs synchronization retrigger state store is invalid")
 
     try:
         recovered = store.recover_interrupted_work()
-        item = claim_log_sync_work(store)
-        if item is None:
-            return LogSyncRetriggerResult(recovered_interrupted=recovered, processed=None)
-        try:
-            log_sync_artifact_id(target, item.work_key)
-        except LogSyncWorkError:
-            blocked = store.fail_work(item, transient=False)
-            return LogSyncRetriggerResult(
-                recovered_interrupted=recovered,
-                processed=LogSyncWorkResult(blocked, None),
-            )
-        processed = execute_claimed_log_sync_work(
+        processed = run_log_sync_process(
             store,
-            item,
             artifact_root,
             snapshot_staging_root,
             workspace_root,
             target,
             token,
         )
-        return LogSyncRetriggerResult(recovered_interrupted=recovered, processed=processed)
-    except (StateError, LogSyncWorkError) as exc:
+        return LogSyncRetriggerResult(
+            recovered_interrupted=recovered,
+            processed=processed.processed,
+        )
+    except (StateError, LogSyncProcessError) as exc:
         raise LogSyncRetriggerError("logs synchronization retrigger pass failed closed") from exc

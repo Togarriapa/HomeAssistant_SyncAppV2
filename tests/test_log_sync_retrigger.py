@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ha_syncapp import log_sync_retrigger
+from ha_syncapp import log_sync_process, log_sync_retrigger
 from ha_syncapp.log_artifact import LogRecord, build_log_artifact
 from ha_syncapp.log_sync import LogSyncDisposition, LogSyncResult
 from ha_syncapp.log_sync_work import enqueue_log_sync_work
@@ -70,7 +70,7 @@ def test_retrigger_recovers_interrupted_and_processes_at_most_one_log_item(
         )
         return LogSyncWorkResult(completed, sync)
 
-    monkeypatch.setattr(log_sync_retrigger, "execute_claimed_log_sync_work", execute)
+    monkeypatch.setattr(log_sync_process, "execute_claimed_log_sync_work", execute)
     try:
         result = log_sync_retrigger.run_log_sync_retrigger_pass(
             store,
