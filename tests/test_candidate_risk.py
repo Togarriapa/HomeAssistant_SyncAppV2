@@ -48,7 +48,9 @@ def _runtime(*, missing_integration: bool = False) -> RuntimeInventoryInput:
             "floors": [],
             "labels": [],
             "states": [{"entity_id": "light.kitchen", "state": "on"}],
-            "services": [{"domain": "light"}],
+            "services": [
+                {"domain": "light", "services": {"turn_on": {}}},
+            ],
         },
     )
 
@@ -58,6 +60,7 @@ def _dependencies(
     path: str,
     *,
     known: tuple[str, ...] = ("light.kitchen",),
+    services: tuple[str, ...] = (),
     unknown: tuple[str, ...] = (),
     dynamic: bool = False,
     disposition: str = "analyzed_text",
@@ -68,6 +71,7 @@ def _dependencies(
         known_entity_references=known if disposition == "analyzed_text" else (),
         unknown_object_references=unknown if disposition == "analyzed_text" else (),
         dynamic_reference=dynamic if disposition == "analyzed_text" else False,
+        known_service_references=services if disposition == "analyzed_text" else (),
     )
     return CandidateDependencyAnalysis(
         target=TARGET,
@@ -82,6 +86,7 @@ def _dependencies(
         unknown_object_references=file.unknown_object_references,
         dynamic_paths=(path,) if file.dynamic_reference else (),
         unanalyzed_paths=(path,) if disposition in {"non_utf8_or_binary", "oversize"} else (),
+        known_service_references=file.known_service_references,
     )
 
 
@@ -124,6 +129,22 @@ def test_readme_path_examples_establish_risk_floor(path: str, expected: str) -> 
         _impact(dependencies, runtime),
         runtime,
     )
+
+
+def test_known_service_reference_does_not_trigger_unknown_object_escalation() -> None:
+    runtime = _runtime()
+    dependencies = _dependencies(
+        runtime,
+        "automations.yaml",
+        known=(),
+        services=("light.turn_on",),
+    )
+
+    result = classify_candidate_risk(dependencies, _impact(dependencies, runtime), runtime)
+
+    assert result.level == "low"
+    assert result.unresolved_references == ()
+    assert "unknown candidate object references require conservative handling" not in result.reasons
 
 
 def test_dynamic_candidate_reference_raises_low_path_to_high() -> None:
