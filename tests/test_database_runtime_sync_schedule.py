@@ -9,7 +9,10 @@ from ha_syncapp.database_sync_schedule import (
     schedule_database_sync_generation,
 )
 from ha_syncapp.database_sync_work import database_sync_work_key
-from ha_syncapp.runtime_sync_schedule import RuntimeSyncScheduleError, schedule_runtime_sync_generation
+from ha_syncapp.runtime_sync_schedule import (
+    RuntimeSyncScheduleError,
+    schedule_runtime_sync_generation,
+)
 from ha_syncapp.runtime_sync_work import runtime_sync_work_key
 from ha_syncapp.state import StateStore
 
@@ -17,7 +20,9 @@ from ha_syncapp.state import StateStore
 def test_database_schedule_uses_target_and_absolute_recorder_identity(tmp_path: Path) -> None:
     scheduled_at = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
     database = tmp_path / "home-assistant_v2.db"
-    with StateStore(tmp_path / "state") as store:
+    data = tmp_path / "state"
+    data.mkdir()
+    with StateStore(data) as store:
         item = schedule_database_sync_generation(
             store,
             "Owner/Home",
