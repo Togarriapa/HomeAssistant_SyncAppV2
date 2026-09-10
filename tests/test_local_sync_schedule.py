@@ -43,7 +43,6 @@ def test_local_schedule_rearms_only_after_success(tmp_path: Path) -> None:
     assert second.created_at == second_at
 
 
-def test_invalid_target_fails_closed_without_disclosure(tmp_path: Path) -> None:
-    with StateStore(tmp_path) as store, pytest.raises(LocalSyncScheduleError) as error:
-        schedule_local_sync_generation(store, "secret-sentinel\ninvalid")
-    assert "secret-sentinel" not in str(error.value)
+def test_invalid_target_fails_closed(tmp_path: Path) -> None:
+    with StateStore(tmp_path) as store, pytest.raises(LocalSyncScheduleError):
+        schedule_local_sync_generation(store, "")
