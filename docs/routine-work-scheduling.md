@@ -8,6 +8,12 @@ The README separates **normal synchronization**, which should be event-driven wh
 
 A `blocked` item is never rearmed by routine scheduling. Deterministic failures remain blocked exactly as required by the README. Only the separately authorized administrative retry boundary may make blocked work eligible again.
 
-`local_sync_schedule.schedule_local_sync_generation()` applies this rule to the existing deterministic Local -> Repo B work identity. It schedules work only; it does not execute synchronization and it does not change the Retrigger pass. A later event source may use this adapter after it has independently established that a stable local-change event should produce routine Local -> Repo B work.
+The lane adapters preserve the existing deterministic identities:
+
+- `local_sync_schedule.schedule_local_sync_generation()` identifies one Repo B target and branch.
+- `database_sync_schedule.schedule_database_sync_generation()` identifies one Repo B target and absolute Recorder database path.
+- `runtime_sync_schedule.schedule_runtime_sync_generation()` identifies the Repo B runtime publication lane for one target.
+
+These adapters schedule work only. They do not execute synchronization and they do not change Retrigger passes. Future normal producers may invoke them after independently establishing the appropriate event or periodic trigger required by the initial README.
 
 This slice intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
