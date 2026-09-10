@@ -57,7 +57,9 @@ def validate_candidate_integrity(
         stage_module.verify_candidate_stage(stage)
         stage_module._reprove_fetch(fetched)
     except CandidateStageError as exc:
-        raise CandidateIntegrityError("candidate evidence changed during integrity validation") from exc
+        raise CandidateIntegrityError(
+            "candidate evidence changed during integrity validation"
+        ) from exc
 
     return CandidateIntegrity(
         target=stage.target,
@@ -124,7 +126,9 @@ def _validate_change_shape(change: CandidateChange) -> None:
     new_present = change.candidate_mode is not None or change.candidate_object_id is not None
     if old_present != (change.baseline_mode is not None and change.baseline_object_id is not None):
         raise CandidateIntegrityError("candidate change baseline shape is invalid")
-    if new_present != (change.candidate_mode is not None and change.candidate_object_id is not None):
+    if new_present != (
+        change.candidate_mode is not None and change.candidate_object_id is not None
+    ):
         raise CandidateIntegrityError("candidate change candidate shape is invalid")
     for mode in (change.baseline_mode, change.candidate_mode):
         if mode is not None and mode not in _MODES:
