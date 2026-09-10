@@ -24,7 +24,10 @@ def test_observes_trusted_candidate_head(monkeypatch: pytest.MonkeyPatch) -> Non
         )
         return BranchHead("Owner/Home", 42, "candidate", SHA_A)
 
-    monkeypatch.setattr("ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head", fake_fetch)
+    monkeypatch.setattr(
+        "ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head",
+        fake_fetch,
+    )
     observed = observe_trusted_candidate("Owner/Home", "secret-sentinel", expected_id=42)
 
     assert observed == CandidateObservation("Owner/Home", 42, "candidate", SHA_A)
@@ -90,7 +93,9 @@ def test_repository_or_transport_failure_is_not_branch_absence(
 def test_rejects_unexpected_trusted_branch_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head",
-        lambda target, token, *, expected_id, branch: BranchHead("Owner/Home", 42, "main", SHA_A),
+        lambda target, token, *, expected_id, branch: BranchHead(
+            "Owner/Home", 42, "main", SHA_A
+        ),
     )
     with pytest.raises(CandidateDetectionError, match="Candidate observation is invalid"):
         observe_trusted_candidate("Owner/Home", "token", expected_id=42)
