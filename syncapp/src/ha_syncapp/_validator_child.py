@@ -1,7 +1,9 @@
 """Private standalone Core helper; run only in a fresh isolated Python subprocess.
 
-No Home Assistant or candidate import occurs before the sandbox is installed.
-Linux Landlock ABI >=3 and libseccomp are mandatory, never optional fallbacks.
+The helper must already be confined by the shipped HA OS AppArmor child profile before
+it reads candidate data. Seccomp is mandatory. Landlock ABI >=3 is applied as an
+additional filesystem restriction where the host kernel provides it, but is not the
+HA OS isolation authority.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ import resource
 import runpy
 import sys
 from pathlib import Path
+
+_EXPECTED_APPARMOR_PROFILE = b"homeassistant_syncapp_v2//validator (enforce)"
+_VALIDATOR_PYTHON = Path("/opt/syncapp-validator/python3")
 
 
 class _PathRule(ctypes.Structure):
@@ -32,14 +37,31 @@ class _Compare(ctypes.Structure):
     ]
 
 
+def _verify_apparmor_profile() -> None:
+    """Fail unless exec already transitioned into the exact enforced child profile."""
+    try:
+        fd = os.open("/proc/self/attr/current", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            current = os.read(fd, 257)
+        finally:
+            os.close(fd)
+    except OSError:
+        raise RuntimeError("AppArmor confinement unavailable") from None
+    if len(current) > 256 or current.strip() != _EXPECTED_APPARMOR_PROFILE:
+        raise RuntimeError("AppArmor validator profile is not enforced")
+
+
 def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
+    """Apply Landlock as defense in depth when ABI >=3 is available."""
     # asm-generic and x86_64 share the assigned Landlock syscall numbers.
     machine = platform.machine()
     if platform.system() != "Linux" or machine not in {"x86_64", "aarch64"}:
         raise RuntimeError("unsupported platform")
     libc.syscall.restype = ctypes.c_long
     if libc.syscall(444, 0, 0, 1) < 3:
-        raise RuntimeError("Landlock ABI 3 is required")
+        # HA OS AppArmor is already mandatory and verified above. Older/absent Landlock
+        # therefore means only that this additional defense-in-depth layer is unavailable.
+        return
     # All filesystem rights through ABI 3, including REFER and TRUNCATE, handled by default.
     handled = ctypes.c_uint64((1 << 15) - 1)
     ruleset = libc.syscall(444, ctypes.byref(handled), ctypes.sizeof(handled), 0)
@@ -62,15 +84,14 @@ def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
             "/run/.containerenv",
         )
     ]
-    # Home Assistant's checker resolves its dependency site by relaunching this exact
-    # interpreter. An ELF exec also enters through the architecture-specific musl loader,
-    # so both exact files need EXECUTE while every sibling executable remains denied.
+    # Core may relaunch sys.executable for dependency-site discovery. Only the dedicated
+    # validator interpreter and the architecture-specific musl loader receive EXECUTE.
     elf_loader = {
         "x86_64": Path("/lib/ld-musl-x86_64.so.1"),
         "aarch64": Path("/lib/ld-musl-aarch64.so.1"),
     }[machine]
     rules += [
-        (Path("/usr/local/bin/python3"), read_file | execute),
+        (_VALIDATOR_PYTHON, read_file | execute),
         (elf_loader, read_file | execute),
     ]
     # Disposable candidate copy only: regular files/directories, not sockets/devices/symlinks.
@@ -164,6 +185,9 @@ def _syscall_sandbox() -> None:
 
 
 def _sandbox(config: Path) -> None:
+    # This check must run before any candidate/configuration read. The distinct executable
+    # path in candidate_semantics.py is what causes the parent AppArmor cx transition.
+    _verify_apparmor_profile()
     os.umask(0o077)
     limits = (
         (resource.RLIMIT_CORE, 0),
