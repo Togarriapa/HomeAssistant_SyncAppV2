@@ -28,7 +28,14 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m ruff check .
       - run: python -m ruff format --check .
-      - run: python -m mypy
+      - name: Run mypy with temporary diagnostics
+        shell: bash
+        run: |
+          set +e
+          python -m mypy 2>&1 | tee /tmp/mypy-output.txt
+          status=${PIPESTATUS[0]}
+          cat /tmp/mypy-output.txt >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
       - run: python -m bandit -q -r syncapp/src
       - run: python -m pytest -q
 
