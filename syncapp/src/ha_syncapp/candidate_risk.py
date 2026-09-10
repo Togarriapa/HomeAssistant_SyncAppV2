@@ -20,6 +20,7 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DATABASE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _DATABASE_SIDECAR_SUFFIXES = (".db-wal", ".db-shm", ".db-journal")
+_SYSTEM_ROOTS = {"host", "supervisor", "systemd"}
 
 
 class CandidateRiskError(RuntimeError):
@@ -130,6 +131,8 @@ def _classify_path(path: str) -> tuple[str, str]:
     basename = parts[-1]
     if basename.endswith(_DATABASE_SUFFIXES) or basename.endswith(_DATABASE_SIDECAR_SUFFIXES):
         return "critical", "database manipulation"
+    if parts[0] in _SYSTEM_ROOTS or pure.suffix.casefold() == ".service":
+        return "critical", "system-level operation"
 
     if parts[0] == ".storage":
         return "high", "Home Assistant internal storage"
@@ -142,6 +145,8 @@ def _classify_path(path: str) -> tuple[str, str]:
     if basename.startswith("auth") or "authentication" in basename:
         return "high", "authentication-related configuration"
 
+    if parts[0] == "integrations" or basename == "integrations.yaml":
+        return "medium", "integration configuration"
     if parts[0] in {"dashboards", "packages"} or basename in {
         "ui-lovelace.yaml",
         "lovelace.yaml",
