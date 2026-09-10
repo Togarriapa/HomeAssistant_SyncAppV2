@@ -40,6 +40,16 @@ This startup bootstrap is deliberately distinct from the long-running WebSocket 
 
 Events that can change the runtime view—state, entity/device/area/floor/label/category registries, loaded components, Core configuration, and service registration—schedule the existing runtime generation. Unrelated events are ignored. Malformed evidence fails closed. Because the function delegates to routine scheduling, repeated events are coalesced while work is active and a deterministic blocked failure stays blocked.
 
+### Owner-thread mailbox
+
+`runtime_event_mailbox.RuntimeEventMailbox` is the bounded bridge intended for future cross-context event transport. It accepts only two immutable signal shapes: verified subscription `ready`, or one allowed normalized `event_type`. Raw Home Assistant event payloads, credentials and arbitrary objects are not part of the mailbox schema.
+
+The mailbox is capacity-bounded and uses non-blocking insertion. Capacity exhaustion fails closed rather than silently dropping evidence. A future transport owner can therefore disconnect/retry and rely on the next verified readiness baseline to close any observation gap instead of pretending an overflowing event stream was complete.
+
+`drain_runtime_event_mailbox()` must run on the `StateStore`-owning thread. It consumes at most a fixed bounded number of signals per call, revalidates every signal, and delegates only to the existing normal runtime scheduling boundaries. It performs no interrupted-work recovery. Repeated ready/events coalesce into the same durable runtime work identity, and deterministic blocked work remains blocked.
+
+This mailbox does not itself start a thread, process, socket or WebSocket lifecycle. Those ownership decisions remain a separate service-integration gate.
+
 ## Core WebSocket transport
 
 `core_event_stream.consume_core_runtime_events()` implements the read-only transport boundary against the documented Home Assistant App proxy at `ws://supervisor/core/websocket`. It performs the documented authentication handshake using `SUPERVISOR_TOKEN`, subscribes only to the classifier's deterministic event-type set, verifies every subscription result, enforces message-size and connection timeout limits, and rejects binary, malformed, unknown-ID, or mismatched event evidence.
