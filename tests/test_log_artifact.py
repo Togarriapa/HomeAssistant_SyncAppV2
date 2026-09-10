@@ -99,9 +99,10 @@ def test_normalizes_timezone_aware_timestamp_to_utc(tmp_path: Path) -> None:
         reference_time=REFERENCE,
     )
 
-    assert '"timestamp":"2026-09-10T03:00:00Z"' in (
-        artifact.root / "logs/syncapp/records.jsonl"
-    ).read_text()
+    assert (
+        '"timestamp":"2026-09-10T03:00:00Z"'
+        in (artifact.root / "logs/syncapp/records.jsonl").read_text()
+    )
 
 
 @pytest.mark.parametrize(
