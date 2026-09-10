@@ -6,15 +6,15 @@ import hashlib
 from datetime import datetime, timedelta
 
 from .log_artifact import (
+    _MAX_ARTIFACT_BYTES,
+    _RETENTION_DAYS,
     LogArtifactError,
     LogRecord,
     _file_evidence,
     _manifest_bytes,
-    _MAX_ARTIFACT_BYTES,
     _normalize_records,
     _normalize_reference_time,
     _render_payloads,
-    _RETENTION_DAYS,
 )
 
 
