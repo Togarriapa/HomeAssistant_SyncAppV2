@@ -43,11 +43,12 @@ def fetch_trusted_candidate(
     expected_sha: str,
     token: str,
     workspace_root: Path,
+    home_assistant_root: Path,
 ) -> CandidateFetch:
-    """Fetch only the observed candidate branch and prove its exact commit identity."""
+    """Fetch only the observed candidate branch into storage disjoint from live HA."""
     _validate_observation(observation, expected_sha)
     _validate_token(token)
-    parent = _trusted_workspace_root(workspace_root)
+    parent = _trusted_workspace_root(workspace_root, home_assistant_root)
     executable = _git_executable()
 
     root = parent / f"{_WORKSPACE_PREFIX}{uuid.uuid4().hex}.tmp"
@@ -63,7 +64,7 @@ def fetch_trusted_candidate(
         _run_git(executable, root, ("init", "--quiet"))
         _verify_initialized_workspace(root)
         askpass = _create_askpass(root)
-        refspec = f"+refs/heads/{_CANDIDATE_BRANCH}:{_FETCH_REF}"
+        refspec = f"refs/heads/{_CANDIDATE_BRANCH}:{_FETCH_REF}"
         _run_git(
             executable,
             root,
@@ -137,9 +138,13 @@ def _validate_token(token: str) -> None:
         raise CandidateFetchError("GitHub authentication is invalid")
 
 
-def _trusted_workspace_root(path: Path) -> Path:
+def _trusted_workspace_root(path: Path, home_assistant_root: Path) -> Path:
+    if not isinstance(path, Path) or not isinstance(home_assistant_root, Path):
+        raise CandidateFetchError("candidate workspace boundary is invalid")
     try:
         metadata = path.lstat()
+        parent = path.resolve(strict=True)
+        home = home_assistant_root.resolve(strict=True)
     except OSError as exc:
         raise CandidateFetchError("candidate workspace root is unavailable") from exc
     if (
@@ -149,7 +154,9 @@ def _trusted_workspace_root(path: Path) -> Path:
         or stat.S_IMODE(metadata.st_mode) & 0o077
     ):
         raise CandidateFetchError("candidate workspace root is unsafe")
-    return path.resolve(strict=True)
+    if parent == home or parent in home.parents or home in parent.parents:
+        raise CandidateFetchError("candidate workspace overlaps Home Assistant source")
+    return parent
 
 
 def _repository_url(target: str) -> str:
