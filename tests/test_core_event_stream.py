@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from types import TracebackType
@@ -39,6 +40,18 @@ class _FakeContext:
         return None
 
 
+class _Recorder:
+    def __init__(self) -> None:
+        self.events: list[Mapping[str, object]] = []
+
+    async def __call__(self, event: Mapping[str, object]) -> None:
+        self.events.append(event)
+
+
+async def _reject_handler(event: Mapping[str, object]) -> None:
+    raise AssertionError(event)
+
+
 def _json(payload: Mapping[str, object]) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
@@ -66,8 +79,7 @@ def _connector_for(socket: _FakeSocket):
     return connector
 
 
-@pytest.mark.asyncio
-async def test_subscriber_authenticates_subscribes_and_normalizes_event() -> None:
+def test_subscriber_authenticates_subscribes_and_normalizes_event() -> None:
     event_types = runtime_event_types()
     state_id = event_types.index("state_changed") + 1
     messages = _success_messages()
@@ -84,20 +96,19 @@ async def test_subscriber_authenticates_subscribes_and_normalizes_event() -> Non
         )
     )
     socket = _FakeSocket(messages)
-    received: list[Mapping[str, object]] = []
+    recorder = _Recorder()
 
-    async def handler(event: Mapping[str, object]) -> None:
-        received.append(event)
-
-    count = await consume_core_runtime_events(
-        handler,
-        token="token-sentinel",
-        max_events=1,
-        connector=_connector_for(socket),
+    count = asyncio.run(
+        consume_core_runtime_events(
+            recorder,
+            token="token-sentinel",
+            max_events=1,
+            connector=_connector_for(socket),
+        )
     )
 
     assert count == 1
-    assert received == [{"event_type": "state_changed"}]
+    assert recorder.events == [{"event_type": "state_changed"}]
     sent = [json.loads(message) for message in socket.sent]
     assert sent[0] == {"access_token": "token-sentinel", "type": "auth"}
     subscriptions = sent[1:]
@@ -105,8 +116,7 @@ async def test_subscriber_authenticates_subscribes_and_normalizes_event() -> Non
     assert all(item["type"] == "subscribe_events" for item in subscriptions)
 
 
-@pytest.mark.asyncio
-async def test_event_may_arrive_during_subscription_setup_and_is_not_forwarded() -> None:
+def test_event_may_arrive_during_subscription_setup_and_is_not_forwarded() -> None:
     event_types = runtime_event_types()
     first_type = event_types[0]
     messages = [
@@ -124,21 +134,19 @@ async def test_event_may_arrive_during_subscription_setup_and_is_not_forwarded()
         messages.append(_json({"id": command_id, "type": "result", "success": True}))
     messages.append(_json({"id": 1, "type": "event", "event": {"event_type": first_type}}))
     socket = _FakeSocket(messages)
-    received: list[Mapping[str, object]] = []
+    recorder = _Recorder()
 
-    async def handler(event: Mapping[str, object]) -> None:
-        received.append(event)
-
-    await consume_core_runtime_events(
-        handler,
-        token="token",
-        max_events=1,
-        connector=_connector_for(socket),
+    asyncio.run(
+        consume_core_runtime_events(
+            recorder,
+            token="token",
+            max_events=1,
+            connector=_connector_for(socket),
+        )
     )
-    assert received == [{"event_type": first_type}]
+    assert recorder.events == [{"event_type": first_type}]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "messages",
     [
@@ -148,24 +156,22 @@ async def test_event_may_arrive_during_subscription_setup_and_is_not_forwarded()
         ["not-json"],
     ],
 )
-async def test_authentication_and_message_failures_are_sanitized(messages: list[str | bytes]) -> None:
+def test_authentication_and_message_failures_are_sanitized(messages: list[str | bytes]) -> None:
     socket = _FakeSocket(messages)
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError) as error:
-        await consume_core_runtime_events(
-            handler,
-            token="secret-sentinel",
-            max_events=1,
-            connector=_connector_for(socket),
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="secret-sentinel",
+                max_events=1,
+                connector=_connector_for(socket),
+            )
         )
     assert "secret-sentinel" not in str(error.value)
 
 
-@pytest.mark.asyncio
-async def test_failed_subscription_fails_closed() -> None:
+def test_failed_subscription_fails_closed() -> None:
     messages = [
         _json({"type": "auth_required"}),
         _json({"type": "auth_ok"}),
@@ -173,20 +179,18 @@ async def test_failed_subscription_fails_closed() -> None:
     ]
     socket = _FakeSocket(messages)
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError, match="subscription failed"):
-        await consume_core_runtime_events(
-            handler,
-            token="token",
-            max_events=1,
-            connector=_connector_for(socket),
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="token",
+                max_events=1,
+                connector=_connector_for(socket),
+            )
         )
 
 
-@pytest.mark.asyncio
-async def test_unknown_subscription_id_fails_closed() -> None:
+def test_unknown_subscription_id_fails_closed() -> None:
     messages = [
         _json({"type": "auth_required"}),
         _json({"type": "auth_ok"}),
@@ -194,57 +198,51 @@ async def test_unknown_subscription_id_fails_closed() -> None:
     ]
     socket = _FakeSocket(messages)
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError, match="subscription state is invalid"):
-        await consume_core_runtime_events(
-            handler,
-            token="token",
-            max_events=1,
-            connector=_connector_for(socket),
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="token",
+                max_events=1,
+                connector=_connector_for(socket),
+            )
         )
 
 
-@pytest.mark.asyncio
-async def test_mismatched_event_type_fails_closed() -> None:
+def test_mismatched_event_type_fails_closed() -> None:
     messages = _success_messages()
     messages.append(
         _json({"id": 1, "type": "event", "event": {"event_type": "wrong-event"}})
     )
     socket = _FakeSocket(messages)
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError, match="event message is invalid"):
-        await consume_core_runtime_events(
-            handler,
-            token="token",
-            max_events=1,
-            connector=_connector_for(socket),
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="token",
+                max_events=1,
+                connector=_connector_for(socket),
+            )
         )
 
 
-@pytest.mark.asyncio
-async def test_oversized_text_message_fails_closed() -> None:
+def test_oversized_text_message_fails_closed() -> None:
     socket = _FakeSocket(["x" * 65])
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError, match="exceeds size limit"):
-        await consume_core_runtime_events(
-            handler,
-            token="token",
-            max_events=1,
-            max_message_bytes=64,
-            connector=lambda url, opened, closed, size: _FakeContext(socket),
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="token",
+                max_events=1,
+                max_message_bytes=64,
+                connector=lambda url, opened, closed, size: _FakeContext(socket),
+            )
         )
 
 
-@pytest.mark.asyncio
-async def test_invalid_limits_fail_before_connecting() -> None:
+def test_invalid_limits_fail_before_connecting() -> None:
     connected = False
 
     def connector(url: str, opened: float, closed: float, size: int):
@@ -252,14 +250,13 @@ async def test_invalid_limits_fail_before_connecting() -> None:
         connected = True
         raise AssertionError((url, opened, closed, size))
 
-    async def handler(event: Mapping[str, object]) -> None:
-        raise AssertionError(event)
-
     with pytest.raises(CoreEventStreamError, match="count limit is invalid"):
-        await consume_core_runtime_events(
-            handler,
-            token="token",
-            max_events=0,
-            connector=connector,
+        asyncio.run(
+            consume_core_runtime_events(
+                _reject_handler,
+                token="token",
+                max_events=0,
+                connector=connector,
+            )
         )
     assert connected is False
