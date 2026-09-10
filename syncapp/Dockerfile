@@ -15,10 +15,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
-# Keep SyncApp dependencies separate from the official Core Python environment.
+# Keep SyncApp dependencies separate from the official Core Python environment. The
+# validator gets a distinct executable path so HA OS AppArmor can force a child-profile
+# transition before any candidate/configuration bytes are read.
 RUN apk add --no-cache git openssh-client libseccomp \
     && python3 -m venv /opt/syncapp \
-    && /opt/syncapp/bin/python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt
+    && /opt/syncapp/bin/python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt \
+    && install -d -m 0555 /opt/syncapp-validator \
+    && install -m 0555 /usr/local/bin/python3 /opt/syncapp-validator/python3
 COPY src/ /app/
 
 STOPSIGNAL SIGTERM
