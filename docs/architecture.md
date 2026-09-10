@@ -37,7 +37,9 @@ empty/truncated databases, integrity failures, orphaned SQLite recovery files an
 missing/invalid identities fail closed. Initialization is allowed only for a newly
 created database. Migrations are sequential and non-destructive: schema 1 adds the
 recoverable-work table at schema 2; schema 2 adds repository identity bindings at
-schema 3. Installation identity and existing work are preserved. There is no
+schema 3; schema 3 adds synchronization baselines at schema 4; schema 4 adds
+[immutable prepared candidate/backup records](prepared-deployment-state.md) at schema 5.
+Installation identity, existing work, repository pins and baselines are preserved. There is no
 destructive reset fallback.
 
 The single `installation` record contains:

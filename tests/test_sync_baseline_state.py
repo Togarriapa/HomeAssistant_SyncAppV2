@@ -103,6 +103,7 @@ def test_schema_v3_migrates_baselines_without_losing_existing_state(tmp_path: Pa
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE synchronization_baseline")
+        db.execute("DROP TABLE prepared_deployment")
         db.execute("PRAGMA user_version = 3")
 
     with StateStore(tmp_path) as store:
