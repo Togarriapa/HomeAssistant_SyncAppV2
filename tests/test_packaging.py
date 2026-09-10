@@ -61,7 +61,7 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert manifest["schema"]["github_token"].endswith("?")
 
 
-def test_runtime_dependency_is_exactly_pinned_and_hashed() -> None:
+def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     requirements = (ROOT / "syncapp/requirements.txt").read_text()
     non_comment_lines = [
         line.strip()
@@ -71,6 +71,9 @@ def test_runtime_dependency_is_exactly_pinned_and_hashed() -> None:
     assert non_comment_lines == [
         "websockets==17.1 \\",
         "--hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23",
+        "PyYAML==6.0.3 \\",
+        "--hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \\",
+        "--hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28",
     ]
     assert "websockets" not in (ROOT / "requirements-dev.txt").read_text()
 
