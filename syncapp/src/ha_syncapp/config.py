@@ -1,14 +1,17 @@
 """Validate Supervisor options without logging their contents."""
 
 import json
+import posixpath
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 MAX_OPTIONS_BYTES = 65536
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_HOMEASSISTANT_ROOT = PurePosixPath("/homeassistant")
+_MAX_PATH_LENGTH = 4096
 
 
 class ConfigError(ValueError):
@@ -21,6 +24,7 @@ class Config:
     status_interval_seconds: int = 300
     repo_b: str | None = None
     github_token: str | None = field(default=None, repr=False)
+    recorder_database_path: str | None = None
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -59,6 +63,17 @@ def _valid_token(value: object) -> bool:
     )
 
 
+def _valid_recorder_database_path(value: object) -> bool:
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PATH_LENGTH:
+        return False
+    if value != value.strip() or any(ord(character) < 0x20 for character in value):
+        return False
+    if "\x7f" in value or not value.startswith("/") or posixpath.normpath(value) != value:
+        return False
+    path = PurePosixPath(value)
+    return path != _HOMEASSISTANT_ROOT and path.is_relative_to(_HOMEASSISTANT_ROOT)
+
+
 def load_config(path: Path) -> Config:
     """Read a bounded JSON object; reject unknown options and coercion."""
     try:
@@ -71,7 +86,13 @@ def load_config(path: Path) -> Config:
         )
     except (OSError, UnicodeError, ValueError, RecursionError):
         raise ConfigError("Unable to read valid options") from None
-    supported = {"log_level", "status_interval_seconds", "repo_b", "github_token"}
+    supported = {
+        "log_level",
+        "status_interval_seconds",
+        "repo_b",
+        "github_token",
+        "recorder_database_path",
+    }
     if not isinstance(options, dict) or options.keys() - supported:
         raise ConfigError("Options must contain only supported keys")
     level = options.get("log_level", "info")
@@ -89,9 +110,17 @@ def load_config(path: Path) -> Config:
         raise ConfigError("Invalid Repo B target")
     if github_token is not None and not _valid_token(github_token):
         raise ConfigError("Invalid GitHub authentication")
+
+    recorder_database_path = options.get("recorder_database_path")
+    if recorder_database_path is not None and not _valid_recorder_database_path(
+        recorder_database_path
+    ):
+        raise ConfigError("Invalid Recorder database path")
+
     return Config(
         log_level=level,
         status_interval_seconds=interval,
         repo_b=cast(str | None, repo_b),
         github_token=cast(str | None, github_token),
+        recorder_database_path=cast(str | None, recorder_database_path),
     )
