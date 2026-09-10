@@ -101,8 +101,8 @@ def run_retrigger_cycle(
         if log_artifact_root is None:
             log_sync = LogSyncRetriggerResult(recovered_interrupted=0, processed=None)
         else:
-            assert log_snapshot_root is not None
-            assert log_workspace_root is not None
+            if log_snapshot_root is None or log_workspace_root is None:
+                raise RetriggerCycleError("retrigger logs work roots became incomplete")
             log_sync = run_log_sync_retrigger_pass(
                 store,
                 log_artifact_root,
