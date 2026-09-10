@@ -12,6 +12,9 @@ helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox
 config = Path(sys.argv[1])
 helper["_sandbox"](config)
 assert os.geteuid() != 0 and os.getuid() != 0
+assert Path("/proc/self/attr/current").read_bytes().strip() == (
+    b"homeassistant_syncapp_v2//validator (enforce)"
+)
 # The validator must retain only the fixed identity evidence Core needs to recognize
 # the bundled official image; arbitrary files outside the sandbox remain inaccessible.
 assert Path("/OFFICIAL_IMAGE").is_file()
@@ -27,13 +30,15 @@ def denied(operation):
 
 denied(lambda: Path("/tmp/world-readable-canary").read_bytes())
 denied(lambda: Path("/tmp/outside-sandbox-write").write_bytes(b"should be denied"))
+denied(lambda: Path("/data/validator-canary").read_bytes())
+denied(lambda: Path("/homeassistant/configuration.yaml").read_bytes())
 denied(lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM))
 denied(lambda: socket.socket(socket.AF_INET6, socket.SOCK_DGRAM))
 denied(lambda: os.execv("/bin/true", ["/bin/true"]))
-# Core is allowed to relaunch only this exact bundled interpreter for dependency-site
+# Core is allowed to relaunch only this exact dedicated interpreter for dependency-site
 # discovery. Prove that narrow positive exception works while unrelated exec stays denied.
 subprocess.run(
-    ["/usr/local/bin/python3", "-I", "-c", "raise SystemExit(0)"],
+    ["/opt/syncapp-validator/python3", "-I", "-c", "raise SystemExit(0)"],
     check=True,
     env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
     timeout=10,
