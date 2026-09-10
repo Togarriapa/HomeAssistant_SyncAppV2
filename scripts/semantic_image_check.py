@@ -11,6 +11,7 @@ sys.path.insert(0, "/fixtures")
 
 from ha_syncapp.candidate_semantics import (  # noqa: E402
     CandidateSemanticError,
+    _copy_stage,
     validate_candidate_semantics,
     verify_candidate_semantic_validation,
 )
@@ -58,7 +59,27 @@ def run() -> None:
             "scenes.yaml": b"- name: Example\n  entities:\n    light.example: 'on'\n",
         }
         inputs = candidate_inputs(parent, valid)
-        result = validate_candidate_semantics(*inputs)
+        try:
+            result = validate_candidate_semantics(*inputs)
+        except CandidateSemanticError:
+            # The only diagnostic input here is the fixed public valid fixture above.
+            # Production continues to suppress all raw Core output.
+            with tempfile.TemporaryDirectory(prefix="fixture-diagnostic-") as diagnostic:
+                config = Path(diagnostic) / "config"
+                _copy_stage(inputs[2], config)
+                subprocess.run(
+                    [
+                        "/usr/local/bin/python3",
+                        "-I",
+                        "-B",
+                        "/checks/core_fixture_probe.py",
+                        str(config),
+                    ],
+                    env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+                    check=False,
+                    timeout=30,
+                )
+            raise
         verify_candidate_semantic_validation(result, *inputs)
 
         # Syntactically valid YAML must still fail real Core schema validation.

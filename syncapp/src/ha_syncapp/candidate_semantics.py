@@ -10,6 +10,7 @@ import signal
 import stat
 import subprocess  # nosec B404
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -267,10 +268,8 @@ def _run_validator(config: Path, version: str) -> None:
             try:
                 returncode = process.wait(timeout=_TIMEOUT_SECONDS)
             except BaseException:
-                try:
+                with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
                 process.wait()
                 raise CandidateSemanticError(
                     "semantic validator timed out or was interrupted"
