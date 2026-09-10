@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import cast
 
 import pytest
 from ha_syncapp.candidate_dependencies import (
@@ -193,7 +194,10 @@ def test_rejects_tampered_dependency_summary() -> None:
 def test_preserves_unresolved_registry_links_in_impact() -> None:
     runtime = _runtime()
     homeassistant = dict(runtime.homeassistant)
-    entities = [dict(item) for item in homeassistant["entities"]]
+    entities = [
+        dict(item)
+        for item in cast(list[dict[str, object]], homeassistant["entities"])
+    ]
     light = next(item for item in entities if item["entity_id"] == "light.kitchen")
     light["config_entry_id"] = "entry-missing"
     homeassistant["entities"] = entities
