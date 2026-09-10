@@ -169,9 +169,7 @@ def test_known_services_are_separated_from_entities_and_unknown_objects(
         tmp_path,
         {
             "automations.yaml": (
-                b"service: light.turn_on\n"
-                b"entity_id: light.kitchen\n"
-                b"next: switch.not_registered\n"
+                b"service: light.turn_on\nentity_id: light.kitchen\nnext: switch.not_registered\n"
             )
         },
     )
