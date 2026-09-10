@@ -16,6 +16,7 @@ from types import FrameType
 from . import __version__
 from .config import Config, ConfigError, load_config
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
+from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
 from .retrigger_cycle import RetriggerCycleError, run_retrigger_cycle
 from .retrigger_ipc import (
     RetriggerIPCError,
@@ -81,6 +82,22 @@ def _ensure_private_work_directory(protected: Path, directory: Path) -> None:
             os.close(descriptor)
 
 
+def _local_work_roots(
+    data_dir: Path,
+    home_assistant_root: Path,
+) -> tuple[Path, Path]:
+    """Return verified app-owned roots for Local snapshots and Git metadata."""
+    protected = (data_dir / "syncapp").resolve(strict=True)
+    home = home_assistant_root.resolve(strict=True)
+    if protected == home or protected in home.parents or home in protected.parents:
+        raise RetriggerCycleError("Local work root overlaps Home Assistant source")
+    work = protected / "work"
+    roots = (work / "main-snapshots", work / "main-workspaces")
+    for root in roots:
+        _ensure_private_work_directory(protected, root)
+    return roots
+
+
 def _runtime_work_roots(data_dir: Path) -> tuple[Path, Path, Path]:
     """Return verified app-owned roots for runtime artifacts, snapshots and Git metadata."""
     protected = (data_dir / "syncapp").resolve(strict=True)
@@ -116,6 +133,31 @@ def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
         work / "log-snapshots",
         work / "log-workspaces",
     )
+
+
+def _run_startup_local_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> LocalStartupResult | None:
+    """Bootstrap one normal Local generation only for a trusted configured Repo B."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise LocalStartupError("startup Local repository is not trusted")
+    try:
+        snapshot_root, workspace_root = _local_work_roots(data_dir, home_assistant_root)
+        return run_startup_local_sync(
+            store,
+            home_assistant_root,
+            snapshot_root,
+            workspace_root,
+            config.repo_b,
+            config.github_token,
+        )
+    except (RetriggerCycleError, OSError) as exc:
+        raise LocalStartupError("startup Local synchronization failed closed") from exc
 
 
 def _run_startup_runtime_if_configured(
@@ -240,7 +282,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         boot = store.start_run()
         runtime_bridge: RuntimeEventBridge | None = None
         if not stop.requested:
-            _run_startup_runtime_if_configured(store, config, data_dir)
+            _run_startup_local_if_configured(store, config, data_dir)
+            if not stop.requested:
+                _run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
                 if runtime_bridge is not None:
@@ -356,6 +400,9 @@ def main() -> int:
     except RuntimeEventBridgeError:
         emit("service_failed", level="error", reason="runtime_events_unavailable")
         return 7
+    except LocalStartupError:
+        emit("service_failed", level="error", reason="local_sync_startup_failed")
+        return 8
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
