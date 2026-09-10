@@ -28,6 +28,14 @@ Events that can change the runtime view—state, entity/device/area/floor/label/
 
 The transport never forwards raw event data. A valid incoming event is reduced to `{"event_type": "..."}` before the injected handler is invoked. The token is used only in the authentication frame and is neither persisted nor included in diagnostics.
 
-The subscriber remains intentionally **unwired from the service lifecycle**. Reconnection/backoff, shutdown behavior, and the exact service-level handler are a separate milestone that must preserve bounded work and must not turn transient event-stream failures into unsafe Home Assistant mutations.
+### Verified readiness and baseline refresh
+
+Events may arrive while the individual WebSocket subscriptions are still being confirmed. Those setup-time events are intentionally validated but not forwarded because the complete event-observation boundary is not established yet.
+
+After every requested subscription has returned a verified successful result, the transport invokes its optional `on_ready` callback exactly once before forwarding ordinary events. `RuntimeEventSession.ready()` uses that point to schedule one complete runtime inventory generation. The resulting runtime snapshot therefore observes current state after the full subscription set is active, closing the setup window without trusting partial event data.
+
+`RuntimeEventSession.event()` then delegates each normalized event type to the existing classifier. Both callbacks can only schedule durable routine work; they cannot execute synchronization directly. A deterministic blocked runtime failure remains blocked even across reconnection readiness signals.
+
+The subscriber remains intentionally **unwired from the service lifecycle**. Reconnection/backoff and shutdown behavior are a separate milestone that must preserve bounded work and must not turn transient event-stream failures into unsafe Home Assistant mutations.
 
 This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
