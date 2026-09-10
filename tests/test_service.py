@@ -202,9 +202,7 @@ def test_shutdown_after_local_bootstrap_skips_later_normal_startup(
         pytest.fail("shutdown after Local bootstrap must skip runtime bootstrap")
 
     monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
-    monkeypatch.setattr(
-        "ha_syncapp.__main__._run_startup_runtime_if_configured", forbidden_runtime
-    )
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", forbidden_runtime)
 
     run(tmp_path, stop_after_local)
 
