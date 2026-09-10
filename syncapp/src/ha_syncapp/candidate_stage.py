@@ -207,7 +207,7 @@ def _trusted_staging_root(path: Path, home_assistant_root: Path, fetch_root: Pat
         raise CandidateStageError("candidate staging root is unsafe")
     if _overlaps(parent, home):
         raise CandidateStageError("candidate staging overlaps Home Assistant source")
-    if parent == fetched or parent in fetched.parents:
+    if parent == fetched or fetched in parent.parents:
         raise CandidateStageError("candidate staging is inside candidate fetch workspace")
     return parent
 
