@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from ha_syncapp import database_sync_retrigger, database_sync_work
+from ha_syncapp import database_sync_process, database_sync_retrigger, database_sync_work
 from ha_syncapp.database_sync import DatabaseSyncDisposition, DatabaseSyncResult
 from ha_syncapp.database_sync_work import DatabaseSyncWorkResult
 from ha_syncapp.state import StateStore
@@ -95,7 +95,7 @@ def test_retrigger_pass_recovers_interrupted_database_work_before_claiming(
         )
 
     monkeypatch.setattr(
-        database_sync_retrigger,
+        database_sync_process,
         "execute_claimed_database_sync_work",
         succeed,
     )
@@ -129,7 +129,7 @@ def test_retrigger_pass_processes_at_most_one_database_item(
         )
 
     monkeypatch.setattr(
-        database_sync_retrigger,
+        database_sync_process,
         "execute_claimed_database_sync_work",
         succeed,
     )
@@ -203,7 +203,7 @@ def test_retrigger_pass_does_not_expose_token_in_failure(
         raise database_sync_work.DatabaseSyncWorkError(secret)
 
     monkeypatch.setattr(
-        database_sync_retrigger,
+        database_sync_process,
         "execute_claimed_database_sync_work",
         fail,
     )
