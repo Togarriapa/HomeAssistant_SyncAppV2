@@ -256,7 +256,9 @@ def _default_transport(
                 if int(content_length) > max_response_bytes:
                     raise CandidateBackupError("Supervisor backup response exceeds size limit")
             except ValueError:
-                raise CandidateBackupError("Supervisor backup response metadata is invalid") from None
+                raise CandidateBackupError(
+                    "Supervisor backup response metadata is invalid"
+                ) from None
         response_body = response.read(max_response_bytes + 1)
         status = int(response.status)
     except CandidateBackupError:
