@@ -78,9 +78,7 @@ def stage_fetched_candidate(
             ("ls-tree", "-rz", "--full-tree", fetched.git_ref),
         )
         tree_entries = _parse_tree(raw_tree)
-        entries = tuple(
-            _materialize_entry(fetched.root, tree, entry) for entry in tree_entries
-        )
+        entries = tuple(_materialize_entry(fetched.root, tree, entry) for entry in tree_entries)
         manifest_bytes = _manifest_bytes(
             target=fetched.target,
             repository_id=fetched.repository_id,
@@ -487,9 +485,7 @@ def _verify_staged_file(path: Path, entry: CandidateStageEntry) -> None:
         or info.st_size != entry.size
         or digest.hexdigest() != entry.sha256
     ):
-        raise CandidateStageError(
-            "candidate staged file does not match integrity evidence"
-        )
+        raise CandidateStageError("candidate staged file does not match integrity evidence")
 
 
 def _read_private_file(path: Path, *, expected_mode: int) -> bytes:
