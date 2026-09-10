@@ -36,6 +36,16 @@ After every requested subscription has returned a verified successful result, th
 
 `RuntimeEventSession.event()` then delegates each normalized event type to the existing classifier. Both callbacks can only schedule durable routine work; they cannot execute synchronization directly. A deterministic blocked runtime failure remains blocked even across reconnection readiness signals.
 
-The subscriber remains intentionally **unwired from the service lifecycle**. Reconnection/backoff and shutdown behavior are a separate milestone that must preserve bounded work and must not turn transient event-stream failures into unsafe Home Assistant mutations.
+### Bounded reconnect lifecycle
+
+`runtime_event_lifecycle.run_runtime_event_lifecycle()` wraps the verified subscriber in a bounded reconnect transaction. Each connection attempt gets a fresh `RuntimeEventSession`. A connection that reaches verified subscription readiness schedules a complete runtime baseline before ordinary normalized event scheduling resumes.
+
+Only `CoreEventStreamError` failures are eligible for automatic reconnect inside one lifecycle invocation. Reconnect attempts use deterministic exponential backoff with a configured cap and a hard maximum attempt count, so a broken or incompatible stream cannot create a tight or infinite retry loop. Unexpected internal failures fail closed immediately with sanitized diagnostics.
+
+Backoff waits are interruptible through an `asyncio.Event`. Shutdown therefore prevents a further connection attempt and does not schedule additional routine work. Exhausting the bounded attempt budget fails closed; a later service/recovery decision may start a new bounded lifecycle, but this primitive does not silently convert permanent failure into an infinite loop.
+
+The token remains an ephemeral argument to the subscriber and is not persisted or returned in lifecycle results. Raw Home Assistant event payloads still terminate at the transport normalization boundary.
+
+The reconnect lifecycle remains intentionally **unwired from `__main__.py`** in this increment. Service activation must independently prove safe startup/shutdown ownership, configuration and Home Assistant source-path boundaries before a long-running event task is attached to the application lifecycle.
 
 This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
