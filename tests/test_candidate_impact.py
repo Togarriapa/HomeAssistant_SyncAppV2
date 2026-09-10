@@ -194,10 +194,8 @@ def test_rejects_tampered_dependency_summary() -> None:
 def test_preserves_unresolved_registry_links_in_impact() -> None:
     runtime = _runtime()
     homeassistant = dict(runtime.homeassistant)
-    entities = [
-        dict(item)
-        for item in cast(list[dict[str, object]], homeassistant["entities"])
-    ]
+    raw_entities = cast(list[dict[str, object]], homeassistant["entities"])
+    entities = [dict(item) for item in raw_entities]
     light = next(item for item in entities if item["entity_id"] == "light.kitchen")
     light["config_entry_id"] = "entry-missing"
     homeassistant["entities"] = entities
