@@ -270,6 +270,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         if stop.requested:
                             break
                         raise
+                    if stop.requested:
+                        break
                     if runtime_bridge is not None:
                         runtime_bridge.tick()
                     now = time.monotonic()
