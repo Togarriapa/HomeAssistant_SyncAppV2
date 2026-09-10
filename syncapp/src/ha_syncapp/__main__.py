@@ -24,6 +24,7 @@ from .retrigger_ipc import (
     request_retrigger_once,
     retrigger_socket_path,
 )
+from .runtime_startup import RuntimeStartupError, RuntimeStartupResult, run_startup_runtime_sync
 from .state import AlreadyRunning, StateError, StateStore
 
 
@@ -79,6 +80,20 @@ def _ensure_private_work_directory(protected: Path, directory: Path) -> None:
             os.close(descriptor)
 
 
+def _runtime_work_roots(data_dir: Path) -> tuple[Path, Path, Path]:
+    """Return verified app-owned roots for runtime artifacts, snapshots and Git metadata."""
+    protected = (data_dir / "syncapp").resolve(strict=True)
+    work = protected / "work"
+    roots = (
+        work / "runtime-staging",
+        work / "runtime-snapshots",
+        work / "runtime-workspaces",
+    )
+    for root in roots:
+        _ensure_private_work_directory(protected, root)
+    return roots
+
+
 def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
     protected = (data_dir / "syncapp").resolve(strict=True)
     home = home_assistant_root.resolve(strict=True)
@@ -99,6 +114,28 @@ def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
         log_artifact_root,
         work / "log-snapshots",
         work / "log-workspaces",
+    )
+
+
+def _run_startup_runtime_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> RuntimeStartupResult | None:
+    """Bootstrap one normal runtime generation only for a trusted configured Repo B."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise RuntimeStartupError("startup runtime repository is not trusted")
+    runtime_staging_root, runtime_snapshot_root, runtime_workspace_root = _runtime_work_roots(data_dir)
+    return run_startup_runtime_sync(
+        store,
+        runtime_staging_root,
+        runtime_snapshot_root,
+        runtime_workspace_root,
+        config.repo_b,
+        config.github_token,
+        core_token=os.environ.get("SUPERVISOR_TOKEN"),
     )
 
 
@@ -174,6 +211,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
+        if not stop.requested:
+            _run_startup_runtime_if_configured(store, config, data_dir)
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
 
