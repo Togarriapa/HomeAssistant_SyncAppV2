@@ -211,9 +211,7 @@ def test_unknown_subscription_id_fails_closed() -> None:
 
 def test_mismatched_event_type_fails_closed() -> None:
     messages = _success_messages()
-    messages.append(
-        _json({"id": 1, "type": "event", "event": {"event_type": "wrong-event"}})
-    )
+    messages.append(_json({"id": 1, "type": "event", "event": {"event_type": "wrong-event"}}))
     socket = _FakeSocket(messages)
 
     with pytest.raises(CoreEventStreamError, match="event message is invalid"):
