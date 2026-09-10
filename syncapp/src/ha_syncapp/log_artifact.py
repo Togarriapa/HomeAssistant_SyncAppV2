@@ -266,24 +266,23 @@ def _verify_manifest(manifest: bytes, files: tuple[LogArtifactFile, ...]) -> Non
     expected_file_payload = [
         {"path": item.path, "sha256": item.sha256, "size": item.size} for item in data_files
     ]
-    record_counts = payload.get("record_counts")
-    valid_record_counts = isinstance(record_counts, dict) and set(record_counts) == set(_CATEGORIES)
-    if valid_record_counts:
-        assert isinstance(record_counts, dict)
-        valid_record_counts = all(
-            type(value) is int and value >= 0 for value in record_counts.values()
-        )
     if (
         payload.get("schema") != 1
         or payload.get("retention_days") != _RETENTION_DAYS
         or payload.get("categories") != list(_CATEGORIES)
         or payload.get("files") != expected_file_payload
-        or not isinstance(payload.get("reference_time"), str)
-        or not valid_record_counts
     ):
         raise LogArtifactError("log artifact manifest does not match evidence")
-    reference_text = payload["reference_time"]
-    assert isinstance(reference_text, str)
+
+    record_counts = payload.get("record_counts")
+    if not isinstance(record_counts, dict) or set(record_counts) != set(_CATEGORIES):
+        raise LogArtifactError("log artifact manifest record counts are invalid")
+    if any(type(value) is not int or value < 0 for value in record_counts.values()):
+        raise LogArtifactError("log artifact manifest record counts are invalid")
+
+    reference_text = payload.get("reference_time")
+    if not isinstance(reference_text, str):
+        raise LogArtifactError("log artifact manifest reference time is invalid")
     try:
         parsed_reference = datetime.fromisoformat(reference_text.replace("Z", "+00:00"))
     except ValueError as exc:
