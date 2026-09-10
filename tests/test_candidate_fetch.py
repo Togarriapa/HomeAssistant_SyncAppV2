@@ -24,6 +24,27 @@ def _workspace_root(tmp_path: Path) -> Path:
     return root
 
 
+def _home_root(tmp_path: Path) -> Path:
+    root = tmp_path / "homeassistant"
+    root.mkdir(exist_ok=True)
+    return root
+
+
+def _fetch(
+    tmp_path: Path,
+    observation: CandidateObservation = _observation(),
+    expected_sha: str = SHA,
+    workspace_root: Path | None = None,
+):
+    return fetch_trusted_candidate(
+        observation,
+        expected_sha,
+        TOKEN,
+        workspace_root or _workspace_root(tmp_path),
+        _home_root(tmp_path),
+    )
+
+
 def _successful_git(calls: list[tuple[str, ...]]):
     def run(
         _executable: str,
@@ -51,12 +72,7 @@ def test_fetches_only_exact_candidate_ref_without_checkout(
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(fetch_module, "_run_git", _successful_git(calls))
 
-    result = fetch_trusted_candidate(
-        _observation(),
-        SHA,
-        TOKEN,
-        _workspace_root(tmp_path),
-    )
+    result = _fetch(tmp_path)
 
     assert result.target == TARGET
     assert result.repository_id == REPOSITORY_ID
@@ -75,7 +91,7 @@ def test_fetches_only_exact_candidate_ref_without_checkout(
         "--no-recurse-submodules",
         "--depth=1",
         "https://github.com/Owner/Home.git",
-        "+refs/heads/candidate:refs/syncapp/candidate-fetch",
+        "refs/heads/candidate:refs/syncapp/candidate-fetch",
     )
     forbidden = {"checkout", "merge", "reset", "pull", "push", "switch"}
     assert not forbidden.intersection(arguments[0] for arguments in calls)
@@ -126,7 +142,7 @@ def test_branch_movement_or_sha_mismatch_removes_workspace(
 
     monkeypatch.setattr(fetch_module, "_run_git", run)
     with pytest.raises(CandidateFetchError, match="does not match trusted observation"):
-        fetch_trusted_candidate(_observation(), SHA, TOKEN, workspaces)
+        _fetch(tmp_path, workspace_root=workspaces)
 
     assert list(workspaces.iterdir()) == []
 
@@ -157,7 +173,12 @@ def test_invalid_candidate_evidence_fails_before_workspace_creation(
 ) -> None:
     workspaces = _workspace_root(tmp_path)
     with pytest.raises(CandidateFetchError, match=message):
-        fetch_trusted_candidate(observation, expected_sha, TOKEN, workspaces)
+        _fetch(
+            tmp_path,
+            observation=observation,
+            expected_sha=expected_sha,
+            workspace_root=workspaces,
+        )
     assert list(workspaces.iterdir()) == []
 
 
@@ -167,7 +188,19 @@ def test_unsafe_workspace_root_is_rejected(tmp_path: Path) -> None:
     workspaces.chmod(0o755)
 
     with pytest.raises(CandidateFetchError, match="root is unsafe"):
-        fetch_trusted_candidate(_observation(), SHA, TOKEN, workspaces)
+        _fetch(tmp_path, workspace_root=workspaces)
+    assert list(workspaces.iterdir()) == []
+
+
+def test_workspace_must_be_disjoint_from_home_assistant_root(tmp_path: Path) -> None:
+    home = _home_root(tmp_path)
+    workspaces = home / "workspaces"
+    workspaces.mkdir(mode=0o700)
+    workspaces.chmod(0o700)
+
+    with pytest.raises(CandidateFetchError, match="overlaps Home Assistant source"):
+        fetch_trusted_candidate(_observation(), SHA, TOKEN, workspaces, home)
+
     assert list(workspaces.iterdir()) == []
 
 
@@ -190,7 +223,7 @@ def test_git_failure_removes_partial_workspace_and_auth_helper(
 
     monkeypatch.setattr(fetch_module, "_run_git", run)
     with pytest.raises(CandidateFetchError, match="confined Git command failed"):
-        fetch_trusted_candidate(_observation(), SHA, TOKEN, workspaces)
+        _fetch(tmp_path, workspace_root=workspaces)
     assert list(workspaces.iterdir()) == []
 
 
@@ -244,5 +277,5 @@ def test_non_commit_object_fails_closed_and_cleans_up(
 
     monkeypatch.setattr(fetch_module, "_run_git", run)
     with pytest.raises(CandidateFetchError, match="object is not a commit"):
-        fetch_trusted_candidate(_observation(), SHA, TOKEN, workspaces)
+        _fetch(tmp_path, workspace_root=workspaces)
     assert list(workspaces.iterdir()) == []
