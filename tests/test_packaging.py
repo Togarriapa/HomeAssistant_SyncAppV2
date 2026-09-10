@@ -56,6 +56,8 @@ def test_semantic_validator_has_mandatory_app_armor_child_transition() -> None:
     assert "/opt/syncapp-validator/python3 cx -> validator," in profile
     assert "profile validator flags=" in profile
     assert "complain" not in profile.casefold()
+    assert "/proc/*/attr/current r," in profile
+    assert "/proc/**" not in profile.split("profile validator", 1)[1]
     assert "/data/**" not in profile.split("profile validator", 1)[1]
     assert "/homeassistant/**" not in profile.split("profile validator", 1)[1]
     assert "network," not in profile.split("profile validator", 1)[1]
