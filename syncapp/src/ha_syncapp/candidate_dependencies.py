@@ -264,9 +264,7 @@ def _validate_result(result: CandidateDependencyAnalysis) -> None:
     )
     dynamic_paths = tuple(item.path for item in result.files if item.dynamic_reference)
     unanalyzed_paths = tuple(
-        item.path
-        for item in result.files
-        if item.disposition in {"non_utf8_or_binary", "oversize"}
+        item.path for item in result.files if item.disposition in {"non_utf8_or_binary", "oversize"}
     )
     if (
         result.known_entity_references != known_references
