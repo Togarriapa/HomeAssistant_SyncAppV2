@@ -46,6 +46,24 @@ def test_packaging_exposes_only_required_read_only_home_assistant_access() -> No
         assert not manifest.get(capability), f"Unexpected privilege: {capability}"
 
 
+def test_semantic_validator_has_mandatory_app_armor_child_transition() -> None:
+    profile = (ROOT / "syncapp/apparmor.txt").read_text()
+    dockerfile = (ROOT / "syncapp/Dockerfile").read_text()
+    semantics = (ROOT / "syncapp/src/ha_syncapp/candidate_semantics.py").read_text()
+    child = (ROOT / "syncapp/src/ha_syncapp/_validator_child.py").read_text()
+
+    assert "profile homeassistant_syncapp_v2 " in profile
+    assert "/opt/syncapp-validator/python3 cx -> validator," in profile
+    assert "profile validator flags=" in profile
+    assert "complain" not in profile.casefold()
+    assert "/data/**" not in profile.split("profile validator", 1)[1]
+    assert "/homeassistant/**" not in profile.split("profile validator", 1)[1]
+    assert "network," not in profile.split("profile validator", 1)[1]
+    assert "install -m 0555 /usr/local/bin/python3 /opt/syncapp-validator/python3" in dockerfile
+    assert '_VALIDATOR_PYTHON = "/opt/syncapp-validator/python3"' in semantics
+    assert 'b"homeassistant_syncapp_v2//validator (enforce)"' in child
+
+
 def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     import json
 
