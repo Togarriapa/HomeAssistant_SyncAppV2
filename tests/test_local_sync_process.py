@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import local_sync_process, local_sync_work
-from ha_syncapp.local_sync import LocalSyncDisposition, LocalSyncResult
 from ha_syncapp.local_sync_work import LocalSyncWorkResult
 from ha_syncapp.state import StateStore
 
@@ -17,7 +16,12 @@ def _store(tmp_path: Path) -> StateStore:
     return store
 
 
-def _run(store: StateStore, tmp_path: Path, *, target: str = TARGET):
+def _run(
+    store: StateStore,
+    tmp_path: Path,
+    *,
+    target: str = TARGET,
+) -> local_sync_process.LocalSyncProcessResult:
     return local_sync_process.run_local_sync_process(
         store,
         tmp_path / "homeassistant",
