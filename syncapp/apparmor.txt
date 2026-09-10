@@ -25,7 +25,7 @@ profile homeassistant_syncapp_v2 flags=(attach_disconnected,mediate_deleted) {
   profile validator flags=(attach_disconnected,mediate_deleted) {
     #include <abstractions/base>
 
-    signal (receive) peer=*_homeassistant_syncapp_v2,
+    signal (receive) peer=*homeassistant_syncapp_v2,
     capability setuid,
     capability setgid,
 

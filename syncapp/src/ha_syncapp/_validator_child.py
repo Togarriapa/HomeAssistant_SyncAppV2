@@ -14,12 +14,15 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import resource
 import runpy
 import sys
 from pathlib import Path
 
-_EXPECTED_APPARMOR_PROFILE = b"homeassistant_syncapp_v2//validator (enforce)"
+_EXPECTED_APPARMOR_PROFILE = re.compile(
+    rb"(?:[A-Za-z0-9_-]+_)?homeassistant_syncapp_v2//validator \(enforce\)"
+)
 _VALIDATOR_PYTHON = Path("/opt/syncapp-validator/python3")
 
 
@@ -37,8 +40,13 @@ class _Compare(ctypes.Structure):
     ]
 
 
+def _verify_apparmor_label(current: bytes) -> None:
+    if len(current) > 256 or _EXPECTED_APPARMOR_PROFILE.fullmatch(current.strip()) is None:
+        raise RuntimeError("AppArmor validator profile is not enforced")
+
+
 def _verify_apparmor_profile() -> None:
-    """Fail unless exec already transitioned into the exact enforced child profile."""
+    """Fail unless exec transitioned into an enforced Supervisor-adjusted child profile."""
     try:
         fd = os.open("/proc/self/attr/current", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
@@ -47,8 +55,7 @@ def _verify_apparmor_profile() -> None:
             os.close(fd)
     except OSError:
         raise RuntimeError("AppArmor confinement unavailable") from None
-    if len(current) > 256 or current.strip() != _EXPECTED_APPARMOR_PROFILE:
-        raise RuntimeError("AppArmor validator profile is not enforced")
+    _verify_apparmor_label(current)
 
 
 def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:

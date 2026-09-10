@@ -20,7 +20,7 @@ def run() -> None:
             "--security-opt",
             "no-new-privileges",
             "--security-opt",
-            "apparmor=homeassistant_syncapp_v2",
+            "apparmor=ci_homeassistant_syncapp_v2",
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,noexec,size=256m",
             "--volume",

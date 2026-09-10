@@ -57,9 +57,10 @@ Home Assistant OS uses AppArmor as its host Linux security module. The App there
 `apparmor.txt` with a dedicated nested `validator` profile. The service can start semantic
 validation only by executing `/opt/syncapp-validator/python3`; the parent profile applies a
 `cx -> validator` transition to that exact executable path. The child checks
-`/proc/self/attr/current` before candidate access and refuses to continue unless the exact
-`homeassistant_syncapp_v2//validator` profile is reported in **enforce** mode. Missing,
-wrong, unconfined and complain-mode execution all fail closed.
+`/proc/self/attr/current` before candidate access and refuses to continue unless the
+`homeassistant_syncapp_v2//validator` child (with Supervisor's optional repository prefix)
+is reported in **enforce** mode. Missing, wrong, unconfined and complain-mode execution
+all fail closed.
 
 The validator child profile grants read/mmap access to fixed Python/Core runtime resources,
 its helper source and fixed official-container marker files, plus read/write access only to
@@ -96,7 +97,8 @@ validation, not a live HA instance. It cannot prove device behavior, integration
 health, or correctness of arbitrary custom Python. Unsupported candidates stay blocked.
 
 No Docker socket, manager/admin Supervisor role, protection change or host privilege is
-added. Native amd64 and aarch64 CI loads the shipped AppArmor profile, requires the nested
+added. Native amd64 and aarch64 CI adjusts the outer profile name as Supervisor does, loads
+the shipped AppArmor profile, runs the parent lifecycle under it, requires the nested
 validator profile to be enforced, runs filesystem/network/exec/identity probes under it,
 and runs real valid, invalid and warning-producing Core fixtures. Physical Home Assistant
 OS installation remains a separate on-device verification requirement.

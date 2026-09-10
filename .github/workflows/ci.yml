@@ -49,15 +49,18 @@ jobs:
           persist-credentials: false
       - name: Build app image
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} -t syncapp:test syncapp
+      - name: Load and verify Supervisor-adjusted AppArmor profile
+        run: |
+          test -x /usr/sbin/apparmor_parser
+          python3 scripts/apparmor_ci.py load
+          sudo grep -Fxq "ci_homeassistant_syncapp_v2 (enforce)" /sys/kernel/security/apparmor/profiles
+          sudo grep -Fxq "ci_homeassistant_syncapp_v2//validator (enforce)" /sys/kernel/security/apparmor/profiles
       - name: Verify passive lifecycle and restart persistence
         run: python3 scripts/container_smoke.py
-      - name: Load and verify shipped AppArmor profile
-        run: |
-          test -x "$(command -v apparmor_parser)"
-          sudo apparmor_parser -r -W syncapp/apparmor.txt
-          sudo grep -Fxq "homeassistant_syncapp_v2" /sys/kernel/security/apparmor/profiles
-          sudo grep -Fxq "homeassistant_syncapp_v2//validator (enforce)" /sys/kernel/security/apparmor/profiles
       - name: Verify isolated semantic sandbox boundaries
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py
       - name: Verify exact-version Core semantic checker
         run: python3 scripts/semantic_container_smoke.py
+      - name: Unload AppArmor test profile
+        if: always()
+        run: python3 scripts/apparmor_ci.py unload

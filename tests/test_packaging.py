@@ -61,7 +61,8 @@ def test_semantic_validator_has_mandatory_app_armor_child_transition() -> None:
     assert "network," not in profile.split("profile validator", 1)[1]
     assert "install -m 0555 /usr/local/bin/python3 /opt/syncapp-validator/python3" in dockerfile
     assert '_VALIDATOR_PYTHON = "/opt/syncapp-validator/python3"' in semantics
-    assert 'b"homeassistant_syncapp_v2//validator (enforce)"' in child
+    assert "homeassistant_syncapp_v2//validator" in child
+    assert "_EXPECTED_APPARMOR_PROFILE.fullmatch" in child
 
 
 def test_documented_default_options_are_accepted(tmp_path: Path) -> None:

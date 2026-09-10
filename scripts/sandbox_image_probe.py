@@ -13,7 +13,7 @@ config = Path(sys.argv[1])
 helper["_sandbox"](config)
 assert os.geteuid() != 0 and os.getuid() != 0
 assert Path("/proc/self/attr/current").read_bytes().strip() == (
-    b"homeassistant_syncapp_v2//validator (enforce)"
+    b"ci_homeassistant_syncapp_v2//validator (enforce)"
 )
 # The validator must retain only the fixed identity evidence Core needs to recognize
 # the bundled official image; arbitrary files outside the sandbox remain inaccessible.
