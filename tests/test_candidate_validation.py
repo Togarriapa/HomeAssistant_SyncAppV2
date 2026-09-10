@@ -318,7 +318,11 @@ def test_result_verifier_rejects_tampering(
 ) -> None:
     stage = _stage(tmp_path, {"automations.yaml": b"- alias: safe\n"})
     integrity, dependencies, impact, risk, runtime = _evidence(("automations.yaml",))
-    monkeypatch.setattr(validation_module.stage_module, "verify_candidate_stage", lambda value: None)
+    monkeypatch.setattr(
+        validation_module.stage_module,
+        "verify_candidate_stage",
+        lambda value: None,
+    )
     monkeypatch.setattr(
         validation_module,
         "verify_candidate_risk_classification",
@@ -347,7 +351,11 @@ def test_static_validation_is_deterministic(
 ) -> None:
     stage = _stage(tmp_path, {"automations.yaml": b"- alias: safe\n"})
     integrity, dependencies, impact, risk, runtime = _evidence(("automations.yaml",))
-    monkeypatch.setattr(validation_module.stage_module, "verify_candidate_stage", lambda value: None)
+    monkeypatch.setattr(
+        validation_module.stage_module,
+        "verify_candidate_stage",
+        lambda value: None,
+    )
     monkeypatch.setattr(
         validation_module,
         "verify_candidate_risk_classification",
