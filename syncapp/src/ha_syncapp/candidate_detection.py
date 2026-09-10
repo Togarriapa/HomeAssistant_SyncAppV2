@@ -1,4 +1,4 @@
-"""Read-only detection of one trusted Repo B candidate commit."""
+"""Read-only detection and durable binding of one trusted Repo B candidate commit."""
 
 from __future__ import annotations
 
@@ -7,13 +7,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .github_repo import BranchAbsence, BranchHead, fetch_optional_trusted_branch_head
+from .state import StateError, StateStore, WorkItem
 
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _CANDIDATE_BRANCH = "candidate"
+_CANDIDATE_WORK_KIND = "candidate"
 
 
 class CandidateDetectionError(RuntimeError):
-    """Candidate evidence is malformed or inconsistent."""
+    """Candidate evidence or durable detection state is invalid."""
 
 
 class CandidateDisposition(StrEnum):
@@ -32,6 +34,14 @@ class CandidateObservation:
     repository_id: int
     branch: str
     commit_sha: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateDetectionResult:
+    """One trusted observation and its optional durable candidate work item."""
+
+    observation: CandidateObservation
+    work: WorkItem | None
 
 
 def _validate_observation(observation: CandidateObservation) -> None:
@@ -91,6 +101,34 @@ def observe_trusted_candidate(
         raise CandidateDetectionError("Candidate observation is invalid")
     _validate_observation(observation)
     return observation
+
+
+def detect_and_enqueue_trusted_candidate(
+    store: StateStore,
+    target: str,
+    token: str,
+) -> CandidateDetectionResult:
+    """Detect the trusted candidate head and durably enqueue only its immutable SHA."""
+    if type(store) is not StateStore:
+        raise CandidateDetectionError("Candidate detection state store is invalid")
+    try:
+        expected_id = store.repository_id(target)
+    except StateError:
+        raise CandidateDetectionError("Candidate detection state is unavailable") from None
+    if expected_id is None:
+        raise CandidateDetectionError("Trusted Repo B binding is unavailable")
+
+    observation = observe_trusted_candidate(target, token, expected_id=expected_id)
+    if observation.repository_id != expected_id:
+        raise CandidateDetectionError("Candidate repository identity is inconsistent")
+    if observation.commit_sha is None:
+        return CandidateDetectionResult(observation=observation, work=None)
+
+    try:
+        work = store.enqueue_work(_CANDIDATE_WORK_KIND, observation.commit_sha)
+    except StateError:
+        raise CandidateDetectionError("Candidate detection state is unavailable") from None
+    return CandidateDetectionResult(observation=observation, work=work)
 
 
 def classify_candidate(
