@@ -47,8 +47,28 @@ The Stage boundary:
 
 `verify_candidate_stage()` lets every later validation step re-bind itself to the exact accepted manifest and staged bytes before consuming them. Stage success still grants no authority to modify Home Assistant.
 
+## Immutable change-detection boundary
+
+`detect_candidate_changes()` implements the README's **Change detection** evidence needed by later dependency analysis and risk classification. It compares the exact candidate commit with a stable, identity-bound Repo B `main` head rather than using mutable live Home Assistant bytes as the known-good baseline.
+
+The change-detection boundary:
+
+- re-verifies Candidate Fetch and Candidate Stage evidence before consuming either;
+- re-proves the configured private Repo B identity and obtains the exact trusted `main` head;
+- fetches that exact `main` commit only into the already-isolated candidate Git metadata under a temporary app ref;
+- uses the same credential-free HTTPS and temporary non-interactive authentication boundary as candidate Fetch;
+- requires the fetched baseline SHA and Git object type to exactly match the trusted `main` observation;
+- validates both Git trees as regular `100644`/`100755` blobs with safe paths and rejects symlinks, submodules, traversal, `.git`, malformed IDs, duplicates and prefix conflicts;
+- requires candidate Git path, mode and object-ID metadata to exactly match the verified Stage manifest before deriving differences;
+- emits deterministic UTF-8-byte-ordered evidence for added, deleted, modified, executable-mode-changed, and combined content/mode changes;
+- binds that evidence to Repo B target, stable repository ID, exact baseline SHA and exact candidate SHA;
+- re-verifies Stage and Fetch after evidence generation, then re-observes Repo B `main` and fails closed if the known-good branch moved during the operation;
+- removes the temporary baseline ref on every completion or failure path.
+
+This step performs no merge and grants no deployment authority. A moved, absent or unverifiable `main`, identity mismatch, transport failure, staged-byte change, or Git/Stage metadata disagreement causes change detection to fail closed.
+
 ## Not implemented yet
 
 No candidate byte from Stage is copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback remain downstream.
 
-The next increment should compare the verified candidate stage with the relevant known-good configuration baseline and derive deterministic changed-file evidence suitable for dependency analysis and risk classification. Only after those checks and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.
+The next increment should consume immutable change evidence for dependency analysis and risk classification. Only after those checks and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.
