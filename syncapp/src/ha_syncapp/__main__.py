@@ -15,6 +15,11 @@ from types import FrameType
 
 from . import __version__
 from .config import Config, ConfigError, load_config
+from .database_startup import (
+    DatabaseStartupError,
+    DatabaseStartupResult,
+    run_startup_database_sync,
+)
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
 from .retrigger_cycle import RetriggerCycleError, run_retrigger_cycle
@@ -98,6 +103,26 @@ def _local_work_roots(
     return roots
 
 
+def _database_work_roots(
+    data_dir: Path,
+    home_assistant_root: Path,
+) -> tuple[Path, Path, Path]:
+    """Return verified app-owned roots for Recorder staging, snapshots and Git metadata."""
+    protected = (data_dir / "syncapp").resolve(strict=True)
+    home = home_assistant_root.resolve(strict=True)
+    if protected == home or protected in home.parents or home in protected.parents:
+        raise RetriggerCycleError("database work root overlaps Home Assistant source")
+    work = protected / "work"
+    roots = (
+        work / "database-staging",
+        work / "database-snapshots",
+        work / "database-workspaces",
+    )
+    for root in roots:
+        _ensure_private_work_directory(protected, root)
+    return roots
+
+
 def _runtime_work_roots(data_dir: Path) -> tuple[Path, Path, Path]:
     """Return verified app-owned roots for runtime artifacts, snapshots and Git metadata."""
     protected = (data_dir / "syncapp").resolve(strict=True)
@@ -158,6 +183,46 @@ def _run_startup_local_if_configured(
         )
     except (RetriggerCycleError, OSError) as exc:
         raise LocalStartupError("startup Local synchronization failed closed") from exc
+
+
+def _run_startup_database_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> DatabaseStartupResult | None:
+    """Bootstrap one normal Recorder generation only after trust and explicit selection."""
+    if (
+        config.repo_b is None
+        or config.github_token is None
+        or config.recorder_database_path is None
+    ):
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise DatabaseStartupError("startup database repository is not trusted")
+
+    source_database = Path(config.recorder_database_path)
+    try:
+        canonical_home = home_assistant_root.resolve(strict=True)
+        canonical_source = source_database.resolve(strict=True)
+        if not canonical_home.is_dir():
+            raise DatabaseStartupError("startup Home Assistant source is invalid")
+        if canonical_source == canonical_home or canonical_home not in canonical_source.parents:
+            raise DatabaseStartupError("startup database source escapes Home Assistant source")
+        database_staging_root, snapshot_staging_root, workspace_root = _database_work_roots(
+            data_dir, home_assistant_root
+        )
+        return run_startup_database_sync(
+            store,
+            source_database,
+            database_staging_root,
+            snapshot_staging_root,
+            workspace_root,
+            config.repo_b,
+            config.github_token,
+        )
+    except (RetriggerCycleError, OSError) as exc:
+        raise DatabaseStartupError("startup database synchronization failed closed") from exc
 
 
 def _run_startup_runtime_if_configured(
@@ -284,6 +349,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         if not stop.requested:
             _run_startup_local_if_configured(store, config, data_dir)
             if not stop.requested:
+                _run_startup_database_if_configured(store, config, data_dir)
+            if not stop.requested:
                 _run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
@@ -403,6 +470,9 @@ def main() -> int:
     except LocalStartupError:
         emit("service_failed", level="error", reason="local_sync_startup_failed")
         return 8
+    except DatabaseStartupError:
+        emit("service_failed", level="error", reason="database_sync_startup_failed")
+        return 9
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
