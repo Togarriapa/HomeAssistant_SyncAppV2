@@ -41,9 +41,7 @@ class SupervisorLogResponse:
     body: bytes
 
 
-SupervisorLogTransport = Callable[
-    [str, str, Mapping[str, str], float, int], SupervisorLogResponse
-]
+SupervisorLogTransport = Callable[[str, str, Mapping[str, str], float, int], SupervisorLogResponse]
 
 
 def collect_supervisor_logs(
