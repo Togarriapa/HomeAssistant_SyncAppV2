@@ -138,9 +138,7 @@ def _validate_change_shape(change: CandidateChange) -> None:
             raise CandidateIntegrityError("candidate change object ID is invalid")
 
     content_changed = (
-        old_present
-        and new_present
-        and change.baseline_object_id != change.candidate_object_id
+        old_present and new_present and change.baseline_object_id != change.candidate_object_id
     )
     mode_changed = old_present and new_present and change.baseline_mode != change.candidate_mode
     valid = {
