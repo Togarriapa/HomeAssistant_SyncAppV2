@@ -19,6 +19,8 @@ def run() -> None:
             "--read-only",
             "--security-opt",
             "no-new-privileges",
+            "--security-opt",
+            "apparmor=homeassistant_syncapp_v2",
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,noexec,size=256m",
             "--volume",
