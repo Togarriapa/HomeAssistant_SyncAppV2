@@ -166,15 +166,24 @@ class RuntimeEventWorker:
         reconnects = 0
         events_forwarded = 0
         readiness_signals = 0
+        mailbox_failed = False
 
         async def forward_event(evidence: Mapping[str, object]) -> None:
-            nonlocal events_forwarded
-            await self._mailbox.event(evidence)
+            nonlocal events_forwarded, mailbox_failed
+            try:
+                await self._mailbox.event(evidence)
+            except RuntimeEventMailboxError:
+                mailbox_failed = True
+                raise
             events_forwarded += 1
 
         async def forward_ready() -> None:
-            nonlocal readiness_signals
-            await self._mailbox.ready()
+            nonlocal readiness_signals, mailbox_failed
+            try:
+                await self._mailbox.ready()
+            except RuntimeEventMailboxError:
+                mailbox_failed = True
+                raise
             readiness_signals += 1
 
         while attempts < self._max_attempts and not stop.is_set():
@@ -188,6 +197,14 @@ class RuntimeEventWorker:
                     stop,
                 )
             except CoreEventStreamError:
+                if mailbox_failed:
+                    return _result(
+                        RuntimeEventWorkerReason.FAILED,
+                        attempts,
+                        reconnects,
+                        events_forwarded,
+                        readiness_signals,
+                    )
                 if stop.is_set():
                     return _result(
                         RuntimeEventWorkerReason.STOPPED,
@@ -227,7 +244,11 @@ class RuntimeEventWorker:
                     readiness_signals,
                 )
 
-            reason = RuntimeEventWorkerReason.STOPPED if stopped else RuntimeEventWorkerReason.COMPLETED
+            reason = (
+                RuntimeEventWorkerReason.STOPPED
+                if stopped
+                else RuntimeEventWorkerReason.COMPLETED
+            )
             return _result(
                 reason,
                 attempts,
