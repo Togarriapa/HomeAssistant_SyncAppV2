@@ -16,4 +16,12 @@ The lane adapters preserve the existing deterministic identities:
 
 These adapters schedule work only. They do not execute synchronization and they do not change Retrigger passes. Future normal producers may invoke them after independently establishing the appropriate event or periodic trigger required by the initial README.
 
-This slice intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
+## Runtime event classification
+
+`runtime_event_trigger.schedule_runtime_for_event()` is a narrow boundary between a future Home Assistant event transport and durable runtime scheduling. It accepts only a normalized mapping containing one bounded `event_type` string. It does not retain raw Home Assistant event payloads.
+
+Events that can change the runtime view—state, entity/device/area/floor/label/category registries, loaded components, Core configuration, and service registration—schedule the existing runtime generation. Unrelated events are ignored. Malformed evidence fails closed. Because the function delegates to routine scheduling, repeated events are coalesced while work is active and a deterministic blocked failure stays blocked.
+
+The network transport is intentionally separate. A future WebSocket subscriber must authenticate read-only, normalize an incoming Home Assistant event to `{"event_type": "..."}`, enforce its own frame/time limits, and only then call this classifier. The classifier itself has no socket, API-call, service-call, or candidate-deployment capability.
+
+This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
