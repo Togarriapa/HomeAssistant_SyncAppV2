@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import ha_syncapp.candidate_stage as stage_module
 import pytest
@@ -132,6 +132,21 @@ def test_fetch_ref_change_is_rejected_before_materialization(tmp_path: Path) -> 
     assert list(staging.iterdir()) == []
 
 
+def test_malformed_fetch_identity_output_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetched, home = _fetched_candidate(tmp_path)
+    staging = _staging_root(tmp_path)
+    monkeypatch.setattr(stage_module, "_run_git_bytes", lambda *args, **kwargs: b"\xff\n")
+
+    with pytest.raises(CandidateStageError) as caught:
+        stage_fetched_candidate(fetched, staging, home)
+
+    assert "UnicodeDecodeError" not in str(caught.value)
+    assert list(staging.iterdir()) == []
+
+
 def test_staging_root_must_be_disjoint_from_live_home_assistant(tmp_path: Path) -> None:
     fetched, home = _fetched_candidate(tmp_path)
     staging = home / "candidate-staging"
@@ -226,7 +241,7 @@ def test_insufficient_disk_space_fails_before_blob_materialization(
     monkeypatch.setattr(
         stage_module.shutil,
         "disk_usage",
-        lambda path: os.statvfs_result((0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+        lambda path: SimpleNamespace(total=0, used=0, free=0),
     )
 
     with pytest.raises(CandidateStageError, match="insufficient free space"):
