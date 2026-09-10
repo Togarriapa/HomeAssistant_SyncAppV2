@@ -12,7 +12,7 @@ The sole product specification for candidate handling is the initial V2 `README.
 
 ## Isolated Fetch boundary
 
-`fetch_trusted_candidate()` implements only the next **Fetch** step. It accepts one present trusted candidate observation plus the exact expected SHA, an owner-only workspace root, and the live Home Assistant root used solely to prove that Git metadata will be created outside that live tree.
+`fetch_trusted_candidate()` implements only **Fetch**. It accepts one present trusted candidate observation plus the exact expected SHA, an owner-only workspace root, and the live Home Assistant root used solely to prove that Git metadata will be created outside that live tree.
 
 The fetch boundary:
 
@@ -27,8 +27,18 @@ The fetch boundary:
 
 Branch movement between detection and fetch therefore fails closed instead of silently substituting a newer proposal. Fetch success still grants no validation or deployment authority.
 
+## Isolated Stage boundary
+
+`stage_fetched_candidate()` implements only **Stage**. Before reading the tree it re-verifies the private fetched workspace, its SyncApp ref, object type and exact commit SHA. The staging root must be an owner-only directory that is disjoint from both the live Home Assistant tree and the fetched Git workspace.
+
+Stage uses Git plumbing rather than checkout/worktree operations. It recursively enumerates the exact fetched commit and accepts only regular `100644` or `100755` blobs. Symlinks, submodules/non-blob entries, malformed metadata, path traversal, `.git` path components, duplicate paths and file/directory prefix collisions fail closed. Blob output is written with exclusive/no-follow semantics where supported, its exact Git-reported size is checked, and only the Git executable bit is preserved.
+
+Before materialization, the required blob size is compared with current free space while preserving a reserve for metadata and recovery. The resulting candidate tree is then passed through the existing descriptor-aware snapshot primitive, which hashes every file and re-verifies source stability. Stage adds a canonical `candidate.json` manifest that binds the snapshot integrity ID to Repo B target, stable repository ID and exact candidate commit SHA. `verify_candidate_stage()` re-hashes the staged tree, verifies the canonical manifest and its digest, and rejects unexpected root entries or tampering.
+
+Temporary materialization is removed on every path. A failed Stage removes any incomplete snapshot. A successful Stage remains isolated evidence only; the durable candidate work item is not marked successful by this slice.
+
 ## Not implemented yet
 
-The fetched Git object has not yet been materialized into a candidate staging tree. No remote bytes are copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback are also not implemented by this boundary.
+No remote candidate bytes are copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback are not authorized by Detect, Fetch or Stage.
 
-The next Remote -> Home Assistant increment should materialize the exact fetched commit into separate protected staging without symlink/path escape, generate deterministic file/integrity evidence and compare it with the relevant known-good baseline. Only after that staging boundary is independently verified should dependency analysis, risk classification and Home Assistant validation be introduced. Apply must remain downstream of validation and a recoverable pre-deployment backup, followed by observation and automatic rollback on failure.
+The next Remote -> Home Assistant increment should compare the verified candidate stage with the relevant known-good baseline and build dependency/risk evidence without applying it. Home Assistant validation must then run against isolated staged configuration. Apply must remain downstream of successful validation and a recoverable pre-deployment backup, followed by observation and automatic rollback on failure.
