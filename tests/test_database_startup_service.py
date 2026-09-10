@@ -72,9 +72,7 @@ def test_database_bootstrap_uses_private_roots_after_canonical_containment(
     config = Config(repo_b=TARGET, github_token=TOKEN, recorder_database_path=str(source))
     try:
         with pytest.raises(DatabaseStartupError, match="sentinel-after-capture"):
-            service._run_startup_database_if_configured(
-                store, config, tmp_path / "data", home
-            )
+            service._run_startup_database_if_configured(store, config, tmp_path / "data", home)
     finally:
         store.__exit__(None, None, None)
 
@@ -109,9 +107,7 @@ def test_database_bootstrap_rejects_parent_symlink_escape(tmp_path: Path) -> Non
     )
     try:
         with pytest.raises(DatabaseStartupError, match="escapes Home Assistant"):
-            service._run_startup_database_if_configured(
-                store, config, tmp_path / "data", home
-            )
+            service._run_startup_database_if_configured(store, config, tmp_path / "data", home)
     finally:
         store.__exit__(None, None, None)
 
@@ -129,9 +125,7 @@ def test_database_bootstrap_rejects_unavailable_source_without_scheduling(
     )
     try:
         with pytest.raises(DatabaseStartupError, match="failed closed"):
-            service._run_startup_database_if_configured(
-                store, config, tmp_path / "data", home
-            )
+            service._run_startup_database_if_configured(store, config, tmp_path / "data", home)
         assert store.get_work("database", "0" * 64) is None
     finally:
         store.__exit__(None, None, None)
@@ -154,7 +148,9 @@ def test_service_orders_database_between_local_and_runtime(
     order: list[str] = []
     stop_after_runtime = service.Shutdown()
 
-    def verify(target: str, token: str, *, expected_id: int | None = None) -> RepoIdentity:
+    def verify(
+        target: str, token: str, *, expected_id: int | None = None
+    ) -> RepoIdentity:
         assert target == TARGET
         assert token == TOKEN
         order.append("trust")
@@ -200,7 +196,9 @@ def test_shutdown_after_database_bootstrap_skips_runtime(
     monkeypatch.setattr(
         service,
         "fetch_and_verify_private_repository",
-        lambda target, token, expected_id=None: RepoIdentity(target=target, repository_id=123),
+        lambda target, token, expected_id=None: RepoIdentity(
+            target=target, repository_id=123
+        ),
     )
     monkeypatch.setattr(service, "_run_startup_local_if_configured", lambda *args: None)
 
