@@ -44,13 +44,16 @@ def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
     ruleset = libc.syscall(444, ctypes.byref(handled), ctypes.sizeof(handled), 0)
     if ruleset < 0:
         raise RuntimeError("Landlock unavailable")
-    read_file, read_dir = 1 << 2, 1 << 3
+    execute, read_file, read_dir = 1 << 0, 1 << 2, 1 << 3
     # Allow read-only interpreter/libraries/timezone/certificates, never /data or /homeassistant.
     rules = [(Path(p), read_file | read_dir) for p in ("/usr", "/lib", "/lib64", "/etc/ssl")]
     rules += [
         (Path(p), read_file)
         for p in ("/etc/localtime", "/etc/passwd", "/etc/mime.types", "/dev/urandom")
     ]
+    # Home Assistant's checker resolves its dependency site using this exact interpreter.
+    # No other executable is granted Landlock EXECUTE permission.
+    rules.append((Path("/usr/local/bin/python3"), read_file | execute))
     # Disposable candidate copy only: regular files/directories, not sockets/devices/symlinks.
     writable = read_file | read_dir | (1 << 1) | (1 << 4) | (1 << 5)
     writable |= (1 << 7) | (1 << 8) | (1 << 13) | (1 << 14)
@@ -93,8 +96,6 @@ def _syscall_sandbox() -> None:
     denied = 0x00050000 | errno.EPERM
     try:
         names = (
-            "execve",
-            "execveat",
             "connect",
             "bind",
             "listen",
