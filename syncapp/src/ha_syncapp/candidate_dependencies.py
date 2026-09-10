@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from . import candidate_stage as stage_module
 from .candidate_integrity import CandidateIntegrity
 from .candidate_stage import CandidateStage, CandidateStageEntry, CandidateStageError
+from .runtime_evidence import RuntimeEvidenceError, fingerprint_runtime
 from .runtime_inventory import RuntimeInventoryInput
 
 _OBJECT_REFERENCE = re.compile(r"(?<![A-Za-z0-9_])([a-z0-9_]+\.[a-z0-9_]+)(?![A-Za-z0-9_])")
@@ -42,13 +43,14 @@ class CandidateDependencyFile:
 
 @dataclass(frozen=True, slots=True)
 class CandidateDependencyAnalysis:
-    """Immutable dependency evidence bound to one validated candidate staging tree."""
+    """Immutable dependency evidence bound to candidate staging and runtime evidence."""
 
     target: str
     repository_id: int
     baseline_sha: str
     candidate_sha: str
     stage_manifest_sha256: str
+    runtime_sha256: str
     analysis_method: str
     files: tuple[CandidateDependencyFile, ...]
     known_entity_references: tuple[str, ...]
@@ -65,6 +67,7 @@ def analyze_candidate_dependencies(
     """Analyze changed staged text conservatively without executing candidate content."""
     _validate_inputs(integrity, stage, runtime)
     try:
+        runtime_sha256 = fingerprint_runtime(runtime)
         stage_module.verify_candidate_stage(stage)
         known_entities = _runtime_entities(runtime)
         entries = {entry.path: entry for entry in stage.entries}
@@ -76,12 +79,16 @@ def analyze_candidate_dependencies(
         )
         _validate_files(files, integrity.changed_paths)
         stage_module.verify_candidate_stage(stage)
+        if fingerprint_runtime(runtime) != runtime_sha256:
+            raise CandidateDependencyError("runtime evidence changed during dependency analysis")
     except CandidateDependencyError:
         raise
     except CandidateStageError as exc:
         raise CandidateDependencyError(
             "candidate dependency evidence could not be established"
         ) from exc
+    except RuntimeEvidenceError as exc:
+        raise CandidateDependencyError("runtime evidence could not be bound safely") from exc
 
     known_references = tuple(
         sorted({reference for item in files for reference in item.known_entity_references})
@@ -99,6 +106,7 @@ def analyze_candidate_dependencies(
         baseline_sha=integrity.baseline_sha,
         candidate_sha=integrity.candidate_sha,
         stage_manifest_sha256=integrity.stage_manifest_sha256,
+        runtime_sha256=runtime_sha256,
         analysis_method=_ANALYSIS_METHOD,
         files=files,
         known_entity_references=known_references,
@@ -217,6 +225,7 @@ def _validate_result(result: CandidateDependencyAnalysis) -> None:
     if (
         type(result) is not CandidateDependencyAnalysis
         or result.analysis_method != _ANALYSIS_METHOD
+        or _DIGEST.fullmatch(result.runtime_sha256) is None
     ):
         raise CandidateDependencyError("candidate dependency result is invalid")
     if tuple(sorted(set(result.known_entity_references))) != result.known_entity_references:
