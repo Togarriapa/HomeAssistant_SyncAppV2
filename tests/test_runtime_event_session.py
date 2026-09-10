@@ -48,9 +48,9 @@ def test_ready_does_not_rearm_blocked_runtime_work(tmp_path: Path) -> None:
         running = store.claim_work_kind("runtime", now=first_at)
         assert running is not None
         blocked = store.fail_work(running, transient=False, now=first_at)
+        assert blocked.status == "blocked"
 
         asyncio.run(session.ready(now=reconnect_at))
-        repeated = store.work_item("runtime", runtime_sync_work_key("Owner/Home"))
+        repeated = store.claim_work_kind("runtime", now=reconnect_at)
 
-    assert repeated == blocked
-    assert repeated.status == "blocked"
+    assert repeated is None
