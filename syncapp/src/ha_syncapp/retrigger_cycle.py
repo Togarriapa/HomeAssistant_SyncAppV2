@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ha_syncapp.database_sync_retrigger import (
@@ -14,6 +15,11 @@ from ha_syncapp.local_sync_retrigger import (
     LocalSyncRetriggerError,
     LocalSyncRetriggerResult,
     run_local_sync_retrigger_pass,
+)
+from ha_syncapp.log_collection import (
+    LogCollectionError,
+    LogCollectionResult,
+    collect_and_enqueue_supervisor_logs,
 )
 from ha_syncapp.log_sync_retrigger import (
     LogSyncRetriggerError,
@@ -40,6 +46,7 @@ class RetriggerCycleResult:
     database_sync: DatabaseSyncRetriggerResult
     runtime_sync: RuntimeSyncRetriggerResult
     log_sync: LogSyncRetriggerResult
+    log_collection: LogCollectionResult | None
 
 
 def run_retrigger_cycle(
@@ -62,7 +69,7 @@ def run_retrigger_cycle(
     log_snapshot_root: Path | None = None,
     log_workspace_root: Path | None = None,
 ) -> RetriggerCycleResult:
-    """Process at most one item from each implemented outbound lane in order."""
+    """Recover bounded outbound work first, then enqueue one fresh log artifact."""
     if type(store) is not StateStore:
         raise RetriggerCycleError("retrigger cycle state store is invalid")
     log_roots = (log_artifact_root, log_snapshot_root, log_workspace_root)
@@ -100,6 +107,7 @@ def run_retrigger_cycle(
         )
         if log_artifact_root is None:
             log_sync = LogSyncRetriggerResult(recovered_interrupted=0, processed=None)
+            log_collection = None
         else:
             if log_snapshot_root is None or log_workspace_root is None:
                 raise RetriggerCycleError("retrigger logs work roots became incomplete")
@@ -111,11 +119,19 @@ def run_retrigger_cycle(
                 target,
                 github_token,
             )
+            log_collection = collect_and_enqueue_supervisor_logs(
+                store,
+                log_artifact_root,
+                target,
+                reference_time=datetime.now(UTC),
+                token=core_token,
+            )
     except (
         LocalSyncRetriggerError,
         DatabaseSyncRetriggerError,
         RuntimeSyncRetriggerError,
         LogSyncRetriggerError,
+        LogCollectionError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -124,4 +140,5 @@ def run_retrigger_cycle(
         database_sync=database_sync,
         runtime_sync=runtime_sync,
         log_sync=log_sync,
+        log_collection=log_collection,
     )
