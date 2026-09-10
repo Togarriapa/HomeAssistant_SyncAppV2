@@ -13,6 +13,8 @@ init: true
 apparmor: true
 backup: cold
 timeout: 15
+hassio_api: true
+hassio_role: default
 homeassistant_api: true
 map:
   - type: homeassistant_config
