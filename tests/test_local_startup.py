@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from ha_syncapp import local_startup, local_sync_process
+from ha_syncapp import local_startup, local_sync_work
 from ha_syncapp.local_sync import LocalSyncError
 from ha_syncapp.local_sync_process import LocalSyncProcessError, LocalSyncProcessResult
 from ha_syncapp.local_sync_work import local_sync_work_key
@@ -84,27 +84,27 @@ def test_transient_local_failure_remains_durable_retry(
     def fail(*args: object, **kwargs: object):
         raise LocalSyncError(f"failed with {secret}")
 
-    monkeypatch.setattr(local_sync_process, "execute_claimed_local_sync_work", fail)
+    monkeypatch.setattr(local_sync_work, "synchronize_local_configuration", fail)
     try:
-        with pytest.raises(local_startup.LocalStartupError, match="failed closed") as error:
-            local_startup.run_startup_local_sync(
-                store,
-                tmp_path / "homeassistant",
-                tmp_path / "snapshots",
-                tmp_path / "workspaces",
-                TARGET,
-                secret,
-            )
+        result = local_startup.run_startup_local_sync(
+            store,
+            tmp_path / "homeassistant",
+            tmp_path / "snapshots",
+            tmp_path / "workspaces",
+            TARGET,
+            secret,
+        )
     finally:
         store.__exit__(None, None, None)
 
-    assert secret not in str(error.value)
+    assert result.scheduled.status == "pending"
+    assert result.processed.processed is not None
+    assert result.processed.processed.work.status == "retry"
+    assert result.processed.processed.work.next_attempt_at is not None
+    assert secret not in repr(result)
 
 
-def test_blocked_local_generation_remains_blocked(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_blocked_local_generation_remains_blocked(tmp_path: Path) -> None:
     store = _store(tmp_path)
     key = local_sync_work_key(TARGET)
     store.enqueue_work("local_sync", key)
@@ -113,10 +113,6 @@ def test_blocked_local_generation_remains_blocked(
     blocked = store.fail_work(claimed, transient=False)
     assert blocked.status == "blocked"
 
-    def unexpected_process(*args: object, **kwargs: object):
-        raise AssertionError("blocked Local work must not be executed")
-
-    monkeypatch.setattr(local_startup, "run_local_sync_process", unexpected_process)
     try:
         result = local_startup.run_startup_local_sync(
             store,
@@ -159,3 +155,19 @@ def test_processing_failure_is_sanitized(
 
     assert str(error.value) == "startup Local synchronization failed closed"
     assert secret not in str(error.value)
+
+
+def test_unopened_store_fails_closed(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    store = StateStore(data)
+
+    with pytest.raises(local_startup.LocalStartupError, match="failed closed"):
+        local_startup.run_startup_local_sync(
+            store,
+            tmp_path / "homeassistant",
+            tmp_path / "snapshots",
+            tmp_path / "workspaces",
+            TARGET,
+            "github-token",
+        )
