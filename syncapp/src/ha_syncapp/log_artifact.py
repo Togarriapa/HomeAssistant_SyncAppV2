@@ -350,7 +350,12 @@ def _parse_canonical_utc_timestamp(value: str) -> datetime:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise LogArtifactError("log artifact timestamp is invalid") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0) or _render_timestamp(parsed) != value:
+    canonical = (
+        parsed.tzinfo is not None
+        and parsed.utcoffset() == timedelta(0)
+        and _render_timestamp(parsed) == value
+    )
+    if not canonical:
         raise LogArtifactError("log artifact timestamp is not canonical UTC")
     return parsed
 
