@@ -18,10 +18,16 @@ These adapters schedule work only. They do not execute synchronization and they 
 
 ## Runtime event classification
 
-`runtime_event_trigger.schedule_runtime_for_event()` is a narrow boundary between a future Home Assistant event transport and durable runtime scheduling. It accepts only a normalized mapping containing one bounded `event_type` string. It does not retain raw Home Assistant event payloads.
+`runtime_event_trigger.schedule_runtime_for_event()` is a narrow boundary between Home Assistant event transport and durable runtime scheduling. It accepts only a normalized mapping containing one bounded `event_type` string. It does not retain raw Home Assistant event payloads.
 
 Events that can change the runtime view—state, entity/device/area/floor/label/category registries, loaded components, Core configuration, and service registration—schedule the existing runtime generation. Unrelated events are ignored. Malformed evidence fails closed. Because the function delegates to routine scheduling, repeated events are coalesced while work is active and a deterministic blocked failure stays blocked.
 
-The network transport is intentionally separate. A future WebSocket subscriber must authenticate read-only, normalize an incoming Home Assistant event to `{"event_type": "..."}`, enforce its own frame/time limits, and only then call this classifier. The classifier itself has no socket, API-call, service-call, or candidate-deployment capability.
+## Core WebSocket transport
+
+`core_event_stream.consume_core_runtime_events()` implements the read-only transport boundary against the documented Home Assistant App proxy at `ws://supervisor/core/websocket`. It performs the documented authentication handshake using `SUPERVISOR_TOKEN`, subscribes only to the classifier's deterministic event-type set, verifies every subscription result, enforces message-size and connection timeout limits, and rejects binary, malformed, unknown-ID, or mismatched event evidence.
+
+The transport never forwards raw event data. A valid incoming event is reduced to `{"event_type": "..."}` before the injected handler is invoked. The token is used only in the authentication frame and is neither persisted nor included in diagnostics.
+
+The subscriber remains intentionally **unwired from the service lifecycle**. Reconnection/backoff, shutdown behavior, and the exact service-level handler are a separate milestone that must preserve bounded work and must not turn transient event-stream failures into unsafe Home Assistant mutations.
 
 This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
