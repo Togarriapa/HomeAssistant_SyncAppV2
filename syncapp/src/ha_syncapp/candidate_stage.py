@@ -453,10 +453,10 @@ def _verify_staged_tree(tree: Path, entries: tuple[CandidateStageEntry, ...]) ->
                 path = directory_path / name
                 relative = path.relative_to(tree).as_posix()
                 actual.add(relative)
-                entry = expected.get(relative)
-                if entry is None:
+                expected_entry = expected.get(relative)
+                if expected_entry is None:
                     raise CandidateStageError("candidate staging contains an unexpected file")
-                _verify_staged_file(path, entry)
+                _verify_staged_file(path, expected_entry)
     except OSError as exc:
         raise CandidateStageError("candidate staging verification failed") from exc
     if actual != set(expected) or actual_directories != expected_directories:
