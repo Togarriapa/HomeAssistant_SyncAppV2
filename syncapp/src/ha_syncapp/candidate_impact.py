@@ -116,9 +116,9 @@ def _validated_edges(
         if allow_authority and edge["authority"] not in {"registry", "derived"}:
             raise CandidateImpactError("candidate impact runtime topology is invalid")
         edges.append(edge)
-    if edges != sorted(edges, key=_edge_key) or len(
-        {_edge_key(edge) for edge in edges}
-    ) != len(edges):
+    if edges != sorted(edges, key=_edge_key) or len({_edge_key(edge) for edge in edges}) != len(
+        edges
+    ):
         raise CandidateImpactError("candidate impact runtime topology is invalid")
     return tuple(edges)
 
