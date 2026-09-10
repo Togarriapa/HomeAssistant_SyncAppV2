@@ -70,8 +70,11 @@ network access required for normal SyncApp duties, but those permissions are not
 across the child-profile transition.
 
 After proving the AppArmor child profile, the helper drops root identity, sets resource
-limits and installs a mandatory libseccomp filter. Landlock ABI 3+ is also applied as an
-additional filesystem defense when the host kernel provides it; HA OS validation no longer
+limits, enables no-new-privileges and installs a mandatory libseccomp filter. Setting
+no-new-privileges occurs after the AppArmor transition because Linux otherwise blocks the
+profile change; native CI asserts that the flag is active inside the child. Landlock ABI
+3+ is also applied as an additional filesystem defense when the host kernel provides it;
+HA OS validation no longer
 depends on Landlock being selected by the host kernel. The seccomp boundary denies network
 socket families, external Unix datagram use, process interference, signals and io_uring
 operations while retaining Core's private asyncio wakeup socket pairs and worker threads.

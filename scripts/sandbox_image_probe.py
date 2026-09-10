@@ -1,6 +1,7 @@
 """Exercise the production sandbox in a disposable child, never the test runner."""
 
 import asyncio
+import ctypes
 import os
 import runpy
 import socket
@@ -12,6 +13,7 @@ helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox
 config = Path(sys.argv[1])
 helper["_sandbox"](config)
 assert os.geteuid() != 0 and os.getuid() != 0
+assert ctypes.CDLL(None).prctl(39, 0, 0, 0, 0) == 1  # PR_GET_NO_NEW_PRIVS
 assert Path("/proc/self/attr/current").read_bytes().strip() == (
     b"ci_homeassistant_syncapp_v2//validator (enforce)"
 )

@@ -18,8 +18,6 @@ def run() -> None:
             "--init",
             "--read-only",
             "--security-opt",
-            "no-new-privileges",
-            "--security-opt",
             "apparmor=ci_homeassistant_syncapp_v2",
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,noexec,size=256m",
