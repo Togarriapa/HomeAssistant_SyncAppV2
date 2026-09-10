@@ -31,6 +31,11 @@ class RuntimeEventTriggerError(RuntimeError):
     """Runtime event evidence could not be classified safely."""
 
 
+def runtime_event_types() -> tuple[str, ...]:
+    """Return the deterministic event types accepted by the runtime classifier."""
+    return tuple(sorted(_RELEVANT_EVENT_TYPES))
+
+
 def schedule_runtime_for_event(
     store: StateStore,
     target: str,
