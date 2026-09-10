@@ -127,7 +127,9 @@ def _run_startup_runtime_if_configured(
         return None
     if store.repository_id(config.repo_b) is None:
         raise RuntimeStartupError("startup runtime repository is not trusted")
-    runtime_staging_root, runtime_snapshot_root, runtime_workspace_root = _runtime_work_roots(data_dir)
+    runtime_staging_root, runtime_snapshot_root, runtime_workspace_root = _runtime_work_roots(
+        data_dir
+    )
     return run_startup_runtime_sync(
         store,
         runtime_staging_root,
