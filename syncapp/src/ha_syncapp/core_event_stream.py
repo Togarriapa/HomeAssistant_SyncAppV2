@@ -185,7 +185,9 @@ def _decode_message(message: str | bytes, max_message_bytes: int) -> dict[str, o
     try:
         payload = json.loads(message, parse_constant=_reject_json_constant)
     except (json.JSONDecodeError, ValueError, RecursionError):
-        raise CoreEventStreamError("Home Assistant Core event message contains invalid JSON") from None
+        raise CoreEventStreamError(
+            "Home Assistant Core event message contains invalid JSON"
+        ) from None
     if not isinstance(payload, dict):
         raise CoreEventStreamError("Home Assistant Core event message is invalid")
     return cast(dict[str, object], payload)
