@@ -83,19 +83,18 @@ def test_attempt_exhaustion_is_bounded_and_sanitized(tmp_path: Path) -> None:
     consumer = _SequenceConsumer(
         [CoreEventStreamError("secret-one"), CoreEventStreamError("secret-two")]
     )
-    with StateStore(tmp_path) as store:
-        with pytest.raises(RuntimeEventLifecycleError) as error:
-            asyncio.run(
-                run_runtime_event_lifecycle(
-                    store,
-                    "Owner/Home",
-                    token="secret-token",
-                    max_attempts=2,
-                    initial_backoff_seconds=0.001,
-                    max_backoff_seconds=0.001,
-                    consumer=consumer,
-                )
+    with StateStore(tmp_path) as store, pytest.raises(RuntimeEventLifecycleError) as error:
+        asyncio.run(
+            run_runtime_event_lifecycle(
+                store,
+                "Owner/Home",
+                token="secret-token",
+                max_attempts=2,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                consumer=consumer,
             )
+        )
 
     assert str(error.value) == "runtime event reconnect attempts exhausted"
     assert "secret-one" not in str(error.value)
@@ -217,16 +216,15 @@ def test_each_successful_reconnect_readiness_precedes_event(tmp_path: Path) -> N
 
 def test_non_stream_failure_fails_closed_without_retry(tmp_path: Path) -> None:
     consumer = _SequenceConsumer([RuntimeError("secret-sentinel")])
-    with StateStore(tmp_path) as store:
-        with pytest.raises(RuntimeEventLifecycleError) as error:
-            asyncio.run(
-                run_runtime_event_lifecycle(
-                    store,
-                    "Owner/Home",
-                    max_attempts=5,
-                    consumer=consumer,
-                )
+    with StateStore(tmp_path) as store, pytest.raises(RuntimeEventLifecycleError) as error:
+        asyncio.run(
+            run_runtime_event_lifecycle(
+                store,
+                "Owner/Home",
+                max_attempts=5,
+                consumer=consumer,
             )
+        )
 
     assert str(error.value) == "runtime event lifecycle failed closed"
     assert "secret-sentinel" not in str(error.value)
