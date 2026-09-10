@@ -26,6 +26,28 @@ def _store(tmp_path: Path) -> StateStore:
     return store
 
 
+def _absent_candidate(
+    target: str,
+    token: str,
+    *,
+    expected_id: int,
+    branch: str,
+) -> BranchAbsence:
+    del target, token, expected_id, branch
+    return BranchAbsence(TARGET, REPOSITORY_ID, "candidate")
+
+
+def _wrong_branch(
+    target: str,
+    token: str,
+    *,
+    expected_id: int,
+    branch: str,
+) -> BranchHead:
+    del target, token, expected_id, branch
+    return BranchHead(TARGET, REPOSITORY_ID, "main", SHA_A)
+
+
 def test_observes_trusted_candidate_head(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -56,9 +78,7 @@ def test_observes_trusted_candidate_head(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_observes_absent_candidate_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head",
-        lambda target, token, *, expected_id, branch: BranchAbsence(
-            TARGET, REPOSITORY_ID, "candidate"
-        ),
+        _absent_candidate,
     )
     observed = observe_trusted_candidate(TARGET, "token", expected_id=REPOSITORY_ID)
     assert observed.commit_sha is None
@@ -161,9 +181,7 @@ def test_absent_candidate_is_clean_noop_and_enqueues_nothing(
     store.bind_repository(TARGET, REPOSITORY_ID)
     monkeypatch.setattr(
         "ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head",
-        lambda target, token, *, expected_id, branch: BranchAbsence(
-            TARGET, REPOSITORY_ID, "candidate"
-        ),
+        _absent_candidate,
     )
     try:
         result = detect_and_enqueue_trusted_candidate(store, TARGET, "token")
@@ -232,9 +250,7 @@ def test_repository_or_transport_failure_is_not_branch_absence(
 def test_rejects_unexpected_trusted_branch_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "ha_syncapp.candidate_detection.fetch_optional_trusted_branch_head",
-        lambda target, token, *, expected_id, branch: BranchHead(
-            TARGET, REPOSITORY_ID, "main", SHA_A
-        ),
+        _wrong_branch,
     )
     with pytest.raises(CandidateDetectionError, match="Candidate observation is invalid"):
         observe_trusted_candidate(TARGET, "token", expected_id=REPOSITORY_ID)
