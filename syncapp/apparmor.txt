@@ -1,14 +1,21 @@
 #include <tunables/global>
 
 profile homeassistant_syncapp_v2 flags=(attach_disconnected,mediate_deleted) {
-  # The service parent retains only the container-visible access already required by
-  # SyncApp. Candidate validation crosses a distinct cx boundary below.
+  # The service parent retains the container-visible access already required by SyncApp.
+  # Candidate validation crosses a distinct cx boundary below.
   #include <abstractions/base>
 
   file,
   network,
   capability,
   signal (send) set=(kill,term,int,hup,cont),
+
+  # Service/runtime executables. These stay in the parent profile.
+  /opt/syncapp/bin/python rix,
+  /usr/local/bin/python3* rix,
+  /bin/** rix,
+  /usr/bin/** rix,
+  /usr/libexec/git-core/** rix,
 
   # Force the dedicated validator executable into the nested profile before Python
   # can import the validator helper or read any candidate/configuration data.
