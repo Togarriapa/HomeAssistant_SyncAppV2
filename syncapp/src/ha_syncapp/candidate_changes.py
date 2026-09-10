@@ -286,7 +286,10 @@ def _build_changes(
 ) -> tuple[CandidateChange, ...]:
     baseline_by_path = {entry.path: entry for entry in baseline}
     candidate_by_path = {entry.path: entry for entry in candidate}
-    paths = sorted(set(baseline_by_path) | set(candidate_by_path), key=lambda path: path.encode("utf-8"))
+    paths = sorted(
+        set(baseline_by_path) | set(candidate_by_path),
+        key=lambda path: path.encode("utf-8"),
+    )
     changes: list[CandidateChange] = []
     for path in paths:
         old = baseline_by_path.get(path)
