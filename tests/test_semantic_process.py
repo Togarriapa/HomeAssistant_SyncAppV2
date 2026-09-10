@@ -54,3 +54,17 @@ def test_timeout_reaps_the_child(tmp_path, monkeypatch):
     monkeypatch.setattr(semantic, "_TIMEOUT_SECONDS", 0.05)
     with pytest.raises(semantic.CandidateSemanticError, match="timed out"):
         semantic._run_validator(tmp_path, "2026.9.1")
+
+
+def test_duplicate_receipt_fields_are_ambiguous(tmp_path, monkeypatch):
+    helper(
+        tmp_path,
+        monkeypatch,
+        """
+import json, sys
+result = json.dumps({'nonce':sys.argv[3], 'version':sys.argv[2], 'result':'passed'})
+print(result[:-1] + ', "result": "passed"}')
+""",
+    )
+    with pytest.raises(semantic.CandidateSemanticError, match="ambiguous"):
+        semantic._run_validator(tmp_path, "2026.9.1")

@@ -24,6 +24,7 @@ from .candidate_risk import CandidateRiskClassification
 from .candidate_stage import CandidateStage, verify_candidate_stage
 from .candidate_validation import (
     CandidateStaticValidation,
+    _json_object_no_duplicates,
     _read_bound_bytes,
     verify_candidate_static_validation,
 )
@@ -279,7 +280,7 @@ def _run_validator(config: Path, version: str) -> None:
     if returncode != 0 or len(raw) > 4096:
         raise CandidateSemanticError("semantic validator unavailable or resource limit exceeded")
     try:
-        payload = json.loads(raw)
+        payload = json.loads(raw, object_pairs_hook=_json_object_no_duplicates)
     except (ValueError, UnicodeError):
         raise CandidateSemanticError("semantic validator returned an ambiguous result") from None
     if payload != {"nonce": nonce, "version": version, "result": "passed"}:

@@ -47,7 +47,10 @@ def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
     read_file, read_dir = 1 << 2, 1 << 3
     # Allow read-only interpreter/libraries/timezone/certificates, never /data or /homeassistant.
     rules = [(Path(p), read_file | read_dir) for p in ("/usr", "/lib", "/lib64", "/etc/ssl")]
-    rules += [(Path(p), read_file) for p in ("/etc/localtime", "/etc/passwd", "/dev/urandom")]
+    rules += [
+        (Path(p), read_file)
+        for p in ("/etc/localtime", "/etc/passwd", "/etc/mime.types", "/dev/urandom")
+    ]
     # Disposable candidate copy only: regular files/directories, not sockets/devices/symlinks.
     writable = read_file | read_dir | (1 << 1) | (1 << 4) | (1 << 5)
     writable |= (1 << 7) | (1 << 8) | (1 << 13) | (1 << 14)
