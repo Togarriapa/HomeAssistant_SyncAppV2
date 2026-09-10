@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -128,7 +129,7 @@ def test_runtime_bridge_failure_stops_transport_and_leaves_run_interrupted(
     assert GITHUB_TOKEN not in output
     assert order[-2:] == ["bridge_tick", "bridge_stop"]
 
-    with __import__("sqlite3").connect(tmp_path / "syncapp/state.sqlite3") as database:
+    with sqlite3.connect(tmp_path / "syncapp/state.sqlite3") as database:
         active_run_id = database.execute(
             "SELECT active_run_id FROM installation WHERE singleton = 1"
         ).fetchone()[0]
