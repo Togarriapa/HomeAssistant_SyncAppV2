@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from . import candidate_stage as stage_module
@@ -39,6 +40,7 @@ class CandidateDependencyFile:
     known_entity_references: tuple[str, ...]
     unknown_object_references: tuple[str, ...]
     dynamic_reference: bool
+    known_service_references: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +59,7 @@ class CandidateDependencyAnalysis:
     unknown_object_references: tuple[str, ...]
     dynamic_paths: tuple[str, ...]
     unanalyzed_paths: tuple[str, ...]
+    known_service_references: tuple[str, ...] = ()
 
 
 def analyze_candidate_dependencies(
@@ -70,11 +73,12 @@ def analyze_candidate_dependencies(
         runtime_sha256 = fingerprint_runtime(runtime)
         stage_module.verify_candidate_stage(stage)
         known_entities = _runtime_entities(runtime)
+        known_services = _runtime_services(runtime)
         entries = {entry.path: entry for entry in stage.entries}
         if len(entries) != len(stage.entries):
             raise CandidateDependencyError("candidate staged path evidence is invalid")
         files = tuple(
-            _analyze_path(path, entries.get(path), stage, known_entities)
+            _analyze_path(path, entries.get(path), stage, known_entities, known_services)
             for path in integrity.changed_paths
         )
         _validate_files(files, integrity.changed_paths)
@@ -92,6 +96,9 @@ def analyze_candidate_dependencies(
 
     known_references = tuple(
         sorted({reference for item in files for reference in item.known_entity_references})
+    )
+    known_service_references = tuple(
+        sorted({reference for item in files for reference in item.known_service_references})
     )
     unknown_references = tuple(
         sorted({reference for item in files for reference in item.unknown_object_references})
@@ -113,6 +120,7 @@ def analyze_candidate_dependencies(
         unknown_object_references=unknown_references,
         dynamic_paths=dynamic_paths,
         unanalyzed_paths=unanalyzed_paths,
+        known_service_references=known_service_references,
     )
     _validate_result(result)
     return result
@@ -125,6 +133,8 @@ def verify_candidate_dependency_analysis(
     """Reprove dependency evidence structure and its exact runtime binding."""
     if type(runtime) is not RuntimeInventoryInput:
         raise CandidateDependencyError("candidate dependency runtime evidence is invalid")
+    _runtime_entities(runtime)
+    _runtime_services(runtime)
     _validate_result(result)
     try:
         runtime_sha256 = fingerprint_runtime(runtime)
@@ -179,11 +189,41 @@ def _runtime_entities(runtime: RuntimeInventoryInput) -> frozenset[str]:
     return frozenset(entities)
 
 
+def _runtime_services(runtime: RuntimeInventoryInput) -> frozenset[str]:
+    raw_services = runtime.homeassistant.get("services", [])
+    if not isinstance(raw_services, list):
+        raise CandidateDependencyError("runtime service evidence is invalid")
+
+    service_ids: set[str] = set()
+    domains: set[str] = set()
+    for raw in raw_services:
+        if not isinstance(raw, dict):
+            raise CandidateDependencyError("runtime service evidence is invalid")
+        domain = raw.get("domain")
+        if not isinstance(domain, str) or not domain or domain in domains:
+            raise CandidateDependencyError("runtime service evidence is invalid")
+        domains.add(domain)
+        services = raw.get("services")
+        if services is None:
+            continue
+        if not isinstance(services, Mapping) or any(
+            not isinstance(name, str) or not name for name in services
+        ):
+            raise CandidateDependencyError("runtime service evidence is invalid")
+        for name in services:
+            service_id = f"{domain}.{name}"
+            if service_id in service_ids:
+                raise CandidateDependencyError("runtime service evidence is invalid")
+            service_ids.add(service_id)
+    return frozenset(service_ids)
+
+
 def _analyze_path(
     path: str,
     entry: CandidateStageEntry | None,
     stage: CandidateStage,
     known_entities: frozenset[str],
+    known_services: frozenset[str],
 ) -> CandidateDependencyFile:
     if entry is None:
         return CandidateDependencyFile(path, "deleted", (), (), False)
@@ -209,10 +249,20 @@ def _analyze_path(
         return CandidateDependencyFile(path, "non_utf8_or_binary", (), (), False)
 
     references = set(_OBJECT_REFERENCE.findall(text))
-    known = tuple(sorted(references & known_entities))
-    unknown = tuple(sorted(references - known_entities))
+    known_entities_found = references & known_entities
+    known_services_found = references & known_services
+    known = tuple(sorted(known_entities_found))
+    services = tuple(sorted(known_services_found))
+    unknown = tuple(sorted(references - known_entities_found - known_services_found))
     dynamic = any(marker in text for marker in _DYNAMIC_MARKERS)
-    return CandidateDependencyFile(path, "analyzed_text", known, unknown, dynamic)
+    return CandidateDependencyFile(
+        path,
+        "analyzed_text",
+        known,
+        unknown,
+        dynamic,
+        services,
+    )
 
 
 def _validate_files(
@@ -230,13 +280,19 @@ def _validate_files(
             or not item.path
             or item.disposition not in _ALLOWED_DISPOSITIONS
             or tuple(sorted(set(item.known_entity_references))) != item.known_entity_references
+            or tuple(sorted(set(item.known_service_references))) != item.known_service_references
             or tuple(sorted(set(item.unknown_object_references))) != item.unknown_object_references
+            or set(item.known_entity_references) & set(item.known_service_references)
             or set(item.known_entity_references) & set(item.unknown_object_references)
+            or set(item.known_service_references) & set(item.unknown_object_references)
             or type(item.dynamic_reference) is not bool
         ):
             raise CandidateDependencyError("candidate dependency file evidence is invalid")
         if item.disposition != "analyzed_text" and (
-            item.known_entity_references or item.unknown_object_references or item.dynamic_reference
+            item.known_entity_references
+            or item.known_service_references
+            or item.unknown_object_references
+            or item.dynamic_reference
         ):
             raise CandidateDependencyError("candidate dependency file evidence is invalid")
 
@@ -259,6 +315,9 @@ def _validate_result(result: CandidateDependencyAnalysis) -> None:
     known_references = tuple(
         sorted({reference for item in result.files for reference in item.known_entity_references})
     )
+    known_service_references = tuple(
+        sorted({reference for item in result.files for reference in item.known_service_references})
+    )
     unknown_references = tuple(
         sorted({reference for item in result.files for reference in item.unknown_object_references})
     )
@@ -268,6 +327,7 @@ def _validate_result(result: CandidateDependencyAnalysis) -> None:
     )
     if (
         result.known_entity_references != known_references
+        or result.known_service_references != known_service_references
         or result.unknown_object_references != unknown_references
         or result.dynamic_paths != dynamic_paths
         or result.unanalyzed_paths != unanalyzed_paths
