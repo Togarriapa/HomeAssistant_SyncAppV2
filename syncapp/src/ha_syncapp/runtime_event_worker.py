@@ -105,6 +105,19 @@ class RuntimeEventWorker:
             self._thread = thread
             thread.start()
 
+    def result_if_finished(self) -> RuntimeEventWorkerResult | None:
+        """Inspect terminal state without blocking or exposing transport details."""
+        with self._lock:
+            thread = self._thread
+            result = self._result
+        if thread is None:
+            raise RuntimeEventWorkerError("runtime event worker was not started")
+        if thread.is_alive():
+            return None
+        if result is None:
+            raise RuntimeEventWorkerError("runtime event worker result is unavailable")
+        return result
+
     def request_stop(self) -> None:
         """Request cooperative cancellation of active waiting or reconnect backoff."""
         self._stop_requested.set()
