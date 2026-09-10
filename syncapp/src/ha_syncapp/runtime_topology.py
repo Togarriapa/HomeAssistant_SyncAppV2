@@ -188,15 +188,8 @@ def build_runtime_topology(inventory: RuntimeInventoryInput) -> RuntimeInventory
                 authority="registry",
             )
 
-    edge_key = lambda item: (
-        item["source_type"],
-        item["source_id"],
-        item["relation"],
-        item["target_type"],
-        item["target_id"],
-    )
-    edges.sort(key=edge_key)
-    unresolved.sort(key=edge_key)
+    edges.sort(key=_edge_key)
+    unresolved.sort(key=_edge_key)
     entity_dependencies.sort(key=lambda item: str(item["entity_id"]))
     service_domains = sorted(services)
 
@@ -298,3 +291,13 @@ def _relation(
         unresolved.append(record)
         return
     edges.append({**record, "authority": authority})
+
+
+def _edge_key(item: Mapping[str, str]) -> tuple[str, str, str, str, str]:
+    return (
+        item["source_type"],
+        item["source_id"],
+        item["relation"],
+        item["target_type"],
+        item["target_id"],
+    )
