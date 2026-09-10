@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import Awaitable, Callable, Mapping
 
 from ha_syncapp.core_event_stream import CoreEventStreamError
@@ -176,9 +177,12 @@ def test_stop_interrupts_reconnect_backoff() -> None:
     )
     worker.start()
     assert failed.wait(timeout=1)
+    time.sleep(0.05)
+    started = time.monotonic()
     worker.request_stop()
     result = worker.join(timeout_seconds=2)
 
     assert result.reason is RuntimeEventWorkerReason.STOPPED
     assert result.attempts == 1
     assert result.reconnects == 1
+    assert time.monotonic() - started < 0.5
