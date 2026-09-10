@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from ha_syncapp.__main__ import Shutdown, run
 from ha_syncapp.github_repo import RepoIdentity, RepositoryVerificationError
+from ha_syncapp.local_startup import LocalStartupResult
 from ha_syncapp.runtime_startup import RuntimeStartupResult
 
 SOURCE = Path(__file__).resolve().parents[1] / "syncapp/src"
@@ -130,7 +131,7 @@ def test_configured_repo_is_verified_and_bound_before_start(
     assert calls[-1] == ("Owner/Home", token, 123)
 
 
-def test_runtime_bootstrap_occurs_only_after_repository_trust(
+def test_normal_bootstraps_occur_only_after_repository_trust(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -149,23 +150,61 @@ def test_runtime_bootstrap_occurs_only_after_repository_trust(
         order.append("trust")
         return RepoIdentity(target=target, repository_id=123)
 
-    def bootstrap(store, config, data_dir: Path) -> RuntimeStartupResult | None:
+    def local_bootstrap(store, config, data_dir: Path) -> LocalStartupResult | None:
         assert config.repo_b == "Owner/Home"
         assert config.github_token == token
         assert data_dir == tmp_path
         assert store.repository_id("Owner/Home") == 123
-        order.append("bootstrap")
+        order.append("local_bootstrap")
+        return None
+
+    def runtime_bootstrap(store, config, data_dir: Path) -> RuntimeStartupResult | None:
+        assert config.repo_b == "Owner/Home"
+        assert config.github_token == token
+        assert data_dir == tmp_path
+        assert store.repository_id("Owner/Home") == 123
+        order.append("runtime_bootstrap")
         stop_after_bootstrap.requested = True
         return None
 
     monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
-    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap)
 
     run(tmp_path, stop_after_bootstrap)
     output = capsys.readouterr().out
 
-    assert order == ["trust", "bootstrap"]
+    assert order == ["trust", "local_bootstrap", "runtime_bootstrap"]
     assert token not in output
+
+
+def test_shutdown_after_local_bootstrap_skips_later_normal_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "github-secret-sentinel"
+    (tmp_path / "options.json").write_text(
+        json.dumps({"repo_b": "Owner/Home", "github_token": token})
+    )
+    stop_after_local = Shutdown()
+
+    monkeypatch.setattr(
+        "ha_syncapp.__main__.fetch_and_verify_private_repository",
+        lambda target, supplied_token, expected_id=None: RepoIdentity(
+            target=target, repository_id=123
+        ),
+    )
+
+    def local_bootstrap(store, config, data_dir: Path) -> None:
+        stop_after_local.requested = True
+
+    def forbidden_runtime(*args: object) -> None:
+        pytest.fail("shutdown after Local bootstrap must skip runtime bootstrap")
+
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", forbidden_runtime)
+
+    run(tmp_path, stop_after_local)
 
 
 def test_repo_verification_failure_happens_before_run_is_started(

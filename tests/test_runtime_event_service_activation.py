@@ -60,7 +60,7 @@ def _trusted_repo(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
     monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
 
 
-def test_configured_service_starts_bridge_after_trust_and_runtime_bootstrap(
+def test_configured_service_starts_bridge_after_trust_and_normal_bootstraps(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -71,11 +71,17 @@ def test_configured_service_starts_bridge_after_trust_and_runtime_bootstrap(
     _trusted_repo(monkeypatch, order)
     bridge = FakeBridge(order, stop)
 
-    def bootstrap(store, config, data_dir: Path) -> None:
+    def local_bootstrap(store, config, data_dir: Path) -> None:
         assert store.repository_id(TARGET) == 123
         assert config.repo_b == TARGET
         assert data_dir == tmp_path
-        order.append("bootstrap")
+        order.append("local_bootstrap")
+
+    def runtime_bootstrap(store, config, data_dir: Path) -> None:
+        assert store.repository_id(TARGET) == 123
+        assert config.repo_b == TARGET
+        assert data_dir == tmp_path
+        order.append("runtime_bootstrap")
 
     def build_bridge(store, config, data_dir: Path) -> FakeBridge:
         assert store.repository_id(TARGET) == 123
@@ -84,7 +90,8 @@ def test_configured_service_starts_bridge_after_trust_and_runtime_bootstrap(
         order.append("bridge_build")
         return bridge
 
-    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap)
     monkeypatch.setattr("ha_syncapp.__main__._runtime_event_bridge_if_configured", build_bridge)
 
     run(tmp_path, stop)
@@ -92,7 +99,8 @@ def test_configured_service_starts_bridge_after_trust_and_runtime_bootstrap(
 
     assert order == [
         "trust",
-        "bootstrap",
+        "local_bootstrap",
+        "runtime_bootstrap",
         "bridge_build",
         "bridge_start",
         "bridge_tick",
@@ -114,8 +122,12 @@ def test_runtime_bridge_failure_stops_transport_and_leaves_run_interrupted(
     bridge = FakeBridge(order, stop, fail_tick=True)
 
     monkeypatch.setattr(
+        "ha_syncapp.__main__._run_startup_local_if_configured",
+        lambda store, config, data_dir: order.append("local_bootstrap"),
+    )
+    monkeypatch.setattr(
         "ha_syncapp.__main__._run_startup_runtime_if_configured",
-        lambda store, config, data_dir: order.append("bootstrap"),
+        lambda store, config, data_dir: order.append("runtime_bootstrap"),
     )
     monkeypatch.setattr(
         "ha_syncapp.__main__._runtime_event_bridge_if_configured",
