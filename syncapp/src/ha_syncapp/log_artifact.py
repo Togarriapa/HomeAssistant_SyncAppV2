@@ -229,8 +229,7 @@ def _render_payloads(records: tuple[tuple[LogRecord, datetime], ...]) -> dict[st
         }
         grouped[record.category].append(_canonical_json(payload))
     return {
-        f"logs/{category}/records.jsonl": b"".join(grouped[category])
-        for category in _CATEGORIES
+        f"logs/{category}/records.jsonl": b"".join(grouped[category]) for category in _CATEGORIES
     }
 
 
@@ -246,8 +245,7 @@ def _manifest_bytes(
         {
             "categories": list(_CATEGORIES),
             "files": [
-                {"path": item.path, "sha256": item.sha256, "size": item.size}
-                for item in files
+                {"path": item.path, "sha256": item.sha256, "size": item.size} for item in files
             ],
             "record_counts": counts,
             "reference_time": _render_timestamp(reference_time),
