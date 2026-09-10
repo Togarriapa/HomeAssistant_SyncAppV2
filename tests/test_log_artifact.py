@@ -35,8 +35,10 @@ def _record(
 
 
 def test_builds_deterministic_readme_log_layout(tmp_path: Path) -> None:
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
+    first_staging = tmp_path / "first"
+    second_staging = tmp_path / "second"
+    first_staging.mkdir(mode=0o700)
+    second_staging.mkdir(mode=0o700)
     records = (
         _record("syncapp", "b", "second", timestamp=REFERENCE - timedelta(hours=1)),
         _record("home-assistant", "a", "first"),
@@ -44,8 +46,12 @@ def test_builds_deterministic_readme_log_layout(tmp_path: Path) -> None:
         _record("supervisor", "c", "supervisor"),
     )
 
-    first = build_log_artifact(staging, records, reference_time=REFERENCE)
-    second = build_log_artifact(staging, tuple(reversed(records)), reference_time=REFERENCE)
+    first = build_log_artifact(first_staging, records, reference_time=REFERENCE)
+    second = build_log_artifact(
+        second_staging,
+        tuple(reversed(records)),
+        reference_time=REFERENCE,
+    )
 
     assert first.artifact_id == second.artifact_id
     assert tuple(item.path for item in first.files) == (
@@ -70,7 +76,12 @@ def test_applies_exact_thirty_day_retention_cutoff(tmp_path: Path) -> None:
         staging,
         (
             _record("syncapp", "kept", "boundary", timestamp=cutoff),
-            _record("syncapp", "old", "expired", timestamp=cutoff - timedelta(microseconds=1)),
+            _record(
+                "syncapp",
+                "old",
+                "expired",
+                timestamp=cutoff - timedelta(microseconds=1),
+            ),
         ),
         reference_time=REFERENCE,
     )
@@ -100,8 +111,24 @@ def test_normalizes_timezone_aware_timestamp_to_utc(tmp_path: Path) -> None:
     [
         (_record("other", "one", "message"), REFERENCE),
         (_record("syncapp", "", "message"), REFERENCE),
-        (_record("syncapp", "one", "message", timestamp=REFERENCE.replace(tzinfo=None)), REFERENCE),
-        (_record("syncapp", "one", "message", timestamp=REFERENCE + timedelta(seconds=1)), REFERENCE),
+        (
+            _record(
+                "syncapp",
+                "one",
+                "message",
+                timestamp=REFERENCE.replace(tzinfo=None),
+            ),
+            REFERENCE,
+        ),
+        (
+            _record(
+                "syncapp",
+                "one",
+                "message",
+                timestamp=REFERENCE + timedelta(seconds=1),
+            ),
+            REFERENCE,
+        ),
         (_record("syncapp", "one", "message"), REFERENCE.replace(tzinfo=None)),
     ],
 )
@@ -160,6 +187,21 @@ def test_verification_rejects_content_and_layout_tampering(tmp_path: Path) -> No
     (fresh.root / "unexpected.txt").write_text("inserted")
     with pytest.raises(LogArtifactError):
         verify_log_artifact(fresh)
+
+
+def test_verification_rejects_mode_tampering(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir(mode=0o700)
+    artifact = build_log_artifact(
+        staging,
+        (_record("syncapp", "one", "message"),),
+        reference_time=REFERENCE,
+    )
+    log_file = artifact.root / "logs/syncapp/records.jsonl"
+    log_file.chmod(0o644)
+
+    with pytest.raises(LogArtifactError):
+        verify_log_artifact(artifact)
 
 
 def test_verification_rejects_symlink_and_evidence_tampering(tmp_path: Path) -> None:
