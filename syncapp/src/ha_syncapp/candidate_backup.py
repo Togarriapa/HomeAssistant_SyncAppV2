@@ -219,9 +219,10 @@ def _verify_backup_info(payload: dict[str, object], slug: str, core_version: str
     if payload.get("homeassistant") != core_version:
         raise CandidateBackupError("Supervisor backup Home Assistant version is invalid")
     content = payload.get("content")
-    if content is not None:
-        if not isinstance(content, dict) or content.get("homeassistant") is not True:
-            raise CandidateBackupError("Supervisor backup does not contain Home Assistant")
+    if content is not None and (
+        not isinstance(content, dict) or content.get("homeassistant") is not True
+    ):
+        raise CandidateBackupError("Supervisor backup does not contain Home Assistant")
 
 
 def _default_transport(
