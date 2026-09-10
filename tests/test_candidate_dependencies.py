@@ -113,6 +113,7 @@ def test_analyzes_only_integrity_bound_changed_candidate_files(
     assert result.baseline_sha == BASELINE_SHA
     assert result.candidate_sha == CANDIDATE_SHA
     assert result.stage_manifest_sha256 == MANIFEST_SHA
+    assert result.analysis_method == "best_effort_lexical"
     assert result.files == (
         dependency_module.CandidateDependencyFile(
             path="automations.yaml",
