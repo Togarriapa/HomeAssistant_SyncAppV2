@@ -237,9 +237,7 @@ class RuntimeEventWorker:
                 )
 
             reason = (
-                RuntimeEventWorkerReason.STOPPED
-                if stopped
-                else RuntimeEventWorkerReason.COMPLETED
+                RuntimeEventWorkerReason.STOPPED if stopped else RuntimeEventWorkerReason.COMPLETED
             )
             return _result(
                 reason,
