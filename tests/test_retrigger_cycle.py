@@ -273,21 +273,17 @@ def test_candidate_detection_failure_is_sanitized_after_recovery_lanes(
     monkeypatch.setattr(
         retrigger_cycle,
         "run_local_sync_retrigger_pass",
-        lambda *args, **kwargs: (calls.append("local") or LocalSyncRetriggerResult(0, None)),
+        lambda *args, **kwargs: calls.append("local") or LocalSyncRetriggerResult(0, None),
     )
     monkeypatch.setattr(
         retrigger_cycle,
         "run_database_sync_retrigger_pass",
-        lambda *args, **kwargs: (
-            calls.append("database") or DatabaseSyncRetriggerResult(0, None)
-        ),
+        lambda *args, **kwargs: calls.append("database") or DatabaseSyncRetriggerResult(0, None),
     )
     monkeypatch.setattr(
         retrigger_cycle,
         "run_runtime_sync_retrigger_pass",
-        lambda *args, **kwargs: (
-            calls.append("runtime") or RuntimeSyncRetriggerResult(0, None)
-        ),
+        lambda *args, **kwargs: calls.append("runtime") or RuntimeSyncRetriggerResult(0, None),
     )
 
     def fail_candidate(*args: object, **kwargs: object) -> CandidateDetectionResult:
