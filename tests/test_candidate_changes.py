@@ -255,12 +255,8 @@ def test_tree_parser_rejects_unsafe_or_malformed_entries(raw: bytes) -> None:
 
 
 def test_tree_parser_rejects_duplicate_and_conflicting_paths() -> None:
-    duplicate = (
-        f"100644 blob {OID_A}\ta.yaml\x00100644 blob {OID_B}\ta.yaml\x00"
-    ).encode()
-    conflict = (
-        f"100644 blob {OID_A}\ta\x00100644 blob {OID_B}\ta/file.yaml\x00"
-    ).encode()
+    duplicate = (f"100644 blob {OID_A}\ta.yaml\x00100644 blob {OID_B}\ta.yaml\x00").encode()
+    conflict = (f"100644 blob {OID_A}\ta\x00100644 blob {OID_B}\ta/file.yaml\x00").encode()
 
     with pytest.raises(CandidateChangeError, match="unsafe entry"):
         changes_module._parse_tree(duplicate)
