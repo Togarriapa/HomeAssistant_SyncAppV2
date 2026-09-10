@@ -59,7 +59,9 @@ def _stage(tmp_path: Path, files: dict[str, bytes]) -> CandidateStage:
     )
 
 
-def _evidence(paths: tuple[str, ...]) -> tuple[
+def _evidence(
+    paths: tuple[str, ...],
+) -> tuple[
     CandidateIntegrity,
     CandidateDependencyAnalysis,
     CandidateImpactAnalysis,
@@ -167,8 +169,7 @@ def test_valid_yaml_supports_home_assistant_scalar_indirection_tags(
         monkeypatch,
         {
             "configuration.yaml": (
-                b"automation: !include automations.yaml\n"
-                b"password: !secret example_password\n"
+                b"automation: !include automations.yaml\npassword: !secret example_password\n"
             )
         },
         "configuration.yaml",
