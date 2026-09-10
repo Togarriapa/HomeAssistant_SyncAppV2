@@ -98,6 +98,7 @@ def _impact(
         ("automations.yaml", "low"),
         ("scripts.yaml", "low"),
         ("scenes.yaml", "low"),
+        ("integrations/lighting.yaml", "medium"),
         ("packages/lighting.yaml", "medium"),
         ("dashboards/tablet.yaml", "medium"),
         ("configuration.yaml", "high"),
@@ -106,6 +107,7 @@ def _impact(
         ("custom_components/example/manifest.json", "high"),
         ("home-assistant_v2.db", "critical"),
         ("home-assistant_v2.db-wal", "critical"),
+        ("systemd/home-assistant.service", "critical"),
     ],
 )
 def test_readme_path_examples_establish_risk_floor(path: str, expected: str) -> None:
