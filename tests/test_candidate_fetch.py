@@ -1,10 +1,11 @@
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
 import ha_syncapp.candidate_fetch as fetch_module
 import pytest
 from ha_syncapp.candidate_detection import CandidateObservation
-from ha_syncapp.candidate_fetch import CandidateFetchError, fetch_trusted_candidate
+from ha_syncapp.candidate_fetch import CandidateFetch, CandidateFetchError, fetch_trusted_candidate
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
@@ -32,12 +33,12 @@ def _home_root(tmp_path: Path) -> Path:
 
 def _fetch(
     tmp_path: Path,
-    observation: CandidateObservation = _observation(),
+    observation: CandidateObservation | None = None,
     expected_sha: str = SHA,
     workspace_root: Path | None = None,
-):
+) -> CandidateFetch:
     return fetch_trusted_candidate(
-        observation,
+        observation or _observation(),
         expected_sha,
         TOKEN,
         workspace_root or _workspace_root(tmp_path),
@@ -45,7 +46,9 @@ def _fetch(
     )
 
 
-def _successful_git(calls: list[tuple[str, ...]]):
+def _successful_git(
+    calls: list[tuple[str, ...]],
+) -> Callable[..., str]:
     def run(
         _executable: str,
         root: Path,
