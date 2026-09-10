@@ -119,7 +119,10 @@ def verify_log_artifact(artifact: LogArtifact) -> None:
     _validate_file_evidence(artifact.files)
 
     root_before = _safe_lstat(artifact.root)
-    if not stat.S_ISDIR(root_before.st_mode) or stat.S_IMODE(root_before.st_mode) != 0o700:
+    root_is_private = (
+        stat.S_ISDIR(root_before.st_mode) and stat.S_IMODE(root_before.st_mode) == 0o700
+    )
+    if not root_is_private:
         raise LogArtifactError("log artifact root is not a private directory")
 
     expected = {item.path: item for item in artifact.files}
@@ -149,7 +152,8 @@ def verify_log_artifact(artifact: LogArtifact) -> None:
             data = _read_private_regular_file(node)
             file_bytes[relative] = data
             evidence = expected[relative]
-            if len(data) != evidence.size or hashlib.sha256(data).hexdigest() != evidence.sha256:
+            digest_matches = hashlib.sha256(data).hexdigest() == evidence.sha256
+            if len(data) != evidence.size or not digest_matches:
                 raise LogArtifactError("log artifact bytes do not match evidence")
 
     if observed != set(expected) or observed_directories != expected_directories:
@@ -166,7 +170,8 @@ def verify_log_artifact(artifact: LogArtifact) -> None:
 
 
 def _normalize_reference_time(value: datetime) -> datetime:
-    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
+    invalid = type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None
+    if invalid:
         raise LogArtifactError("log artifact reference time must be timezone-aware")
     return value.astimezone(UTC)
 
@@ -263,19 +268,26 @@ def _verify_manifest(manifest: bytes, files: tuple[LogArtifactFile, ...]) -> Non
     expected_file_payload = [
         {"path": item.path, "sha256": item.sha256, "size": item.size} for item in data_files
     ]
+    record_counts = payload.get("record_counts")
+    valid_record_counts = isinstance(record_counts, dict) and set(record_counts) == set(_CATEGORIES)
+    if valid_record_counts:
+        assert isinstance(record_counts, dict)
+        valid_record_counts = all(
+            type(value) is int and value >= 0 for value in record_counts.values()
+        )
     if (
         payload.get("schema") != 1
         or payload.get("retention_days") != _RETENTION_DAYS
         or payload.get("categories") != list(_CATEGORIES)
         or payload.get("files") != expected_file_payload
         or not isinstance(payload.get("reference_time"), str)
-        or not isinstance(payload.get("record_counts"), dict)
-        or set(payload["record_counts"]) != set(_CATEGORIES)
-        or any(type(value) is not int or value < 0 for value in payload["record_counts"].values())
+        or not valid_record_counts
     ):
         raise LogArtifactError("log artifact manifest does not match evidence")
+    reference_text = payload["reference_time"]
+    assert isinstance(reference_text, str)
     try:
-        parsed_reference = datetime.fromisoformat(payload["reference_time"].replace("Z", "+00:00"))
+        parsed_reference = datetime.fromisoformat(reference_text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise LogArtifactError("log artifact manifest reference time is invalid") from exc
     if parsed_reference.tzinfo is None or parsed_reference.utcoffset() != timedelta(0):
@@ -301,7 +313,8 @@ def _render_timestamp(value: datetime) -> str:
 
 
 def _file_evidence(path: str, data: bytes) -> LogArtifactFile:
-    return LogArtifactFile(path=path, sha256=hashlib.sha256(data).hexdigest(), size=len(data))
+    digest = hashlib.sha256(data).hexdigest()
+    return LogArtifactFile(path=path, sha256=digest, size=len(data))
 
 
 def _validate_staging_root(staging_root: Path) -> None:
