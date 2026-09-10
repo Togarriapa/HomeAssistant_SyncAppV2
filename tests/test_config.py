@@ -17,6 +17,7 @@ def test_defaults_are_passive(tmp_path: Path) -> None:
         status_interval_seconds=300,
         repo_b=None,
         github_token=None,
+        recorder_database_path=None,
     )
 
 
@@ -29,6 +30,7 @@ def test_explicit_options(tmp_path: Path) -> None:
                 "status_interval_seconds": 30,
                 "repo_b": "Owner/Home",
                 "github_token": "secret-sentinel",
+                "recorder_database_path": "/homeassistant/recorder.db",
             },
         )
     )
@@ -36,6 +38,7 @@ def test_explicit_options(tmp_path: Path) -> None:
     assert config.status_interval_seconds == 30
     assert config.repo_b == "Owner/Home"
     assert config.github_token == "secret-sentinel"
+    assert config.recorder_database_path == "/homeassistant/recorder.db"
 
 
 @pytest.mark.parametrize(
@@ -62,12 +65,31 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"repo_b": "Owner/Home", "github_token": ""},
         {"repo_b": "Owner/Home", "github_token": " secret-sentinel"},
         {"repo_b": "Owner/Home", "github_token": "secret\nsentinel"},
+        {"recorder_database_path": "homeassistant/recorder.db"},
+        {"recorder_database_path": "/homeassistant"},
+        {"recorder_database_path": "/homeassistant/../etc/passwd"},
+        {"recorder_database_path": "/homeassistant//recorder.db"},
+        {"recorder_database_path": "/homeassistant/recorder.db/"},
+        {"recorder_database_path": "/tmp/recorder.db"},
+        {"recorder_database_path": "/homeassistant/secret-sentinel\n.db"},
+        {"recorder_database_path": "/homeassistant/secret-sentinel\x7f.db"},
+        {"recorder_database_path": 42},
     ],
 )
 def test_invalid_options_fail_without_disclosing_input(tmp_path: Path, value: object) -> None:
     with pytest.raises(ConfigError) as error:
         load_config(write_options(tmp_path, value))
     assert "secret-sentinel" not in str(error.value)
+
+
+def test_recorder_database_path_may_select_nested_config_file(tmp_path: Path) -> None:
+    config = load_config(
+        write_options(
+            tmp_path,
+            {"recorder_database_path": "/homeassistant/storage/recorder.db"},
+        )
+    )
+    assert config.recorder_database_path == "/homeassistant/storage/recorder.db"
 
 
 @pytest.mark.parametrize(
