@@ -33,14 +33,20 @@ def verify_sandbox() -> None:
     canary = Path("/tmp/world-readable-canary")
     canary.write_text("credential-canary")
     canary.chmod(0o644)
-    with tempfile.TemporaryDirectory(prefix="sandbox-probe-") as directory:
+    with tempfile.TemporaryDirectory(prefix="syncapp-validator-") as directory:
         probe_root = Path(directory)
         config = probe_root / "config"
         config.mkdir(mode=0o700)
         os.chown(config, 65534, 65534)
         os.chown(probe_root, 65534, 65534)
         output = subprocess.check_output(
-            ["/usr/local/bin/python3", "-I", "-B", "/checks/sandbox_image_probe.py", str(config)],
+            [
+                "/opt/syncapp-validator/python3",
+                "-I",
+                "-B",
+                "/checks/sandbox_image_probe.py",
+                str(config),
+            ],
             env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
             text=True,
             timeout=30,
@@ -91,7 +97,7 @@ def run() -> None:
         warning = dict(valid, **{"scenes.yaml": b"- name: Example\n  entities: 42\n"})
         require_failure(candidate_inputs(parent, warning), "failed Home Assistant")
         require_failure(candidate_inputs(parent, valid, "2026.9.2"), "version")
-    print("Exact-version Core valid/invalid/warning checks and process isolation verified")
+    print("Exact-version Core valid/invalid/warning checks and AppArmor isolation verified")
 
 
 if __name__ == "__main__":
