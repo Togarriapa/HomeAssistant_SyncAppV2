@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from ha_syncapp.__main__ import Shutdown, run
 from ha_syncapp.github_repo import RepoIdentity, RepositoryVerificationError
+from ha_syncapp.runtime_startup import RuntimeStartupResult
 
 SOURCE = Path(__file__).resolve().parents[1] / "syncapp/src"
 
@@ -127,6 +128,44 @@ def test_configured_repo_is_verified_and_bound_before_start(
     second_output = capsys.readouterr().out
     assert token not in second_output
     assert calls[-1] == ("Owner/Home", token, 123)
+
+
+def test_runtime_bootstrap_occurs_only_after_repository_trust(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    token = "github-secret-sentinel"
+    (tmp_path / "options.json").write_text(
+        json.dumps({"repo_b": "Owner/Home", "github_token": token})
+    )
+    order: list[str] = []
+    stop_after_bootstrap = Shutdown()
+
+    def verify(target: str, supplied_token: str, *, expected_id: int | None = None) -> RepoIdentity:
+        assert target == "Owner/Home"
+        assert supplied_token == token
+        assert expected_id is None
+        order.append("trust")
+        return RepoIdentity(target=target, repository_id=123)
+
+    def bootstrap(store, config, data_dir: Path) -> RuntimeStartupResult | None:
+        assert config.repo_b == "Owner/Home"
+        assert config.github_token == token
+        assert data_dir == tmp_path
+        assert store.repository_id("Owner/Home") == 123
+        order.append("bootstrap")
+        stop_after_bootstrap.requested = True
+        return None
+
+    monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", bootstrap)
+
+    run(tmp_path, stop_after_bootstrap)
+    output = capsys.readouterr().out
+
+    assert order == ["trust", "bootstrap"]
+    assert token not in output
 
 
 def test_repo_verification_failure_happens_before_run_is_started(
