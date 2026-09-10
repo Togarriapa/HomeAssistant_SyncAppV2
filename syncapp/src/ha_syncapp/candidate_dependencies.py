@@ -214,7 +214,10 @@ def _validate_files(
 
 
 def _validate_result(result: CandidateDependencyAnalysis) -> None:
-    if type(result) is not CandidateDependencyAnalysis or result.analysis_method != _ANALYSIS_METHOD:
+    if (
+        type(result) is not CandidateDependencyAnalysis
+        or result.analysis_method != _ANALYSIS_METHOD
+    ):
         raise CandidateDependencyError("candidate dependency result is invalid")
     if tuple(sorted(set(result.known_entity_references))) != result.known_entity_references:
         raise CandidateDependencyError("candidate dependency result is invalid")
