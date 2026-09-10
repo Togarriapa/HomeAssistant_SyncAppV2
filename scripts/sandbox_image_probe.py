@@ -11,6 +11,9 @@ helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox
 config = Path(sys.argv[1])
 helper["_sandbox"](config)
 assert os.geteuid() != 0 and os.getuid() != 0
+# The validator must retain only the fixed identity evidence Core needs to recognize
+# the bundled official image; arbitrary files outside the sandbox remain inaccessible.
+assert Path("/OFFICIAL_IMAGE").is_file()
 
 
 def denied(operation):
