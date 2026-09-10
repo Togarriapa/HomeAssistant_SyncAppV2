@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import ha_syncapp.candidate_dependencies as dependency_module
@@ -74,6 +75,28 @@ def _runtime() -> RuntimeInventoryInput:
     )
 
 
+def _runtime_with_services() -> RuntimeInventoryInput:
+    return RuntimeInventoryInput(
+        manifest={},
+        homeassistant={
+            "entities": [
+                {"entity_id": "light.kitchen"},
+                {"entity_id": "sensor.temperature"},
+            ],
+            "services": [
+                {
+                    "domain": "light",
+                    "services": {
+                        "turn_on": {"name": "Turn on"},
+                        "turn_off": {"name": "Turn off"},
+                    },
+                },
+                {"domain": "homeassistant"},
+            ],
+        },
+    )
+
+
 def _install_stage_verifier(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls: list[str] = []
     monkeypatch.setattr(
@@ -131,9 +154,127 @@ def test_analyzes_only_integrity_bound_changed_candidate_files(
         ),
     )
     assert result.known_entity_references == ("light.kitchen", "sensor.temperature")
+    assert result.known_service_references == ()
     assert result.unknown_object_references == ("sensor.not_registered",)
     assert result.dynamic_paths == ("automations.yaml",)
     assert result.unanalyzed_paths == ()
+
+
+def test_known_services_are_separated_from_entities_and_unknown_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stage_verifier(monkeypatch)
+    stage = _stage(
+        tmp_path,
+        {
+            "automations.yaml": (
+                b"service: light.turn_on\n"
+                b"entity_id: light.kitchen\n"
+                b"next: switch.not_registered\n"
+            )
+        },
+    )
+
+    result = dependency_module.analyze_candidate_dependencies(
+        _integrity("automations.yaml"),
+        stage,
+        _runtime_with_services(),
+    )
+
+    assert result.files[0].known_entity_references == ("light.kitchen",)
+    assert result.files[0].known_service_references == ("light.turn_on",)
+    assert result.files[0].unknown_object_references == ("switch.not_registered",)
+    assert result.known_entity_references == ("light.kitchen",)
+    assert result.known_service_references == ("light.turn_on",)
+    assert result.unknown_object_references == ("switch.not_registered",)
+
+
+def test_domain_only_service_summary_remains_compatible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stage_verifier(monkeypatch)
+    stage = _stage(tmp_path, {"configuration.yaml": b"homeassistant.restart\n"})
+
+    result = dependency_module.analyze_candidate_dependencies(
+        _integrity("configuration.yaml"),
+        stage,
+        _runtime_with_services(),
+    )
+
+    assert result.known_service_references == ()
+    assert result.unknown_object_references == ("homeassistant.restart",)
+
+
+@pytest.mark.parametrize(
+    "services",
+    [
+        "not-a-list",
+        ["not-an-object"],
+        [{"domain": "Light", "services": {"turn_on": {}}}],
+        [{"domain": "light.bad", "services": {"turn_on": {}}}],
+        [{"domain": "light", "services": []}],
+        [{"domain": "light", "services": {"TurnOn": {}}}],
+        [{"domain": "light"}, {"domain": "light", "services": {}}],
+    ],
+)
+def test_malformed_or_duplicate_runtime_service_evidence_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    services: object,
+) -> None:
+    _install_stage_verifier(monkeypatch)
+    stage = _stage(tmp_path, {"automations.yaml": b"service: light.turn_on\n"})
+    runtime = RuntimeInventoryInput(
+        manifest={},
+        homeassistant={"entities": [], "services": services},
+    )
+
+    with pytest.raises(dependency_module.CandidateDependencyError, match="service evidence"):
+        dependency_module.analyze_candidate_dependencies(
+            _integrity("automations.yaml"), stage, runtime
+        )
+
+
+def test_service_evidence_is_bound_during_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stage_verifier(monkeypatch)
+    stage = _stage(tmp_path, {"automations.yaml": b"service: light.turn_on\n"})
+    runtime = _runtime_with_services()
+    result = dependency_module.analyze_candidate_dependencies(
+        _integrity("automations.yaml"), stage, runtime
+    )
+
+    dependency_module.verify_candidate_dependency_analysis(result, runtime)
+
+    changed_runtime = RuntimeInventoryInput(
+        manifest={},
+        homeassistant={
+            "entities": runtime.homeassistant["entities"],
+            "services": [{"domain": "light", "services": {"turn_off": {}}}],
+        },
+    )
+    with pytest.raises(dependency_module.CandidateDependencyError, match="binding"):
+        dependency_module.verify_candidate_dependency_analysis(result, changed_runtime)
+
+
+def test_tampered_service_aggregate_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stage_verifier(monkeypatch)
+    stage = _stage(tmp_path, {"automations.yaml": b"service: light.turn_on\n"})
+    runtime = _runtime_with_services()
+    result = dependency_module.analyze_candidate_dependencies(
+        _integrity("automations.yaml"), stage, runtime
+    )
+    tampered = replace(result, known_service_references=("light.turn_off",))
+
+    with pytest.raises(dependency_module.CandidateDependencyError, match="result"):
+        dependency_module.verify_candidate_dependency_analysis(tampered, runtime)
 
 
 def test_output_is_deterministic_and_inputs_are_not_mutated(
