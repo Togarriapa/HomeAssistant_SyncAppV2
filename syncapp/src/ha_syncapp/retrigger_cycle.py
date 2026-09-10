@@ -16,6 +16,7 @@ from ha_syncapp.database_sync_retrigger import (
     DatabaseSyncRetriggerResult,
     run_database_sync_retrigger_pass,
 )
+from ha_syncapp.github_repo import RepositoryVerificationError
 from ha_syncapp.local_sync_retrigger import (
     LocalSyncRetriggerError,
     LocalSyncRetriggerResult,
@@ -147,6 +148,7 @@ def run_retrigger_cycle(
         RuntimeSyncRetriggerError,
         LogSyncRetriggerError,
         CandidateDetectionError,
+        RepositoryVerificationError,
         LogCollectionError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
