@@ -17,6 +17,7 @@ from . import candidate_fetch as fetch_module
 from .candidate_fetch import CandidateFetch
 
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _STAGE_PREFIX = ".git-workspace-candidate-stage-"
 _FETCH_REF = "refs/syncapp/candidate-fetch"
 _ALLOWED_MODES = {"100644", "100755"}
@@ -78,28 +79,31 @@ def stage_fetched_candidate(
         )
         tree_entries = _parse_tree(raw_tree)
         entries = tuple(
-            _materialize_entry(fetched.root, tree, entry)
-            for entry in tree_entries
+            _materialize_entry(fetched.root, tree, entry) for entry in tree_entries
         )
-        manifest_bytes = _manifest_bytes(fetched, entries)
-        _write_private_file(manifest, manifest_bytes, executable=False)
-        manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-        _verify_staged_tree(tree, entries)
-        if manifest.read_bytes() != manifest_bytes:
-            raise CandidateStageError("candidate staging manifest changed during verification")
-        _reprove_fetch(fetched)
-        accepted = True
-        return CandidateStage(
-            root=root,
-            tree=tree,
-            manifest=manifest,
-            manifest_sha256=manifest_sha256,
+        manifest_bytes = _manifest_bytes(
             target=fetched.target,
             repository_id=fetched.repository_id,
             branch=fetched.branch,
             commit_sha=fetched.commit_sha,
             entries=entries,
         )
+        _write_private_file(manifest, manifest_bytes, executable=False)
+        result = CandidateStage(
+            root=root,
+            tree=tree,
+            manifest=manifest,
+            manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+            target=fetched.target,
+            repository_id=fetched.repository_id,
+            branch=fetched.branch,
+            commit_sha=fetched.commit_sha,
+            entries=entries,
+        )
+        verify_candidate_stage(result)
+        _reprove_fetch(fetched)
+        accepted = True
+        return result
     except CandidateStageError:
         raise
     except OSError as exc:
@@ -111,14 +115,16 @@ def stage_fetched_candidate(
 
 def verify_candidate_stage(stage: CandidateStage) -> None:
     """Re-bind returned evidence to the staged bytes before later validation uses it."""
-    if type(stage) is not CandidateStage:
-        raise CandidateStageError("candidate staging evidence is invalid")
+    _validate_stage_evidence(stage)
     _validate_stage_root(stage)
-    expected_manifest = _manifest_bytes_from_stage(stage)
-    try:
-        actual_manifest = stage.manifest.read_bytes()
-    except OSError as exc:
-        raise CandidateStageError("candidate staging manifest is unavailable") from exc
+    expected_manifest = _manifest_bytes(
+        target=stage.target,
+        repository_id=stage.repository_id,
+        branch=stage.branch,
+        commit_sha=stage.commit_sha,
+        entries=stage.entries,
+    )
+    actual_manifest = _read_private_file(stage.manifest, expected_mode=0o600)
     if actual_manifest != expected_manifest:
         raise CandidateStageError("candidate staging manifest does not match evidence")
     if hashlib.sha256(actual_manifest).hexdigest() != stage.manifest_sha256:
@@ -143,6 +149,47 @@ def _validate_fetch_evidence(fetched: CandidateFetch) -> None:
         raise CandidateStageError("candidate fetch evidence is invalid")
 
 
+def _validate_stage_evidence(stage: CandidateStage) -> None:
+    if type(stage) is not CandidateStage:
+        raise CandidateStageError("candidate staging evidence is invalid")
+    if (
+        not isinstance(stage.root, Path)
+        or not isinstance(stage.tree, Path)
+        or not isinstance(stage.manifest, Path)
+        or not isinstance(stage.target, str)
+        or not stage.target
+        or type(stage.repository_id) is not int
+        or stage.repository_id <= 0
+        or stage.branch != "candidate"
+        or not isinstance(stage.commit_sha, str)
+        or _OBJECT_ID.fullmatch(stage.commit_sha) is None
+        or not isinstance(stage.manifest_sha256, str)
+        or _SHA256.fullmatch(stage.manifest_sha256) is None
+        or type(stage.entries) is not tuple
+    ):
+        raise CandidateStageError("candidate staging evidence is invalid")
+    previous: bytes | None = None
+    for entry in stage.entries:
+        if type(entry) is not CandidateStageEntry:
+            raise CandidateStageError("candidate staging evidence is invalid")
+        if (
+            not isinstance(entry.path, str)
+            or entry.git_mode not in _ALLOWED_MODES
+            or not isinstance(entry.object_id, str)
+            or _OBJECT_ID.fullmatch(entry.object_id) is None
+            or type(entry.size) is not int
+            or entry.size < 0
+            or not isinstance(entry.sha256, str)
+            or _SHA256.fullmatch(entry.sha256) is None
+        ):
+            raise CandidateStageError("candidate staging evidence is invalid")
+        _validate_safe_path(entry.path)
+        encoded_path = entry.path.encode("utf-8")
+        if previous is not None and encoded_path <= previous:
+            raise CandidateStageError("candidate staging evidence is not canonically ordered")
+        previous = encoded_path
+
+
 def _trusted_staging_root(path: Path, home_assistant_root: Path, fetch_root: Path) -> Path:
     if not isinstance(path, Path) or not isinstance(home_assistant_root, Path):
         raise CandidateStageError("candidate staging boundary is invalid")
@@ -162,8 +209,8 @@ def _trusted_staging_root(path: Path, home_assistant_root: Path, fetch_root: Pat
         raise CandidateStageError("candidate staging root is unsafe")
     if _overlaps(parent, home):
         raise CandidateStageError("candidate staging overlaps Home Assistant source")
-    if _overlaps(parent, fetched):
-        raise CandidateStageError("candidate staging overlaps candidate fetch workspace")
+    if parent == fetched or parent in fetched.parents:
+        raise CandidateStageError("candidate staging is inside candidate fetch workspace")
     return parent
 
 
@@ -174,13 +221,14 @@ def _overlaps(left: Path, right: Path) -> bool:
 def _reprove_fetch(fetched: CandidateFetch) -> None:
     try:
         fetch_module._verify_initialized_workspace(fetched.root)
+        executable = fetch_module._git_executable()
         commit = fetch_module._run_git(
-            fetch_module._git_executable(),
+            executable,
             fetched.root,
             ("rev-parse", "--verify", f"{fetched.git_ref}^{{commit}}"),
         )
         object_type = fetch_module._run_git(
-            fetch_module._git_executable(),
+            executable,
             fetched.root,
             ("cat-file", "-t", f"{fetched.git_ref}^{{commit}}"),
         )
@@ -249,14 +297,7 @@ def _validate_tree_entry(
     object_id: str,
     seen: set[str],
 ) -> None:
-    parts = path.split("/")
-    if (
-        not path
-        or path.startswith("/")
-        or any(part in {"", ".", ".."} for part in parts)
-        or any(part.casefold() == ".git" for part in parts)
-    ):
-        raise CandidateStageError("candidate Git tree contains an unsafe path")
+    _validate_safe_path(path)
     if mode not in _ALLOWED_MODES or object_type != "blob":
         raise CandidateStageError("candidate Git tree contains an unsupported entry")
     if _OBJECT_ID.fullmatch(object_id) is None:
@@ -266,6 +307,17 @@ def _validate_tree_entry(
     for existing in seen:
         if path.startswith(existing + "/") or existing.startswith(path + "/"):
             raise CandidateStageError("candidate Git tree contains conflicting paths")
+
+
+def _validate_safe_path(path: str) -> None:
+    parts = path.split("/") if isinstance(path, str) else []
+    if (
+        not path
+        or path.startswith("/")
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(part.casefold() == ".git" for part in parts)
+    ):
+        raise CandidateStageError("candidate Git tree contains an unsafe path")
 
 
 def _materialize_entry(root: Path, tree: Path, entry: _TreeEntry) -> CandidateStageEntry:
@@ -313,15 +365,19 @@ def _write_private_file(path: Path, data: bytes, *, executable: bool) -> None:
 
 
 def _manifest_bytes(
-    fetched: CandidateFetch,
+    *,
+    target: str,
+    repository_id: int,
+    branch: str,
+    commit_sha: str,
     entries: tuple[CandidateStageEntry, ...],
 ) -> bytes:
     payload = {
         "version": _MANIFEST_VERSION,
-        "target": fetched.target,
-        "repository_id": fetched.repository_id,
-        "branch": fetched.branch,
-        "commit_sha": fetched.commit_sha,
+        "target": target,
+        "repository_id": repository_id,
+        "branch": branch,
+        "commit_sha": commit_sha,
         "entries": [
             {
                 "path": entry.path,
@@ -334,18 +390,6 @@ def _manifest_bytes(
         ],
     }
     return (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
-
-
-def _manifest_bytes_from_stage(stage: CandidateStage) -> bytes:
-    fetched = CandidateFetch(
-        root=stage.root,
-        target=stage.target,
-        repository_id=stage.repository_id,
-        branch=stage.branch,
-        commit_sha=stage.commit_sha,
-        git_ref=_FETCH_REF,
-    )
-    return _manifest_bytes(fetched, stage.entries)
 
 
 def _validate_stage_root(stage: CandidateStage) -> None:
@@ -369,6 +413,7 @@ def _validate_stage_root(stage: CandidateStage) -> None:
         or not stat.S_ISREG(manifest.st_mode)
         or stage.manifest.is_symlink()
         or manifest.st_uid != os.geteuid()
+        or manifest.st_nlink != 1
         or stat.S_IMODE(manifest.st_mode) != 0o600
     ):
         raise CandidateStageError("candidate staging evidence paths are unsafe")
@@ -378,13 +423,24 @@ def _validate_stage_root(stage: CandidateStage) -> None:
 
 def _verify_staged_tree(tree: Path, entries: tuple[CandidateStageEntry, ...]) -> None:
     expected = {entry.path: entry for entry in entries}
+    expected_directories = {""}
+    for entry in entries:
+        parts = entry.path.split("/")[:-1]
+        for index in range(1, len(parts) + 1):
+            expected_directories.add("/".join(parts[:index]))
     actual: set[str] = set()
+    actual_directories: set[str] = set()
     try:
         for directory, dirnames, filenames in os.walk(tree, followlinks=False):
             directory_path = Path(directory)
+            relative_directory = directory_path.relative_to(tree).as_posix()
+            if relative_directory == ".":
+                relative_directory = ""
+            actual_directories.add(relative_directory)
             directory_info = directory_path.lstat()
             if (
-                not stat.S_ISDIR(directory_info.st_mode)
+                relative_directory not in expected_directories
+                or not stat.S_ISDIR(directory_info.st_mode)
                 or directory_path.is_symlink()
                 or directory_info.st_uid != os.geteuid()
                 or stat.S_IMODE(directory_info.st_mode) != 0o700
@@ -402,29 +458,56 @@ def _verify_staged_tree(tree: Path, entries: tuple[CandidateStageEntry, ...]) ->
                 entry = expected.get(relative)
                 if entry is None:
                     raise CandidateStageError("candidate staging contains an unexpected file")
-                info = path.lstat()
-                expected_mode = 0o700 if entry.git_mode == "100755" else 0o600
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or path.is_symlink()
-                    or info.st_uid != os.geteuid()
-                    or stat.S_IMODE(info.st_mode) != expected_mode
-                    or info.st_size != entry.size
-                    or _sha256_file(path) != entry.sha256
-                ):
-                    raise CandidateStageError("candidate staged file does not match integrity evidence")
+                _verify_staged_file(path, entry)
     except OSError as exc:
         raise CandidateStageError("candidate staging verification failed") from exc
-    if actual != set(expected):
+    if actual != set(expected) or actual_directories != expected_directories:
         raise CandidateStageError("candidate staging file set does not match integrity evidence")
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
+def _verify_staged_file(path: Path, entry: CandidateStageEntry) -> None:
+    expected_mode = 0o700 if entry.git_mode == "100755" else 0o600
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        with path.open("rb") as handle:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            digest = hashlib.sha256()
             while chunk := handle.read(1024 * 1024):
                 digest.update(chunk)
     except OSError as exc:
-        raise CandidateStageError("candidate staged file could not be hashed") from exc
-    return digest.hexdigest()
+        raise CandidateStageError("candidate staged file could not be verified") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != expected_mode
+        or info.st_size != entry.size
+        or digest.hexdigest() != entry.sha256
+    ):
+        raise CandidateStageError(
+            "candidate staged file does not match integrity evidence"
+        )
+
+
+def _read_private_file(path: Path, *, expected_mode: int) -> bytes:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            data = handle.read()
+    except OSError as exc:
+        raise CandidateStageError("candidate staging manifest is unavailable") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != expected_mode
+    ):
+        raise CandidateStageError("candidate staging manifest is unsafe")
+    return data
