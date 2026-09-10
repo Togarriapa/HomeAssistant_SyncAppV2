@@ -16,6 +16,14 @@ The lane adapters preserve the existing deterministic identities:
 
 These adapters schedule work only. They do not execute synchronization and they do not change Retrigger passes. Future normal producers may invoke them after independently establishing the appropriate event or periodic trigger required by the initial README.
 
+## Normal runtime processing
+
+`runtime_sync_process.run_runtime_sync_process()` is the bounded execution boundary for normal runtime work. It claims and processes at most one eligible `runtime` item through the existing Core runtime collection and isolated publication pipeline. It does **not** recover interrupted work and does not rearm deterministic blocked work.
+
+A Core runtime collection failure moves only the claimed item through the existing transient retry policy. A target mismatch blocks only that claimed item. Unexpected state or runtime-work failures fail closed with sanitized diagnostics.
+
+`runtime_sync_retrigger.run_runtime_sync_retrigger_pass()` remains the recovery adapter: it first performs interrupted-work recovery and only then delegates one processing attempt to `run_runtime_sync_process()`. This keeps normal event-driven execution reusable without silently importing Retrigger semantics into the service path.
+
 ## Runtime event classification
 
 `runtime_event_trigger.schedule_runtime_for_event()` is a narrow boundary between Home Assistant event transport and durable runtime scheduling. It accepts only a normalized mapping containing one bounded `event_type` string. It does not retain raw Home Assistant event payloads.
