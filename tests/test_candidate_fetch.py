@@ -136,9 +136,17 @@ def test_branch_movement_or_sha_mismatch_removes_workspace(
     [
         (CandidateObservation(TARGET, REPOSITORY_ID, "main", SHA), SHA, "branch is invalid"),
         (CandidateObservation(TARGET, 0, "candidate", SHA), SHA, "identity is invalid"),
-        (CandidateObservation(TARGET, REPOSITORY_ID, "candidate", None), SHA, "commit is invalid"),
+        (
+            CandidateObservation(TARGET, REPOSITORY_ID, "candidate", None),
+            SHA,
+            "commit is invalid",
+        ),
         (CandidateObservation(TARGET, REPOSITORY_ID, "candidate", SHA), "bad", "expected"),
-        (CandidateObservation(TARGET, REPOSITORY_ID, "candidate", SHA), OTHER_SHA, "does not match"),
+        (
+            CandidateObservation(TARGET, REPOSITORY_ID, "candidate", SHA),
+            OTHER_SHA,
+            "does not match",
+        ),
     ],
 )
 def test_invalid_candidate_evidence_fails_before_workspace_creation(
