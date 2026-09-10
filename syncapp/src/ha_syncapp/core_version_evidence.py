@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .runtime_evidence import RuntimeEvidenceError, fingerprint_runtime
 from .runtime_inventory import RuntimeInventoryInput
@@ -49,7 +49,9 @@ def verify_core_version_evidence(
     _validate_evidence(evidence)
     expected = bind_core_version(runtime)
     if evidence != expected:
-        raise CoreVersionEvidenceError("Home Assistant Core version evidence does not match runtime")
+        raise CoreVersionEvidenceError(
+            "Home Assistant Core version evidence does not match runtime"
+        )
 
 
 def _extract_core_version(manifest: Mapping[str, object]) -> str:
