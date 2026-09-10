@@ -92,9 +92,7 @@ def test_missing_token_fails_before_backup_request(tmp_path, monkeypatch):
         {"slug": ""},
     ],
 )
-def test_ambiguous_or_unsafe_creation_response_is_blocked(
-    tmp_path, monkeypatch, create_payload
-):
+def test_ambiguous_or_unsafe_creation_response_is_blocked(tmp_path, monkeypatch, create_payload):
     inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
 
     def transport(*_args):
@@ -159,9 +157,7 @@ def test_semantic_drift_after_backup_discards_success(tmp_path, monkeypatch):
         if method == "POST":
             return _json_response({"slug": "abc123"})
         inputs[6].manifest["core_config"]["version"] = "2026.9.2"
-        return _json_response(
-            {"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"}
-        )
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"})
 
     with pytest.raises(backup.CandidateBackupError, match="semantic"):
         backup.create_candidate_backup(
