@@ -47,6 +47,16 @@ def _inventory() -> RuntimeInventoryInput:
     )
 
 
+def _edge_key(item: dict[str, str]) -> tuple[str, str, str, str, str]:
+    return (
+        item["source_type"],
+        item["source_id"],
+        item["relation"],
+        item["target_type"],
+        item["target_id"],
+    )
+
+
 def test_builds_deterministic_registry_topology_and_dependency_evidence() -> None:
     inventory = _inventory()
     original = copy.deepcopy(inventory)
@@ -66,12 +76,12 @@ def test_builds_deterministic_registry_topology_and_dependency_evidence() -> Non
         "registry_relationships": "authoritative",
         "runtime_state": "observational",
     }
-    assert topology["edges"] == sorted(
-        topology["edges"], key=lambda item: (item["source_type"], item["source_id"], item["relation"], item["target_type"], item["target_id"])
-    )
+    assert topology["edges"] == sorted(topology["edges"], key=_edge_key)
 
     dependencies = result.analysis["dependencies"]
-    kitchen = next(item for item in dependencies["entities"] if item["entity_id"] == "light.kitchen")
+    kitchen = next(
+        item for item in dependencies["entities"] if item["entity_id"] == "light.kitchen"
+    )
     assert kitchen == {
         "area_id": "area-1",
         "area_source": "derived_via_device",
@@ -82,10 +92,19 @@ def test_builds_deterministic_registry_topology_and_dependency_evidence() -> Non
         "labels": ["label-1"],
         "state": "on",
     }
-    orphaned = next(item for item in dependencies["entities"] if item["entity_id"] == "sensor.orphaned")
+    orphaned = next(
+        item for item in dependencies["entities"] if item["entity_id"] == "sensor.orphaned"
+    )
     assert orphaned["available"] is False
     assert dependencies["service_domains"] == ["light", "switch"]
     assert dependencies["unresolved"] == [
+        {
+            "source_id": "sensor.orphaned",
+            "source_type": "entity",
+            "relation": "belongs_to_device",
+            "target_id": "missing-device",
+            "target_type": "device",
+        },
         {
             "source_id": "sensor.orphaned",
             "source_type": "entity",
@@ -100,19 +119,14 @@ def test_builds_deterministic_registry_topology_and_dependency_evidence() -> Non
             "target_id": "label-missing",
             "target_type": "label",
         },
-        {
-            "source_id": "sensor.orphaned",
-            "source_type": "entity",
-            "relation": "belongs_to_device",
-            "target_id": "missing-device",
-            "target_type": "device",
-        },
     ]
 
 
 def test_result_is_independent_of_registry_ordering() -> None:
     first = _inventory()
-    second_homeassistant = {key: list(reversed(value)) for key, value in first.homeassistant.items()}
+    second_homeassistant = {
+        key: list(reversed(value)) for key, value in first.homeassistant.items()
+    }
     second = RuntimeInventoryInput(manifest=first.manifest, homeassistant=second_homeassistant)
 
     assert build_runtime_topology(first) == build_runtime_topology(second)
