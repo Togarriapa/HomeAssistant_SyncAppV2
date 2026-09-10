@@ -214,9 +214,15 @@ def test_malformed_runtime_topology_fails_closed() -> None:
     runtime = _runtime()
     malformed = RuntimeInventoryInput(
         manifest=runtime.manifest,
-        homeassistant={**runtime.homeassistant, "devices": [{"id": "device-1"}, {"id": "device-1"}]},
+        homeassistant={
+            **runtime.homeassistant,
+            "devices": [{"id": "device-1"}, {"id": "device-1"}],
+        },
     )
-    dependencies = replace(_dependencies(runtime), runtime_sha256=fingerprint_runtime(malformed))
+    dependencies = replace(
+        _dependencies(runtime),
+        runtime_sha256=fingerprint_runtime(malformed),
+    )
 
     with pytest.raises(CandidateImpactError, match="runtime topology"):
         expand_candidate_impact(dependencies, malformed)
