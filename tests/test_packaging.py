@@ -7,7 +7,7 @@ from ha_syncapp.config import load_config
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_packaging_exposes_only_read_only_home_assistant_access() -> None:
+def test_packaging_exposes_only_required_read_only_home_assistant_access() -> None:
     manifest = yaml.safe_load((ROOT / "syncapp/config.yaml").read_text())
     assert set(manifest["arch"]) == {"aarch64", "amd64"}
     assert manifest["version"] == __version__
@@ -17,6 +17,8 @@ def test_packaging_exposes_only_read_only_home_assistant_access() -> None:
     assert manifest["init"] is True
     assert manifest.get("apparmor", True) is True
     assert manifest["homeassistant_api"] is True
+    assert manifest["hassio_api"] is True
+    assert manifest["hassio_role"] == "default"
     assert manifest["map"] == [
         {
             "type": "homeassistant_config",
@@ -33,7 +35,6 @@ def test_packaging_exposes_only_read_only_home_assistant_access() -> None:
         "host_ipc",
         "host_dbus",
         "docker_api",
-        "hassio_api",
         "auth_api",
         "ingress",
         "devices",
