@@ -129,17 +129,17 @@ async def _subscribe(socket: EventSocket, max_message_bytes: int) -> dict[int, s
     while pending:
         message = _decode_message(await socket.recv(), max_message_bytes)
         message_type = message.get("type")
-        command_id = message.get("id")
-        if type(command_id) is not int or command_id not in subscriptions:
+        received_id = message.get("id")
+        if type(received_id) is not int or received_id not in subscriptions:
             raise CoreEventStreamError("Home Assistant Core event subscription state is invalid")
         if message_type == "event":
             _validate_event_message(message, subscriptions)
             continue
-        if message_type != "result" or command_id not in pending:
+        if message_type != "result" or received_id not in pending:
             raise CoreEventStreamError("Home Assistant Core event subscription state is invalid")
         if message.get("success") is not True:
             raise CoreEventStreamError("Home Assistant Core event subscription failed")
-        pending.remove(command_id)
+        pending.remove(received_id)
     return subscriptions
 
 
