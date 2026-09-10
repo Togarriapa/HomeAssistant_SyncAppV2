@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import ha_syncapp.candidate_stage as stage_module
@@ -118,11 +119,10 @@ def test_manifest_and_entries_are_deterministic_regardless_of_git_tree_order(
     )
 
     stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
+    manifest_text = stage.manifest.read_text(encoding="utf-8")
 
     assert [entry.path for entry in stage.entries] == ["a.yaml", "z.yaml"]
-    assert stage.manifest.read_text(encoding="utf-8").index("a.yaml") < stage.manifest.read_text(
-        encoding="utf-8"
-    ).index("z.yaml")
+    assert manifest_text.index("a.yaml") < manifest_text.index("z.yaml")
 
 
 def test_stage_verification_detects_staged_file_tampering(
@@ -156,6 +156,47 @@ def test_stage_verification_detects_manifest_tampering(
     stage.manifest.write_bytes(b"{}\n")
 
     with pytest.raises(CandidateStageError, match="manifest does not match evidence"):
+        verify_candidate_stage(stage)
+
+
+def test_stage_verification_rejects_unexpected_empty_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch_root, staging_root, home_root = _roots(tmp_path)
+    _install_git_fakes(
+        monkeypatch,
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        blobs={OID_A: b"safe\n"},
+    )
+    stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
+    unexpected = stage.tree / "unexpected"
+    unexpected.mkdir(mode=0o700)
+    unexpected.chmod(0o700)
+
+    with pytest.raises(CandidateStageError, match="unsafe directory"):
+        verify_candidate_stage(stage)
+
+
+def test_stage_verification_rejects_hardlinked_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch_root, staging_root, home_root = _roots(tmp_path)
+    _install_git_fakes(
+        monkeypatch,
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        blobs={OID_A: b"safe\n"},
+    )
+    stage = stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
+    staged_file = stage.tree / "configuration.yaml"
+    outside = tmp_path / "same-bytes"
+    outside.write_bytes(b"safe\n")
+    outside.chmod(0o600)
+    staged_file.unlink()
+    os.link(outside, staged_file)
+
+    with pytest.raises(CandidateStageError, match="integrity evidence"):
         verify_candidate_stage(stage)
 
 
@@ -250,7 +291,6 @@ def test_staging_root_must_be_disjoint_from_home_assistant(
     staging_root = home_root / "staging"
     staging_root.mkdir(mode=0o700)
     staging_root.chmod(0o700)
-    monkeypatch.setattr(stage_module, "_reprove_fetch", lambda fetched: None)
 
     with pytest.raises(CandidateStageError, match="overlaps Home Assistant source"):
         stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
@@ -258,20 +298,45 @@ def test_staging_root_must_be_disjoint_from_home_assistant(
     assert list(staging_root.iterdir()) == []
 
 
-def test_staging_root_must_be_disjoint_from_fetch_workspace(
+def test_staging_root_must_not_be_inside_fetch_workspace(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fetch_root, _staging_root, home_root = _roots(tmp_path)
     staging_root = fetch_root / "staging"
     staging_root.mkdir(mode=0o700)
     staging_root.chmod(0o700)
-    monkeypatch.setattr(stage_module, "_reprove_fetch", lambda fetched: None)
 
-    with pytest.raises(CandidateStageError, match="overlaps candidate fetch workspace"):
+    with pytest.raises(CandidateStageError, match="inside candidate fetch workspace"):
         stage_fetched_candidate(_fetched(fetch_root), staging_root, home_root)
 
     assert list(staging_root.iterdir()) == []
+
+
+def test_shared_private_parent_can_hold_fetch_and_stage_siblings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir(mode=0o700)
+    workspace_root.chmod(0o700)
+    fetch_root = workspace_root / "fetch"
+    fetch_root.mkdir(mode=0o700)
+    fetch_root.chmod(0o700)
+    (fetch_root / ".git").mkdir()
+    home_root = tmp_path / "homeassistant"
+    home_root.mkdir(mode=0o700)
+    home_root.chmod(0o700)
+    _install_git_fakes(
+        monkeypatch,
+        raw_tree=f"100644 blob {OID_A}\tconfiguration.yaml\0".encode(),
+        blobs={OID_A: b"safe\n"},
+    )
+
+    stage = stage_fetched_candidate(_fetched(fetch_root), workspace_root, home_root)
+
+    assert stage.root.parent == workspace_root
+    assert stage.root != fetch_root
+    verify_candidate_stage(stage)
 
 
 def test_reprove_fetch_requires_exact_commit_and_type(
@@ -280,7 +345,16 @@ def test_reprove_fetch_requires_exact_commit_and_type(
 ) -> None:
     fetch_root, _staging_root, _home_root = _roots(tmp_path)
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(fetch_module := stage_module.fetch_module, "_verify_initialized_workspace", lambda root: None)
+    fetch_module = stage_module.fetch_module
+
+    def verify_workspace(_root: Path) -> None:
+        return None
+
+    monkeypatch.setattr(
+        fetch_module,
+        "_verify_initialized_workspace",
+        verify_workspace,
+    )
     monkeypatch.setattr(fetch_module, "_git_executable", lambda: "/usr/bin/git")
 
     def run_git(
