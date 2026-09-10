@@ -60,6 +60,4 @@ def run_database_sync_process(
         )
         return DatabaseSyncProcessResult(processed=processed)
     except (StateError, DatabaseSyncWorkError) as exc:
-        raise DatabaseSyncProcessError(
-            "database synchronization processing failed closed"
-        ) from exc
+        raise DatabaseSyncProcessError("database synchronization processing failed closed") from exc
