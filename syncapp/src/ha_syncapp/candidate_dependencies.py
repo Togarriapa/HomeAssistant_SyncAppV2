@@ -16,6 +16,7 @@ from .runtime_inventory import RuntimeInventoryInput
 _OBJECT_REFERENCE = re.compile(r"(?<![A-Za-z0-9_])([a-z0-9_]+\.[a-z0-9_]+)(?![A-Za-z0-9_])")
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_SERVICE_COMPONENT = re.compile(r"^[a-z0-9_]+$")
 _DYNAMIC_MARKERS = ("{{", "{%", "{#", "!include", "!secret")
 _MAX_ANALYSIS_BYTES = 1024 * 1024
 _ANALYSIS_METHOD = "best_effort_lexical"
@@ -200,14 +201,19 @@ def _runtime_services(runtime: RuntimeInventoryInput) -> frozenset[str]:
         if not isinstance(raw, dict):
             raise CandidateDependencyError("runtime service evidence is invalid")
         domain = raw.get("domain")
-        if not isinstance(domain, str) or not domain or domain in domains:
+        if (
+            not isinstance(domain, str)
+            or _SERVICE_COMPONENT.fullmatch(domain) is None
+            or domain in domains
+        ):
             raise CandidateDependencyError("runtime service evidence is invalid")
         domains.add(domain)
         services = raw.get("services")
         if services is None:
             continue
         if not isinstance(services, Mapping) or any(
-            not isinstance(name, str) or not name for name in services
+            not isinstance(name, str) or _SERVICE_COMPONENT.fullmatch(name) is None
+            for name in services
         ):
             raise CandidateDependencyError("runtime service evidence is invalid")
         for name in services:
