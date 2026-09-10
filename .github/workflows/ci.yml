@@ -51,5 +51,7 @@ jobs:
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} -t syncapp:test syncapp
       - name: Verify passive lifecycle and restart persistence
         run: python3 scripts/container_smoke.py
-      - name: Verify exact-version Core checker and isolated process boundaries
+      - name: Verify isolated semantic sandbox boundaries
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py
+      - name: Verify exact-version Core semantic checker
         run: python3 scripts/semantic_container_smoke.py
