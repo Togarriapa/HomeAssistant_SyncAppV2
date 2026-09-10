@@ -37,7 +37,9 @@ def retry_blocked_work(
                 raise WorkAdministrationError("administrative retry work item does not exist")
             blocked = store._work_from_row(row)
             if blocked.status != "blocked":
-                raise WorkAdministrationError("only blocked work can be administratively retried")
+                raise WorkAdministrationError(
+                    "only blocked work can be administratively retried"
+                )
 
             result = database.execute(
                 "UPDATE work SET status = 'pending', attempts = 0, updated_at = ?, "
@@ -46,7 +48,9 @@ def retry_blocked_work(
                 (current, current, work_kind, work_key, blocked.attempts),
             )
             if result.rowcount != 1:
-                raise WorkAdministrationError("administrative retry work item changed unexpectedly")
+                raise WorkAdministrationError(
+                    "administrative retry work item changed unexpectedly"
+                )
 
             updated_row = database.execute(
                 "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
@@ -63,7 +67,9 @@ def retry_blocked_work(
                 or retried.updated_at != retry_time
                 or retried.next_attempt_at != retry_time
             ):
-                raise WorkAdministrationError("administrative retry durable state is inconsistent")
+                raise WorkAdministrationError(
+                    "administrative retry durable state is inconsistent"
+                )
         return retried
     except WorkAdministrationError:
         raise
