@@ -121,7 +121,10 @@ def _validate_observation(observation: CandidateObservation, expected_sha: str) 
         raise CandidateFetchError("trusted candidate repository identity is invalid")
     if observation.branch != _CANDIDATE_BRANCH:
         raise CandidateFetchError("trusted candidate branch is invalid")
-    if not isinstance(observation.commit_sha, str) or _COMMIT_SHA.fullmatch(observation.commit_sha) is None:
+    if (
+        not isinstance(observation.commit_sha, str)
+        or _COMMIT_SHA.fullmatch(observation.commit_sha) is None
+    ):
         raise CandidateFetchError("trusted candidate commit is invalid")
     if not isinstance(expected_sha, str) or _COMMIT_SHA.fullmatch(expected_sha) is None:
         raise CandidateFetchError("expected candidate commit is invalid")
