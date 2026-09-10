@@ -224,7 +224,9 @@ def _validate_bindings(
             or evidence.stage_manifest_sha256 != integrity.stage_manifest_sha256
             or evidence.runtime_sha256 != risk.runtime_sha256
         ):
-            raise CandidateValidationError("candidate static validation evidence bindings do not match")
+            raise CandidateValidationError(
+                "candidate static validation evidence bindings do not match"
+            )
     changed_paths = tuple(item.path for item in dependencies.files)
     if changed_paths != integrity.changed_paths or risk.changed_paths != integrity.changed_paths:
         raise CandidateValidationError("candidate static validation changed paths do not match")
