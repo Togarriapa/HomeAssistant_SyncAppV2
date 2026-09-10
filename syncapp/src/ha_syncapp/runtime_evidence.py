@@ -18,10 +18,11 @@ def fingerprint_runtime(runtime: RuntimeInventoryInput) -> str:
         raise RuntimeEvidenceError("runtime evidence input is invalid")
     payload = {
         "analysis": runtime.analysis,
-        "database": runtime.database,
+        "deployments": runtime.deployments,
+        "hardware": runtime.hardware,
         "homeassistant": runtime.homeassistant,
-        "logs": runtime.logs,
         "manifest": runtime.manifest,
+        "supervisor": runtime.supervisor,
     }
     try:
         encoded = json.dumps(
