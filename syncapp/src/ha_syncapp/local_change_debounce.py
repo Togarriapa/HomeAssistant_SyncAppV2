@@ -66,4 +66,10 @@ class LocalChangeDebouncer:
 
 
 def _valid_time_value(value: object) -> bool:
-    return type(value) in {int, float} and math.isfinite(value) and value >= 0
+    if type(value) is int:
+        number = float(value)
+    elif type(value) is float:
+        number = value
+    else:
+        return False
+    return math.isfinite(number) and number >= 0
