@@ -207,10 +207,7 @@ def _run_startup_database_if_configured(
         canonical_source = source_database.resolve(strict=True)
         if not canonical_home.is_dir():
             raise DatabaseStartupError("startup Home Assistant source is invalid")
-        if (
-            canonical_source == canonical_home
-            or canonical_home not in canonical_source.parents
-        ):
+        if canonical_source == canonical_home or canonical_home not in canonical_source.parents:
             raise DatabaseStartupError("startup database source escapes Home Assistant source")
         database_staging_root, snapshot_staging_root, workspace_root = _database_work_roots(
             data_dir, home_assistant_root
