@@ -83,17 +83,11 @@ def test_drain_limit_leaves_later_signals_for_next_owner_pass(tmp_path: Path) ->
     assert empty.consumed == 0
 
 
-def test_drain_revalidates_tampered_internal_signal(tmp_path: Path) -> None:
+def test_public_signal_boundary_rejects_tampered_signal() -> None:
     mailbox = RuntimeEventMailbox()
-    mailbox._queue.put_nowait(
-        RuntimeEventSignal(RuntimeEventSignalKind.READY, "state_changed")
-    )
-    store = _store(tmp_path)
-    try:
-        with pytest.raises(RuntimeEventMailboxError, match="signal is invalid"):
-            drain_runtime_event_mailbox(mailbox, store, TARGET)
-    finally:
-        store.__exit__(None, None, None)
+
+    with pytest.raises(RuntimeEventMailboxError, match="signal is invalid"):
+        mailbox.put(RuntimeEventSignal(RuntimeEventSignalKind.READY, "state_changed"))
 
 
 def test_blocked_runtime_work_is_not_rearmed_by_mailbox(tmp_path: Path) -> None:
