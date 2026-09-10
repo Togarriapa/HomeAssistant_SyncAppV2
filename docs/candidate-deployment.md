@@ -2,27 +2,32 @@
 
 The sole product specification for candidate handling is the initial V2 `README.md` at root commit `71d284ce447d79b044e332c9bc01ae801dc91947`.
 
-## Current implemented boundary
+## Trusted detection and durable work
 
-The first Remote -> Home Assistant primitive is deliberately read-only. `observe_trusted_candidate()` re-proves the configured private Repo B identity through the existing pinned repository-ID trust gate and then inspects only the exact `candidate` branch.
+`observe_trusted_candidate()` re-proves the configured private Repo B identity through the pinned repository-ID trust gate and inspects only the exact `candidate` branch. The observation binds Repo B target, stable GitHub repository ID, branch name `candidate`, and the exact candidate commit SHA, or explicit trusted branch absence. Repository, authentication, rate-limit and transport failures remain failures rather than candidate absence.
 
-The result is immutable evidence binding:
+`detect_and_enqueue_trusted_candidate()` requires that pinned repository identity from protected `StateStore`. A present candidate is durably represented by work kind `candidate` keyed by the exact trusted commit SHA. Repeated observation of the same SHA is idempotent; a later SHA is separate work. Durable work records evidence only and grants no deployment authority.
 
-- Repo B target;
-- stable GitHub repository ID;
-- branch name `candidate`;
-- the exact candidate commit SHA, or explicit trusted branch absence.
+`classify_candidate()` remains a deterministic comparison helper returning `absent`, `new`, or `unchanged` against an explicitly supplied prior SHA.
 
-Repository, authentication, rate-limit and transport failures remain failures. They are not converted into candidate absence.
+## Isolated Fetch boundary
 
-`classify_candidate()` performs only deterministic comparison with an explicitly supplied previously observed candidate SHA. Its results are `absent`, `new`, and `unchanged`. These states do not authorize deployment.
+`fetch_trusted_candidate()` implements only the next **Fetch** step. It accepts one present trusted candidate observation plus the exact expected SHA and creates a private transient Git workspace under an explicitly supplied owner-only workspace root.
 
-`detect_and_enqueue_trusted_candidate()` adds the durable detection boundary. It first requires an existing pinned Repo B repository ID from `StateStore`, then performs the trusted observation above. An absent `candidate` branch is a clean no-op. A present branch is bound to durable work kind `candidate` using the exact observed commit SHA as the work key. Because the work queue is idempotent by `(work_kind, work_key)`, repeated detection of the same SHA does not create duplicate work, while a later candidate SHA becomes a separate pending work item rather than rewriting older evidence.
+The fetch boundary:
 
-Durable enqueue still grants no deployment authority. It records only immutable evidence that a later candidate worker may fetch and stage by exact SHA.
+- initializes Git only in that isolated transient workspace;
+- uses a credential-free Repo B HTTPS URL and a temporary non-interactive authentication helper;
+- fetches only `refs/heads/candidate` into the private `refs/syncapp/candidate-fetch` ref;
+- resolves that ref as a commit and requires its SHA to equal both the trusted observation and expected durable SHA;
+- verifies the fetched object type is `commit`;
+- removes the authentication helper on every path and removes incomplete staging on failure;
+- leaves no checked-out candidate files in the fetch workspace.
 
-## Not implemented by this slice
+Branch movement between detection and fetch therefore fails closed instead of silently substituting a newer proposal. Fetch success still grants no validation or deployment authority.
 
-Candidate detection does not fetch candidate file contents, run Git, copy remote bytes into the live Home Assistant configuration, create a backup, validate Home Assistant configuration, analyze dependencies, classify deployment risk, reload/restart Home Assistant, observe runtime health, promote to `main`, or roll back.
+## Not implemented yet
 
-The next Remote -> Home Assistant increment should claim one exact candidate SHA, acquire only that commit into isolated protected staging, verify that the fetched commit still equals the durable work key and trusted repository identity, and build deterministic changed-file/integrity evidence. Only after that staging boundary is independently verified should dependency analysis, risk classification and Home Assistant validation be introduced. Apply must remain downstream of validation and a recoverable pre-deployment backup, followed by observation and automatic rollback on failure.
+The fetched Git object has not yet been materialized into a candidate staging tree. No remote bytes are copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback are also not implemented by this boundary.
+
+The next Remote -> Home Assistant increment should materialize the exact fetched commit into separate protected staging without symlink/path escape, generate deterministic file/integrity evidence and compare it with the relevant known-good baseline. Only after that staging boundary is independently verified should dependency analysis, risk classification and Home Assistant validation be introduced. Apply must remain downstream of validation and a recoverable pre-deployment backup, followed by observation and automatic rollback on failure.
