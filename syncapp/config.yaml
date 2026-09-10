@@ -28,3 +28,4 @@ schema:
   status_interval_seconds: int(30,3600)
   repo_b: str?
   github_token: password?
+  recorder_database_path: str?
