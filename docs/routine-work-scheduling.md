@@ -24,6 +24,16 @@ A Core runtime collection failure moves only the claimed item through the existi
 
 `runtime_sync_retrigger.run_runtime_sync_retrigger_pass()` remains the recovery adapter: it first performs interrupted-work recovery and only then delegates one processing attempt to `run_runtime_sync_process()`. This keeps normal event-driven execution reusable without silently importing Retrigger semantics into the service path.
 
+## Service-start runtime bootstrap
+
+After the service has re-verified and pinned the configured private Repo B identity, `runtime_startup.run_startup_runtime_sync()` schedules one normal runtime generation and immediately processes at most one eligible runtime item. This gives a newly started service a deterministic opportunity to publish a fresh AI-readable runtime baseline without waiting for the Retrigger recovery job.
+
+The startup bootstrap uses only app-owned private staging, snapshot and Git-workspace roots beneath `/data/syncapp/work`. It never puts Git metadata or generated runtime files in the live Home Assistant configuration tree. A transient Core collection failure remains durable as `retry`; a deterministic blocked item remains blocked. Startup never calls interrupted-work recovery or administrative retry.
+
+If shutdown has already been requested before bootstrap begins, the service skips this work. An unconfigured service also remains passive and performs no runtime publication attempt.
+
+This startup bootstrap is deliberately distinct from the long-running WebSocket lifecycle. It establishes a fresh baseline opportunity at process start but does not yet attach asynchronous event consumption to the synchronous state-owning service loop.
+
 ## Runtime event classification
 
 `runtime_event_trigger.schedule_runtime_for_event()` is a narrow boundary between Home Assistant event transport and durable runtime scheduling. It accepts only a normalized mapping containing one bounded `event_type` string. It does not retain raw Home Assistant event payloads.
@@ -54,6 +64,6 @@ Backoff waits are interruptible through an `asyncio.Event`. Shutdown therefore p
 
 The token remains an ephemeral argument to the subscriber and is not persisted or returned in lifecycle results. Raw Home Assistant event payloads still terminate at the transport normalization boundary.
 
-The reconnect lifecycle remains intentionally **unwired from `__main__.py`** in this increment. Service activation must independently prove safe startup/shutdown ownership, configuration and Home Assistant source-path boundaries before a long-running event task is attached to the application lifecycle.
+The long-running reconnect lifecycle remains intentionally **unwired from `__main__.py`** in this increment. Service activation must independently solve safe ownership/concurrency between asynchronous event transport and the process-exclusive synchronous `StateStore` before attaching that task to the application lifecycle.
 
 This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
