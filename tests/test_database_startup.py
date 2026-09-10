@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import database_startup
-from ha_syncapp.database_sync_process import DatabaseSyncProcessError, DatabaseSyncProcessResult
+from ha_syncapp.database_sync_process import (
+    DatabaseSyncProcessError,
+    DatabaseSyncProcessResult,
+)
 from ha_syncapp.database_sync_work import database_sync_work_key
 from ha_syncapp.state import StateStore
 
@@ -32,7 +35,9 @@ def test_startup_schedules_before_processing(
         assert target == TARGET
         assert database == source
         events.append("schedule")
-        scheduled_item = state.enqueue_work("database", database_sync_work_key(TARGET, source))
+        scheduled_item = state.enqueue_work(
+            "database", database_sync_work_key(TARGET, source)
+        )
         return scheduled_item
 
     def process(
