@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from ha_syncapp import runtime_startup
 from ha_syncapp.runtime_sync_process import RuntimeSyncProcessError, RuntimeSyncProcessResult
+from ha_syncapp.runtime_sync_work import runtime_sync_work_key
 from ha_syncapp.state import StateStore
 
 TARGET = "Owner/Private-Home"
@@ -29,7 +30,7 @@ def test_startup_schedules_before_processing(
         assert state is store
         assert target == TARGET
         events.append("schedule")
-        scheduled_item = state.enqueue_work("runtime", "runtime:Owner/Private-Home")
+        scheduled_item = state.enqueue_work("runtime", runtime_sync_work_key(TARGET))
         return scheduled_item
 
     def process(
@@ -77,7 +78,7 @@ def test_blocked_runtime_generation_remains_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _store(tmp_path)
-    key = "runtime:Owner/Private-Home"
+    key = runtime_sync_work_key(TARGET)
     pending = store.enqueue_work("runtime", key)
     claimed = store.claim_work_kind("runtime")
     assert claimed is not None
