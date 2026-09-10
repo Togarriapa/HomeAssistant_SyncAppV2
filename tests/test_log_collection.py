@@ -83,7 +83,7 @@ def test_required_source_failure_creates_no_artifact_and_no_work(tmp_path: Path)
     assert children == []
 
 
-def test_repeated_identical_collection_is_idempotently_enqueued(tmp_path: Path) -> None:
+def test_repeated_identical_collection_reuses_verified_artifact_and_work(tmp_path: Path) -> None:
     store = _store(tmp_path)
     root = tmp_path / "artifacts"
     root.mkdir(mode=0o700)
@@ -114,6 +114,42 @@ def test_repeated_identical_collection_is_idempotently_enqueued(tmp_path: Path) 
 
     assert first.artifact.artifact_id == second.artifact.artifact_id
     assert first.work.work_key == second.work.work_key
+
+
+def test_identical_collection_refuses_tampered_existing_artifact(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    root = tmp_path / "artifacts"
+    root.mkdir(mode=0o700)
+
+    def transport(method, url, headers, timeout, limit):
+        del method, url, headers, timeout, limit
+        return SupervisorLogResponse(200, "text/plain", b"same\n")
+
+    try:
+        first = collect_and_enqueue_supervisor_logs(
+            store,
+            root,
+            TARGET,
+            reference_time=REFERENCE,
+            token=TOKEN,
+            transport=transport,
+        )
+        payload = first.artifact.root / "logs/home-assistant/records.jsonl"
+        payload.write_text("tampered\n")
+        payload.chmod(0o600)
+        with pytest.raises(LogCollectionError, match="failed closed"):
+            collect_and_enqueue_supervisor_logs(
+                store,
+                root,
+                TARGET,
+                reference_time=REFERENCE,
+                token=TOKEN,
+                transport=transport,
+            )
+    finally:
+        store.__exit__(None, None, None)
+
+    assert payload.read_text() == "tampered\n"
 
 
 def test_collection_error_does_not_expose_supervisor_token(tmp_path: Path) -> None:
