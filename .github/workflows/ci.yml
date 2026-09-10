@@ -55,8 +55,8 @@ jobs:
         run: |
           test -x "$(command -v apparmor_parser)"
           sudo apparmor_parser -r -W syncapp/apparmor.txt
-          grep -Fxq "homeassistant_syncapp_v2" /sys/kernel/security/apparmor/profiles
-          grep -Fxq "homeassistant_syncapp_v2//validator (enforce)" /sys/kernel/security/apparmor/profiles
+          sudo grep -Fxq "homeassistant_syncapp_v2" /sys/kernel/security/apparmor/profiles
+          sudo grep -Fxq "homeassistant_syncapp_v2//validator (enforce)" /sys/kernel/security/apparmor/profiles
       - name: Verify isolated semantic sandbox boundaries
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py
       - name: Verify exact-version Core semantic checker
