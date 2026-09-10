@@ -95,6 +95,18 @@ def expand_candidate_impact(
     return result
 
 
+def verify_candidate_impact_analysis(
+    result: CandidateImpactAnalysis,
+    dependencies: CandidateDependencyAnalysis,
+    runtime: RuntimeInventoryInput,
+) -> None:
+    """Rebuild and compare candidate impact before downstream safety decisions."""
+    _validate_result(result)
+    expected = expand_candidate_impact(dependencies, runtime)
+    if result != expected:
+        raise CandidateImpactError("candidate impact evidence does not match verified inputs")
+
+
 def _validated_edges(
     raw: object,
     *,
