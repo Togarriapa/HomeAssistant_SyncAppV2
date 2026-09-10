@@ -72,6 +72,4 @@ def run_runtime_sync_process(
         )
         return RuntimeSyncProcessResult(processed=processed)
     except (StateError, RuntimeSyncWorkError) as exc:
-        raise RuntimeSyncProcessError(
-            "runtime synchronization processing failed closed"
-        ) from exc
+        raise RuntimeSyncProcessError("runtime synchronization processing failed closed") from exc
