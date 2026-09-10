@@ -11,6 +11,7 @@ profile homeassistant_syncapp_v2 flags=(attach_disconnected,mediate_deleted) {
   signal (send) set=(kill,term,int,hup,cont),
 
   # Service/runtime executables. These stay in the parent profile.
+  /sbin/docker-init rix,
   /opt/syncapp/bin/python rix,
   /usr/local/bin/python3* rix,
   /bin/** rix,
