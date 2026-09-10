@@ -31,20 +31,37 @@ def candidate_inputs(parent: Path, files: dict[str, bytes], version: str = "2026
         path.chmod(0o600)
         oid = hashlib.sha1(f"blob {len(data)}\0".encode() + data, usedforsecurity=False)
         entries.append(
-            CandidateStageEntry(name, "100644", oid.hexdigest(), len(data), hashlib.sha256(data).hexdigest())
+            CandidateStageEntry(
+                name, "100644", oid.hexdigest(), len(data), hashlib.sha256(data).hexdigest()
+            )
         )
     manifest = _manifest_bytes(
-        target="Owner/Home", repository_id=42, branch="candidate", commit_sha="b" * 40,
+        target="Owner/Home",
+        repository_id=42,
+        branch="candidate",
+        commit_sha="b" * 40,
         entries=tuple(entries),
     )
     (root / "manifest.json").write_bytes(manifest)
     (root / "manifest.json").chmod(0o600)
     stage = CandidateStage(
-        root, tree, root / "manifest.json", hashlib.sha256(manifest).hexdigest(),
-        "Owner/Home", 42, "candidate", "b" * 40, tuple(entries),
+        root,
+        tree,
+        root / "manifest.json",
+        hashlib.sha256(manifest).hexdigest(),
+        "Owner/Home",
+        42,
+        "candidate",
+        "b" * 40,
+        tuple(entries),
     )
     integrity = CandidateIntegrity(
-        "Owner/Home", 42, "a" * 40, "b" * 40, stage.manifest_sha256, tuple(sorted(files)),
+        "Owner/Home",
+        42,
+        "a" * 40,
+        "b" * 40,
+        stage.manifest_sha256,
+        tuple(sorted(files)),
     )
     runtime = RuntimeInventoryInput(manifest={"core_config": {"version": version}})
     dependencies = analyze_candidate_dependencies(integrity, stage, runtime)

@@ -25,8 +25,10 @@ class _PathRule(ctypes.Structure):
 
 class _Compare(ctypes.Structure):
     _fields_ = [
-        ("arg", ctypes.c_uint), ("op", ctypes.c_uint),
-        ("a", ctypes.c_uint64), ("b", ctypes.c_uint64),
+        ("arg", ctypes.c_uint),
+        ("op", ctypes.c_uint),
+        ("a", ctypes.c_uint64),
+        ("b", ctypes.c_uint64),
     ]
 
 
@@ -75,7 +77,11 @@ def _syscall_sandbox() -> None:
     seccomp.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
     seccomp.seccomp_syscall_resolve_name.restype = ctypes.c_int
     seccomp.seccomp_rule_add_array.argtypes = [
-        ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint, ctypes.POINTER(_Compare),
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.POINTER(_Compare),
     ]
     seccomp.seccomp_load.argtypes = [ctypes.c_void_p]
     context = seccomp.seccomp_init(0x7FFF0000)  # SCMP_ACT_ALLOW; libseccomp checks native arch.
@@ -84,11 +90,28 @@ def _syscall_sandbox() -> None:
     denied = 0x00050000 | errno.EPERM
     try:
         names = (
-            "execve", "execveat", "connect", "bind", "listen", "accept", "accept4",
-            "ptrace", "process_vm_readv", "process_vm_writev", "setsid", "setpgid",
-            "io_uring_setup", "io_uring_enter", "io_uring_register", "open_by_handle_at",
-            "kill", "tkill", "tgkill", "pidfd_send_signal",
-            "sendmsg", "sendmmsg",
+            "execve",
+            "execveat",
+            "connect",
+            "bind",
+            "listen",
+            "accept",
+            "accept4",
+            "ptrace",
+            "process_vm_readv",
+            "process_vm_writev",
+            "setsid",
+            "setpgid",
+            "io_uring_setup",
+            "io_uring_enter",
+            "io_uring_register",
+            "open_by_handle_at",
+            "kill",
+            "tkill",
+            "tgkill",
+            "pidfd_send_signal",
+            "sendmsg",
+            "sendmmsg",
         )
         for name in names:
             number = seccomp.seccomp_syscall_resolve_name(name.encode())
@@ -104,8 +127,11 @@ def _syscall_sandbox() -> None:
         # send() uses sendto with a null destination and is needed by asyncio's wakeup pair.
         compare = _Compare(4, 1, 0, 0)
         if seccomp.seccomp_rule_add_array(
-            context, denied, seccomp.seccomp_syscall_resolve_name(b"sendto"),
-            1, ctypes.byref(compare),
+            context,
+            denied,
+            seccomp.seccomp_syscall_resolve_name(b"sendto"),
+            1,
+            ctypes.byref(compare),
         ):
             raise RuntimeError("seccomp datagram rule failed")
         if seccomp.seccomp_load(context):
@@ -117,9 +143,11 @@ def _syscall_sandbox() -> None:
 def _sandbox(config: Path) -> None:
     os.umask(0o077)
     limits = (
-        (resource.RLIMIT_CORE, 0), (resource.RLIMIT_CPU, 90),
+        (resource.RLIMIT_CORE, 0),
+        (resource.RLIMIT_CPU, 90),
         (resource.RLIMIT_AS, 2 * 1024 * 1024 * 1024),
-        (resource.RLIMIT_FSIZE, 16 * 1024 * 1024), (resource.RLIMIT_NOFILE, 512),
+        (resource.RLIMIT_FSIZE, 16 * 1024 * 1024),
+        (resource.RLIMIT_NOFILE, 512),
         (resource.RLIMIT_NPROC, 256),
     )
     for kind, limit in limits:
@@ -145,7 +173,11 @@ def _check(config: Path, version: str) -> str:
     if importlib.metadata.version("homeassistant") != version:
         return "version_mismatch"
     sys.argv = [
-        "homeassistant", "--script", "check_config", "--config", str(config),
+        "homeassistant",
+        "--script",
+        "check_config",
+        "--config",
+        str(config),
         "--fail-on-warnings",
     ]
     try:

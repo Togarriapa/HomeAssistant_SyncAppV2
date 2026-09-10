@@ -36,7 +36,9 @@ def test_success_binds_every_gate_and_uses_a_copy(tmp_path, monkeypatch):
     assert not copied[0].exists()
     semantic.verify_candidate_semantic_validation(result, *inputs)
     with pytest.raises(semantic.CandidateSemanticError):
-        semantic.verify_candidate_semantic_validation(replace(result, candidate_sha="c" * 40), *inputs)
+        semantic.verify_candidate_semantic_validation(
+            replace(result, candidate_sha="c" * 40), *inputs
+        )
 
 
 @pytest.mark.parametrize("version", ["2026.8.1", "2026.9.0", "2026.9.2"])
@@ -47,10 +49,13 @@ def test_exact_version_mismatch_never_launches(tmp_path, monkeypatch, version):
         semantic.validate_candidate_semantics(*inputs)
 
 
-@pytest.mark.parametrize("files", [
-    {"configuration.yaml": b"broken: ["},
-    {"configuration.yaml": b"homeassistant:\n", "notes.txt": b"not validated"},
-])
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"configuration.yaml": b"broken: ["},
+        {"configuration.yaml": b"homeassistant:\n", "notes.txt": b"not validated"},
+    ],
+)
 def test_invalid_or_unvalidated_static_gate_never_launches(tmp_path, monkeypatch, files):
     inputs = candidate_inputs(tmp_path, files)
     monkeypatch.setattr(semantic, "_run_validator", lambda *args: pytest.fail("must not launch"))
@@ -58,14 +63,17 @@ def test_invalid_or_unvalidated_static_gate_never_launches(tmp_path, monkeypatch
         semantic.validate_candidate_semantics(*inputs)
 
 
-@pytest.mark.parametrize("name, data", [
-    ("configuration.yaml", b"homeassistant: !include /etc/passwd\n"),
-    ("configuration.yaml", b"homeassistant: !include ../secrets.yaml\n"),
-    ("configuration.yaml", b"homeassistant: !include_dir_merge_named /data\n"),
-    ("unused.yaml", b"key: !include /homeassistant/secrets.yaml\n"),
-    ("custom_components/example/manifest.json", b"{}"),
-    ("deps/example.json", b"{}"),
-])
+@pytest.mark.parametrize(
+    "name, data",
+    [
+        ("configuration.yaml", b"homeassistant: !include /etc/passwd\n"),
+        ("configuration.yaml", b"homeassistant: !include ../secrets.yaml\n"),
+        ("configuration.yaml", b"homeassistant: !include_dir_merge_named /data\n"),
+        ("unused.yaml", b"key: !include /homeassistant/secrets.yaml\n"),
+        ("custom_components/example/manifest.json", b"{}"),
+        ("deps/example.json", b"{}"),
+    ],
+)
 def test_unsupported_tree_fails_before_launch(tmp_path, monkeypatch, name, data):
     files = {"configuration.yaml": b"homeassistant:\n", name: data}
     inputs = candidate_inputs(tmp_path, files)
