@@ -72,10 +72,14 @@ class RuntimeEventBridge:
         self._github_token = github_token
         self._core_token = core_token
         self._mailbox = RuntimeEventMailbox()
-        worker_arguments: dict[str, object] = {"token": core_token}
-        if consumer is not None:
-            worker_arguments["consumer"] = consumer
-        self._worker = RuntimeEventWorker(self._mailbox, **worker_arguments)  # type: ignore[arg-type]
+        if consumer is None:
+            self._worker = RuntimeEventWorker(self._mailbox, token=core_token)
+        else:
+            self._worker = RuntimeEventWorker(
+                self._mailbox,
+                token=core_token,
+                consumer=consumer,
+            )
         self._processor = processor
         self._owner_thread = threading.get_ident()
         self._started = False
