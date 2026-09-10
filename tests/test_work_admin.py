@@ -95,7 +95,12 @@ def test_explicit_retry_rejects_non_blocked_state(tmp_path: Path, status: str) -
             WorkAdministrationError,
             match="only blocked work can be administratively retried",
         ):
-            retry_blocked_work(store, item.work_kind, item.work_key, now=created + timedelta(minutes=1))
+            retry_blocked_work(
+                store,
+                item.work_kind,
+                item.work_key,
+                now=created + timedelta(minutes=1),
+            )
     finally:
         store.__exit__(None, None, None)
 
