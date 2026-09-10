@@ -116,6 +116,8 @@ def verify_log_artifact(artifact: LogArtifact) -> None:
         raise LogArtifactError("log artifact evidence is invalid")
     if _ARTIFACT_ID.fullmatch(artifact.artifact_id) is None:
         raise LogArtifactError("log artifact identifier is invalid")
+    if artifact.root.name != artifact.artifact_id:
+        raise LogArtifactError("log artifact root is not bound to its identifier")
     _validate_file_evidence(artifact.files)
 
     root_before = _safe_lstat(artifact.root)
@@ -162,7 +164,7 @@ def verify_log_artifact(artifact: LogArtifact) -> None:
     manifest = file_bytes.get("manifest.json")
     if manifest is None or hashlib.sha256(manifest).hexdigest() != artifact.artifact_id:
         raise LogArtifactError("log artifact manifest does not match artifact identifier")
-    _verify_manifest(manifest, artifact.files)
+    _verify_manifest(manifest, artifact.files, file_bytes)
 
     root_after = _safe_lstat(artifact.root)
     if _stat_identity(root_before) != _stat_identity(root_after):
@@ -255,7 +257,11 @@ def _manifest_bytes(
     )
 
 
-def _verify_manifest(manifest: bytes, files: tuple[LogArtifactFile, ...]) -> None:
+def _verify_manifest(
+    manifest: bytes,
+    files: tuple[LogArtifactFile, ...],
+    file_bytes: dict[str, bytes],
+) -> None:
     try:
         payload = json.loads(manifest)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -283,12 +289,70 @@ def _verify_manifest(manifest: bytes, files: tuple[LogArtifactFile, ...]) -> Non
     reference_text = payload.get("reference_time")
     if not isinstance(reference_text, str):
         raise LogArtifactError("log artifact manifest reference time is invalid")
+    reference_time = _parse_canonical_utc_timestamp(reference_text)
+    observed_counts = _verify_record_payloads(file_bytes, reference_time)
+    if record_counts != observed_counts:
+        raise LogArtifactError("log artifact manifest record counts do not match payloads")
+
+
+def _verify_record_payloads(
+    file_bytes: dict[str, bytes], reference_time: datetime
+) -> dict[str, int]:
+    cutoff = reference_time - timedelta(days=_RETENTION_DAYS)
+    total_records = 0
+    counts: dict[str, int] = {}
+    identities: set[tuple[str, str]] = set()
+    for category in _CATEGORIES:
+        relative_path = f"logs/{category}/records.jsonl"
+        data = file_bytes.get(relative_path)
+        if data is None:
+            raise LogArtifactError("log artifact category payload is missing")
+        records: list[tuple[datetime, str, str]] = []
+        for line in data.splitlines():
+            total_records += 1
+            if total_records > _MAX_RECORDS:
+                raise LogArtifactError("log artifact contains too many retained records")
+            try:
+                payload = json.loads(line)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise LogArtifactError("log artifact record payload is invalid") from exc
+            if type(payload) is not dict or set(payload) != {"message", "record_id", "timestamp"}:
+                raise LogArtifactError("log artifact record payload is invalid")
+            message = payload.get("message")
+            record_id = payload.get("record_id")
+            timestamp_text = payload.get("timestamp")
+            if (
+                type(message) is not str
+                or len(message.encode("utf-8")) > _MAX_RECORD_BYTES
+                or type(record_id) is not str
+                or _RECORD_ID.fullmatch(record_id) is None
+                or not isinstance(timestamp_text, str)
+            ):
+                raise LogArtifactError("log artifact record payload is invalid")
+            timestamp = _parse_canonical_utc_timestamp(timestamp_text)
+            if timestamp < cutoff or timestamp > reference_time:
+                raise LogArtifactError("log artifact record falls outside retention window")
+            identity = (category, record_id)
+            if identity in identities:
+                raise LogArtifactError("log artifact contains a duplicate record identity")
+            identities.add(identity)
+            records.append((timestamp, record_id, message))
+        if records != sorted(records):
+            raise LogArtifactError("log artifact records are not in canonical order")
+        counts[category] = len(records)
+    return counts
+
+
+def _parse_canonical_utc_timestamp(value: str) -> datetime:
+    if not value.endswith("Z"):
+        raise LogArtifactError("log artifact timestamp is not canonical UTC")
     try:
-        parsed_reference = datetime.fromisoformat(reference_text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
-        raise LogArtifactError("log artifact manifest reference time is invalid") from exc
-    if parsed_reference.tzinfo is None or parsed_reference.utcoffset() != timedelta(0):
-        raise LogArtifactError("log artifact manifest reference time is invalid")
+        raise LogArtifactError("log artifact timestamp is invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0) or _render_timestamp(parsed) != value:
+        raise LogArtifactError("log artifact timestamp is not canonical UTC")
+    return parsed
 
 
 def _canonical_json(value: object) -> bytes:
@@ -403,9 +467,10 @@ def _validate_file_evidence(files: tuple[LogArtifactFile, ...]) -> None:
         ):
             raise LogArtifactError("log artifact file evidence is invalid")
         observed.add(item.path)
-    expected_paths = {f"logs/{category}/records.jsonl" for category in _CATEGORIES}
-    expected_paths.add("manifest.json")
-    if observed != expected_paths:
+    expected_order = tuple(f"logs/{category}/records.jsonl" for category in _CATEGORIES) + (
+        "manifest.json",
+    )
+    if tuple(item.path for item in files) != expected_order:
         raise LogArtifactError("log artifact file evidence layout is invalid")
 
 
