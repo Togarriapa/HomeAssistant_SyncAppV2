@@ -35,11 +35,13 @@ class EventSocket(Protocol):
 EventSocketContext = AbstractAsyncContextManager[EventSocket]
 EventSocketConnector = Callable[[str, float, float, int], EventSocketContext]
 RuntimeEventHandler = Callable[[Mapping[str, object]], Awaitable[None]]
+RuntimeReadyHandler = Callable[[], Awaitable[None]]
 
 
 async def consume_core_runtime_events(
     handler: RuntimeEventHandler,
     *,
+    on_ready: RuntimeReadyHandler | None = None,
     token: str | None = None,
     max_events: int | None = None,
     open_timeout_seconds: float = _DEFAULT_OPEN_TIMEOUT_SECONDS,
@@ -48,7 +50,7 @@ async def consume_core_runtime_events(
     connector: EventSocketConnector | None = None,
 ) -> int:
     """Consume normalized runtime events from the documented Supervisor proxy."""
-    if not callable(handler):
+    if not callable(handler) or (on_ready is not None and not callable(on_ready)):
         raise CoreEventStreamError("Home Assistant Core event handler is invalid")
     bearer = _resolve_token(token)
     _validate_limits(
@@ -68,6 +70,8 @@ async def consume_core_runtime_events(
         ) as socket:
             await _authenticate(socket, bearer, max_message_bytes)
             subscriptions = await _subscribe(socket, max_message_bytes)
+            if on_ready is not None:
+                await on_ready()
             return await _consume_events(
                 socket,
                 subscriptions,
