@@ -15,6 +15,11 @@ from ha_syncapp.local_sync_retrigger import (
     LocalSyncRetriggerResult,
     run_local_sync_retrigger_pass,
 )
+from ha_syncapp.log_sync_retrigger import (
+    LogSyncRetriggerError,
+    LogSyncRetriggerResult,
+    run_log_sync_retrigger_pass,
+)
 from ha_syncapp.runtime_sync_retrigger import (
     RuntimeSyncRetriggerError,
     RuntimeSyncRetriggerResult,
@@ -34,6 +39,7 @@ class RetriggerCycleResult:
     local_sync: LocalSyncRetriggerResult
     database_sync: DatabaseSyncRetriggerResult
     runtime_sync: RuntimeSyncRetriggerResult
+    log_sync: LogSyncRetriggerResult
 
 
 def run_retrigger_cycle(
@@ -52,10 +58,18 @@ def run_retrigger_cycle(
     github_token: str,
     *,
     core_token: str | None = None,
+    log_artifact_root: Path | None = None,
+    log_snapshot_root: Path | None = None,
+    log_workspace_root: Path | None = None,
 ) -> RetriggerCycleResult:
     """Process at most one item from each implemented outbound lane in order."""
     if type(store) is not StateStore:
         raise RetriggerCycleError("retrigger cycle state store is invalid")
+    log_roots = (log_artifact_root, log_snapshot_root, log_workspace_root)
+    if any(root is not None for root in log_roots) and not all(
+        root is not None for root in log_roots
+    ):
+        raise RetriggerCycleError("retrigger logs work roots are incomplete")
 
     try:
         local_sync = run_local_sync_retrigger_pass(
@@ -84,10 +98,24 @@ def run_retrigger_cycle(
             github_token,
             core_token=core_token,
         )
+        if log_artifact_root is None:
+            log_sync = LogSyncRetriggerResult(recovered_interrupted=0, processed=None)
+        else:
+            if log_snapshot_root is None or log_workspace_root is None:
+                raise RetriggerCycleError("retrigger logs work roots became incomplete")
+            log_sync = run_log_sync_retrigger_pass(
+                store,
+                log_artifact_root,
+                log_snapshot_root,
+                log_workspace_root,
+                target,
+                github_token,
+            )
     except (
         LocalSyncRetriggerError,
         DatabaseSyncRetriggerError,
         RuntimeSyncRetriggerError,
+        LogSyncRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -95,4 +123,5 @@ def run_retrigger_cycle(
         local_sync=local_sync,
         database_sync=database_sync,
         runtime_sync=runtime_sync,
+        log_sync=log_sync,
     )

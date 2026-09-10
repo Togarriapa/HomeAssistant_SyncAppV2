@@ -67,6 +67,9 @@ def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
         work / "runtime-staging",
         work / "runtime-snapshots",
         work / "runtime-workspaces",
+        work / "log-artifacts",
+        work / "log-snapshots",
+        work / "log-workspaces",
     )
 
 
@@ -98,6 +101,9 @@ def _handle_retrigger_request(
             runtime_staging_root,
             runtime_snapshot_root,
             runtime_workspace_root,
+            log_artifact_root,
+            log_snapshot_root,
+            log_workspace_root,
         ) = _work_roots(data_dir, request.home_assistant_root)
         run_retrigger_cycle(
             store,
@@ -114,6 +120,9 @@ def _handle_retrigger_request(
             config.repo_b,
             config.github_token,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
+            log_artifact_root=log_artifact_root,
+            log_snapshot_root=log_snapshot_root,
+            log_workspace_root=log_workspace_root,
         )
     except RepositoryVerificationError:
         return "repo_b_untrusted"

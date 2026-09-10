@@ -94,9 +94,18 @@ def test_retrigger_reverifies_repo_and_forwards_isolated_paths_and_credentials(
     assert args[1] == request.home_assistant_root
     assert args[4] == request.recorder_database
     assert args[-2:] == (TARGET, GIT_CREDENTIAL)
-    assert kwargs == {"core_token": CORE_CREDENTIAL}
+    assert kwargs["core_token"] == CORE_CREDENTIAL
+    assert kwargs["log_artifact_root"] == data / "syncapp/work/log-artifacts"
+    assert kwargs["log_snapshot_root"] == data / "syncapp/work/log-snapshots"
+    assert kwargs["log_workspace_root"] == data / "syncapp/work/log-workspaces"
 
+    keyword_work_paths = [
+        cast(Path, kwargs["log_artifact_root"]),
+        cast(Path, kwargs["log_snapshot_root"]),
+        cast(Path, kwargs["log_workspace_root"]),
+    ]
     work_paths = [cast(Path, path).resolve(strict=False) for path in args[2:4] + args[5:-2]]
+    work_paths += [path.resolve(strict=False) for path in keyword_work_paths]
     protected = (data / "syncapp").resolve()
     home = request.home_assistant_root.resolve()
     assert all(protected in path.parents for path in work_paths)
