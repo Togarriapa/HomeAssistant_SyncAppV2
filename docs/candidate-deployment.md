@@ -49,7 +49,7 @@ The Stage boundary:
 
 ## Immutable change-detection boundary
 
-`detect_candidate_changes()` implements the README's **Change detection** evidence needed by later dependency analysis and risk classification. It compares the exact candidate commit with a stable, identity-bound Repo B `main` head rather than using mutable live Home Assistant bytes as the known-good baseline.
+`detect_candidate_changes()` implements the README's **Change detection** evidence needed by later validation. It compares the exact candidate commit with a stable, identity-bound Repo B `main` head rather than using mutable live Home Assistant bytes as the known-good baseline.
 
 The change-detection boundary:
 
@@ -67,8 +67,26 @@ The change-detection boundary:
 
 This step performs no merge and grants no deployment authority. A moved, absent or unverifiable `main`, identity mismatch, transport failure, staged-byte change, or Git/Stage metadata disagreement causes change detection to fail closed.
 
+## Integrity validation boundary
+
+`validate_candidate_integrity()` implements the README's explicit **Integrity validation** gate after change detection and before dependency analysis. It consumes only immutable Fetch, Stage and Change evidence and does not inspect or modify the live Home Assistant tree.
+
+The integrity gate:
+
+- requires Repo B target, stable repository ID, `candidate` branch identity and exact candidate SHA to agree across Fetch, Stage and Change evidence;
+- requires a valid exact baseline SHA and the Stage manifest SHA-256 that will be carried forward by later gates;
+- re-verifies the complete staged manifest, staged file set, modes and SHA-256 digests before validation;
+- re-proves the isolated candidate Git ref before validation;
+- validates deterministic change ordering, unique safe paths, supported status vocabulary and the required before/after mode and object-ID shape for every status;
+- rejects impossible status claims such as an `added` path with baseline evidence, a `modified` path with unchanged content, or a content-only status that also changes executable mode;
+- requires every candidate-side changed path, Git mode and object ID to match the verified Stage manifest exactly, while unchanged candidate files remain covered by whole-stage verification;
+- re-verifies Stage and Fetch again immediately before returning success so later dependency analysis receives evidence tied to the same candidate bytes;
+- returns immutable success evidence bound to target, repository ID, baseline SHA, candidate SHA, Stage manifest SHA-256 and deterministic changed paths.
+
+Failure is sanitized and fail-closed. Integrity success grants no permission to validate with Home Assistant, create a backup, apply candidate bytes, reload/restart Home Assistant, promote a branch or perform rollback.
+
 ## Not implemented yet
 
 No candidate byte from Stage is copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback remain downstream.
 
-The next increment should consume immutable change evidence for dependency analysis and risk classification. Only after those checks and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.
+The next increment should consume successful integrity evidence and immutable change evidence for **Dependency analysis**. Risk classification follows dependency analysis. Only after those gates and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.
