@@ -118,6 +118,22 @@ def analyze_candidate_dependencies(
     return result
 
 
+def verify_candidate_dependency_analysis(
+    result: CandidateDependencyAnalysis,
+    runtime: RuntimeInventoryInput,
+) -> None:
+    """Reprove dependency evidence structure and its exact runtime binding."""
+    if type(runtime) is not RuntimeInventoryInput:
+        raise CandidateDependencyError("candidate dependency runtime evidence is invalid")
+    _validate_result(result)
+    try:
+        runtime_sha256 = fingerprint_runtime(runtime)
+    except RuntimeEvidenceError as exc:
+        raise CandidateDependencyError("candidate dependency runtime evidence is invalid") from exc
+    if runtime_sha256 != result.runtime_sha256:
+        raise CandidateDependencyError("candidate dependency runtime binding does not match")
+
+
 def _validate_inputs(
     integrity: CandidateIntegrity,
     stage: CandidateStage,
@@ -203,11 +219,15 @@ def _validate_files(
     files: tuple[CandidateDependencyFile, ...],
     changed_paths: tuple[str, ...],
 ) -> None:
-    if tuple(item.path for item in files) != changed_paths:
+    if (
+        tuple(item.path for item in files) != changed_paths
+        or tuple(sorted(set(changed_paths))) != changed_paths
+    ):
         raise CandidateDependencyError("candidate dependency file evidence is invalid")
     for item in files:
         if (
             type(item) is not CandidateDependencyFile
+            or not item.path
             or item.disposition not in _ALLOWED_DISPOSITIONS
             or tuple(sorted(set(item.known_entity_references))) != item.known_entity_references
             or tuple(sorted(set(item.unknown_object_references))) != item.unknown_object_references
@@ -224,15 +244,34 @@ def _validate_files(
 def _validate_result(result: CandidateDependencyAnalysis) -> None:
     if (
         type(result) is not CandidateDependencyAnalysis
-        or result.analysis_method != _ANALYSIS_METHOD
+        or not result.target
+        or result.repository_id <= 0
+        or _OBJECT_ID.fullmatch(result.baseline_sha) is None
+        or _OBJECT_ID.fullmatch(result.candidate_sha) is None
+        or _DIGEST.fullmatch(result.stage_manifest_sha256) is None
         or _DIGEST.fullmatch(result.runtime_sha256) is None
+        or result.analysis_method != _ANALYSIS_METHOD
     ):
         raise CandidateDependencyError("candidate dependency result is invalid")
-    if tuple(sorted(set(result.known_entity_references))) != result.known_entity_references:
-        raise CandidateDependencyError("candidate dependency result is invalid")
-    if tuple(sorted(set(result.unknown_object_references))) != result.unknown_object_references:
-        raise CandidateDependencyError("candidate dependency result is invalid")
-    if tuple(sorted(set(result.dynamic_paths))) != result.dynamic_paths:
-        raise CandidateDependencyError("candidate dependency result is invalid")
-    if tuple(sorted(set(result.unanalyzed_paths))) != result.unanalyzed_paths:
+
+    paths = tuple(item.path for item in result.files)
+    _validate_files(result.files, paths)
+    known_references = tuple(
+        sorted({reference for item in result.files for reference in item.known_entity_references})
+    )
+    unknown_references = tuple(
+        sorted({reference for item in result.files for reference in item.unknown_object_references})
+    )
+    dynamic_paths = tuple(item.path for item in result.files if item.dynamic_reference)
+    unanalyzed_paths = tuple(
+        item.path
+        for item in result.files
+        if item.disposition in {"non_utf8_or_binary", "oversize"}
+    )
+    if (
+        result.known_entity_references != known_references
+        or result.unknown_object_references != unknown_references
+        or result.dynamic_paths != dynamic_paths
+        or result.unanalyzed_paths != unanalyzed_paths
+    ):
         raise CandidateDependencyError("candidate dependency result is invalid")
