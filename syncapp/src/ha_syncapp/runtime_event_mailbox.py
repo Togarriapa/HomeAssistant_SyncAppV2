@@ -59,9 +59,17 @@ class RuntimeEventMailbox:
             raise RuntimeEventMailboxError("runtime event mailbox capacity is invalid")
         self._queue: queue.Queue[RuntimeEventSignal] = queue.Queue(maxsize=capacity)
 
+    def put(self, signal: RuntimeEventSignal) -> None:
+        """Insert one already-normalized signal after strict structural validation."""
+        _validate_signal(signal)
+        try:
+            self._queue.put_nowait(signal)
+        except queue.Full:
+            raise RuntimeEventMailboxError("runtime event mailbox capacity exhausted") from None
+
     async def ready(self) -> None:
         """Enqueue one subscription-readiness signal without blocking a transport thread."""
-        self._enqueue(RuntimeEventSignal(RuntimeEventSignalKind.READY))
+        self.put(RuntimeEventSignal(RuntimeEventSignalKind.READY))
 
     async def event(self, evidence: Mapping[str, object]) -> None:
         """Reduce already-normalized event evidence to one bounded event-type signal."""
@@ -70,14 +78,7 @@ class RuntimeEventMailbox:
         event_type = evidence.get("event_type")
         if not isinstance(event_type, str) or event_type not in _ALLOWED_EVENT_TYPES:
             raise RuntimeEventMailboxError("runtime event mailbox evidence is invalid")
-        self._enqueue(RuntimeEventSignal(RuntimeEventSignalKind.EVENT, event_type))
-
-    def _enqueue(self, signal: RuntimeEventSignal) -> None:
-        _validate_signal(signal)
-        try:
-            self._queue.put_nowait(signal)
-        except queue.Full:
-            raise RuntimeEventMailboxError("runtime event mailbox capacity exhausted") from None
+        self.put(RuntimeEventSignal(RuntimeEventSignalKind.EVENT, event_type))
 
     def _next(self) -> RuntimeEventSignal | None:
         try:
