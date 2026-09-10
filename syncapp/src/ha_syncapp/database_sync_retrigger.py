@@ -5,14 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ha_syncapp.database_sync_work import (
-    DatabaseSyncWorkError,
-    DatabaseSyncWorkResult,
-    claim_database_sync_work,
-    database_sync_work_key,
-    execute_claimed_database_sync_work,
-)
-from ha_syncapp.state import StateError, StateStore
+from .database_sync_process import DatabaseSyncProcessError, run_database_sync_process
+from .database_sync_work import DatabaseSyncWorkResult
+from .state import StateError, StateStore
 
 
 class DatabaseSyncRetriggerError(RuntimeError):
@@ -36,7 +31,7 @@ def run_database_sync_retrigger_pass(
     target: str,
     token: str,
 ) -> DatabaseSyncRetriggerResult:
-    """Recover interrupted work and process at most one eligible database item."""
+    """Recover interrupted work, then delegate one normal database processing attempt."""
     if type(store) is not StateStore:
         raise DatabaseSyncRetriggerError(
             "database synchronization retrigger state store is invalid"
@@ -44,18 +39,8 @@ def run_database_sync_retrigger_pass(
 
     try:
         recovered = store.recover_interrupted_work()
-        item = claim_database_sync_work(store)
-        if item is None:
-            return DatabaseSyncRetriggerResult(recovered_interrupted=recovered, processed=None)
-        if item.work_key != database_sync_work_key(target, source_database):
-            blocked = store.fail_work(item, transient=False)
-            return DatabaseSyncRetriggerResult(
-                recovered_interrupted=recovered,
-                processed=DatabaseSyncWorkResult(blocked, None),
-            )
-        processed = execute_claimed_database_sync_work(
+        processed = run_database_sync_process(
             store,
-            item,
             source_database,
             database_staging_root,
             snapshot_staging_root,
@@ -63,8 +48,11 @@ def run_database_sync_retrigger_pass(
             target,
             token,
         )
-        return DatabaseSyncRetriggerResult(recovered_interrupted=recovered, processed=processed)
-    except (StateError, DatabaseSyncWorkError) as exc:
+        return DatabaseSyncRetriggerResult(
+            recovered_interrupted=recovered,
+            processed=processed.processed,
+        )
+    except (StateError, DatabaseSyncProcessError) as exc:
         raise DatabaseSyncRetriggerError(
             "database synchronization retrigger pass failed closed"
         ) from exc
