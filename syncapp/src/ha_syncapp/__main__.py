@@ -24,6 +24,7 @@ from .retrigger_ipc import (
     request_retrigger_once,
     retrigger_socket_path,
 )
+from .runtime_event_bridge import RuntimeEventBridge, RuntimeEventBridgeError
 from .runtime_startup import RuntimeStartupError, RuntimeStartupResult, run_startup_runtime_sync
 from .state import AlreadyRunning, StateError, StateStore
 
@@ -141,6 +142,30 @@ def _run_startup_runtime_if_configured(
     )
 
 
+def _runtime_event_bridge_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> RuntimeEventBridge | None:
+    """Build, but do not start, normal runtime event processing after trust/bootstrap."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise RuntimeEventBridgeError("runtime event bridge repository is not trusted")
+    runtime_staging_root, runtime_snapshot_root, runtime_workspace_root = _runtime_work_roots(
+        data_dir
+    )
+    return RuntimeEventBridge(
+        store,
+        runtime_staging_root,
+        runtime_snapshot_root,
+        runtime_workspace_root,
+        config.repo_b,
+        config.github_token,
+        core_token=os.environ.get("SUPERVISOR_TOKEN"),
+    )
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -213,33 +238,52 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
+        runtime_bridge: RuntimeEventBridge | None = None
         if not stop.requested:
             _run_startup_runtime_if_configured(store, config, data_dir)
+            runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
+            if runtime_bridge is not None:
+                runtime_bridge.start()
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
+        mode = "active" if runtime_bridge is not None else "passive"
 
-        with RetriggerServer(socket_path) as retrigger_server:
-            fields = {**asdict(boot), "version": __version__, "mode": "passive"}
-            level = "warning" if boot.interrupted_run_id else "info"
-            if config.log_level == "info" or (config.log_level == "warning" and level == "warning"):
-                emit("service_started", level=level, **fields)
+        try:
+            with RetriggerServer(socket_path) as retrigger_server:
+                fields = {**asdict(boot), "version": __version__, "mode": mode}
+                level = "warning" if boot.interrupted_run_id else "info"
+                if config.log_level == "info" or (
+                    config.log_level == "warning" and level == "warning"
+                ):
+                    emit("service_started", level=level, **fields)
 
-            while not stop.requested:
-                try:
-                    retrigger_server.serve_once(
-                        lambda request: _handle_retrigger_request(store, config, data_dir, request),
-                        timeout_seconds=0.25,
-                    )
-                except RetriggerIPCError:
-                    if stop.requested:
-                        break
-                    raise
-                now = time.monotonic()
-                if now >= next_status:
-                    if config.log_level == "info":
-                        emit("service_idle", run_id=boot.run_id, mode="passive")
-                    next_status = now + config.status_interval_seconds
+                while not stop.requested:
+                    try:
+                        retrigger_server.serve_once(
+                            lambda request: _handle_retrigger_request(
+                                store, config, data_dir, request
+                            ),
+                            timeout_seconds=0.25,
+                        )
+                    except RetriggerIPCError:
+                        if stop.requested:
+                            break
+                        raise
+                    if runtime_bridge is not None:
+                        runtime_bridge.tick()
+                    now = time.monotonic()
+                    if now >= next_status:
+                        if config.log_level == "info":
+                            emit("service_idle", run_id=boot.run_id, mode=mode)
+                        next_status = now + config.status_interval_seconds
+        except BaseException:
+            if runtime_bridge is not None:
+                with suppress(RuntimeEventBridgeError):
+                    runtime_bridge.stop()
+            raise
 
+        if runtime_bridge is not None:
+            runtime_bridge.stop()
         store.finish_run()
         if config.log_level == "info":
             emit("service_stopped", run_id=boot.run_id)
@@ -306,6 +350,9 @@ def main() -> int:
     except RetriggerIPCError:
         emit("service_failed", level="error", reason="retrigger_ipc_unavailable")
         return 6
+    except RuntimeEventBridgeError:
+        emit("service_failed", level="error", reason="runtime_events_unavailable")
+        return 7
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
