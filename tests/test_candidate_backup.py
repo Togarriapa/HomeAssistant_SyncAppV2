@@ -163,3 +163,31 @@ def test_semantic_drift_after_backup_discards_success(tmp_path, monkeypatch):
         backup.create_candidate_backup(
             authorization, *inputs, token="secret-token", transport=transport
         )
+
+
+def test_verified_backup_evidence_is_exactly_retrievable_after_restart(tmp_path, monkeypatch):
+    from uuid import uuid4
+
+    from ha_syncapp.state import StateStore
+
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+
+    def transport(method, *_args):
+        if method == "POST":
+            return _json_response({"slug": "abc123"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"})
+
+    evidence = backup.create_candidate_backup(
+        authorization, *inputs, token="secret-token", transport=transport
+    )
+    data = tmp_path / "prepared-state"
+    data.mkdir()
+    deployment_id = str(uuid4())
+    with StateStore(data) as store:
+        store.bind_repository(evidence.target, evidence.repository_id)
+        recorded = store.record_prepared_deployment(deployment_id, evidence)
+    with StateStore(data) as store:
+        restored = store.prepared_deployment(deployment_id)
+        assert restored == recorded
+        assert restored.evidence == evidence
+    assert b"secret-token" not in (data / "syncapp/state.sqlite3").read_bytes()
