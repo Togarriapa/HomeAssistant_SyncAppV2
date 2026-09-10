@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 
 import pytest
-
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
 from ha_syncapp.runtime_topology import RuntimeTopologyError, build_runtime_topology
 
