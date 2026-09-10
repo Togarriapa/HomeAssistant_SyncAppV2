@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -222,6 +224,67 @@ def test_verification_rejects_symlink_and_evidence_tampering(tmp_path: Path) -> 
     forged = replace(artifact, artifact_id="0" * 64)
     with pytest.raises(LogArtifactError):
         verify_log_artifact(forged)
+
+
+def test_verification_rejects_forged_manifest_counts_with_matching_hashes(
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir(mode=0o700)
+    artifact = build_log_artifact(
+        staging,
+        (_record("syncapp", "one", "message"),),
+        reference_time=REFERENCE,
+    )
+    manifest_path = artifact.root / "manifest.json"
+    payload = json.loads(manifest_path.read_bytes())
+    payload["record_counts"]["syncapp"] = 2
+    forged_manifest = (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+    forged_id = hashlib.sha256(forged_manifest).hexdigest()
+    manifest_path.write_bytes(forged_manifest)
+    forged_root = artifact.root.parent / forged_id
+    artifact.root.rename(forged_root)
+    forged_files = tuple(
+        replace(
+            item,
+            sha256=hashlib.sha256(forged_manifest).hexdigest(),
+            size=len(forged_manifest),
+        )
+        if item.path == "manifest.json"
+        else item
+        for item in artifact.files
+    )
+    forged = replace(
+        artifact,
+        root=forged_root,
+        artifact_id=forged_id,
+        files=forged_files,
+    )
+
+    with pytest.raises(LogArtifactError):
+        verify_log_artifact(forged)
+
+
+def test_verification_rejects_reordered_evidence(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir(mode=0o700)
+    artifact = build_log_artifact(
+        staging,
+        (_record("syncapp", "one", "message"),),
+        reference_time=REFERENCE,
+    )
+
+    with pytest.raises(LogArtifactError):
+        verify_log_artifact(replace(artifact, files=tuple(reversed(artifact.files))))
 
 
 def test_input_records_are_not_mutated(tmp_path: Path) -> None:
