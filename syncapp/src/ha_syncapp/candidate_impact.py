@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
 from .candidate_dependencies import (
     CandidateDependencyAnalysis,
@@ -16,6 +16,7 @@ from .runtime_inventory import RuntimeInventoryInput
 from .runtime_topology import RuntimeTopologyError, build_runtime_topology
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SPECIAL_ENTITY_KINDS = {"automation", "script", "scene"}
 
 
@@ -69,15 +70,11 @@ def expand_candidate_impact(
         raise CandidateImpactError("candidate impact runtime topology is invalid") from exc
 
     topology = topology_evidence.analysis.get("topology")
-    if not isinstance(topology, dict):
-        raise CandidateImpactError("candidate impact runtime topology is invalid")
-    edges_raw = topology.get("edges")
-    unresolved_raw = topology.get("unresolved")
-    if not isinstance(edges_raw, list) or not isinstance(unresolved_raw, list):
+    if not isinstance(topology, Mapping):
         raise CandidateImpactError("candidate impact runtime topology is invalid")
 
-    edges = _validated_edges(edges_raw, allow_authority=True)
-    unresolved_edges = _validated_edges(unresolved_raw, allow_authority=False)
+    edges = _validated_edges(topology.get("edges"), allow_authority=True)
+    unresolved_edges = _validated_edges(topology.get("unresolved"), allow_authority=False)
     outgoing = _group_edges(edges)
     unresolved = _group_edges(unresolved_edges)
 
@@ -99,23 +96,31 @@ def expand_candidate_impact(
 
 
 def _validated_edges(
-    raw: list[object],
+    raw: object,
     *,
     allow_authority: bool,
 ) -> tuple[dict[str, str], ...]:
-    edges: list[dict[str, str]] = []
+    if not isinstance(raw, list):
+        raise CandidateImpactError("candidate impact runtime topology is invalid")
+
     expected_keys = {"source_id", "source_type", "relation", "target_id", "target_type"}
     if allow_authority:
         expected_keys.add("authority")
+
+    edges: list[dict[str, str]] = []
     for item in raw:
-        if not isinstance(item, dict) or set(item) != expected_keys:
+        if not isinstance(item, Mapping) or set(item) != expected_keys:
             raise CandidateImpactError("candidate impact runtime topology is invalid")
-        if any(not isinstance(value, str) or not value for value in item.values()):
-            raise CandidateImpactError("candidate impact runtime topology is invalid")
-        edge = cast(dict[str, str], dict(item))
+        edge: dict[str, str] = {}
+        for key in sorted(expected_keys):
+            value = item.get(key)
+            if not isinstance(value, str) or not value:
+                raise CandidateImpactError("candidate impact runtime topology is invalid")
+            edge[key] = value
         if allow_authority and edge["authority"] not in {"registry", "derived"}:
             raise CandidateImpactError("candidate impact runtime topology is invalid")
         edges.append(edge)
+
     if edges != sorted(edges, key=_edge_key) or len({_edge_key(edge) for edge in edges}) != len(
         edges
     ):
@@ -123,7 +128,7 @@ def _validated_edges(
     return tuple(edges)
 
 
-def _edge_key(edge: dict[str, str]) -> tuple[str, str, str, str, str]:
+def _edge_key(edge: Mapping[str, str]) -> tuple[str, str, str, str, str]:
     return (
         edge["source_type"],
         edge["source_id"],
@@ -149,7 +154,9 @@ def _expand_entity(
 ) -> CandidateEntityImpact:
     if "." not in entity_id:
         raise CandidateImpactError("candidate dependency entity identifier is invalid")
-    domain, _ = entity_id.split(".", 1)
+    domain, object_id = entity_id.split(".", 1)
+    if not domain or not object_id:
+        raise CandidateImpactError("candidate dependency entity identifier is invalid")
     object_kind = domain if domain in _SPECIAL_ENTITY_KINDS else "entity"
 
     devices: set[str] = set()
@@ -227,7 +234,10 @@ def _collect_unresolved(
 def _validate_result(result: CandidateImpactAnalysis) -> None:
     if (
         type(result) is not CandidateImpactAnalysis
+        or not result.target
         or result.repository_id <= 0
+        or _OBJECT_ID.fullmatch(result.baseline_sha) is None
+        or _OBJECT_ID.fullmatch(result.candidate_sha) is None
         or _DIGEST.fullmatch(result.stage_manifest_sha256) is None
         or _DIGEST.fullmatch(result.runtime_sha256) is None
         or tuple(sorted(item.entity_id for item in result.entities))
@@ -235,3 +245,24 @@ def _validate_result(result: CandidateImpactAnalysis) -> None:
         or len({item.entity_id for item in result.entities}) != len(result.entities)
     ):
         raise CandidateImpactError("candidate impact result is invalid")
+
+    for item in result.entities:
+        if (
+            type(item) is not CandidateEntityImpact
+            or not item.entity_id
+            or "." not in item.entity_id
+            or not item.domain
+            or item.object_kind not in {"entity", *_SPECIAL_ENTITY_KINDS}
+            or tuple(sorted(set(item.device_ids))) != item.device_ids
+            or tuple(sorted(set(item.integration_ids))) != item.integration_ids
+            or tuple(sorted(set(item.area_ids))) != item.area_ids
+            or tuple(sorted(set(item.floor_ids))) != item.floor_ids
+            or tuple(sorted(set(item.label_ids))) != item.label_ids
+            or tuple(sorted(set(item.derived_relations))) != item.derived_relations
+            or tuple(sorted(set(item.unresolved))) != item.unresolved
+        ):
+            raise CandidateImpactError("candidate impact entity evidence is invalid")
+        domain, object_id = item.entity_id.split(".", 1)
+        expected_kind = domain if domain in _SPECIAL_ENTITY_KINDS else "entity"
+        if not object_id or item.domain != domain or item.object_kind != expected_kind:
+            raise CandidateImpactError("candidate impact entity evidence is invalid")
