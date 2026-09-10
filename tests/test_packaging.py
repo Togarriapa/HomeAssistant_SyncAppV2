@@ -74,7 +74,9 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
         "--hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23",
         "PyYAML==6.0.3 \\",
         "--hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \\",
-        "--hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28",
+        "--hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \\",
+        "--hash=sha256:7c6610def4f163542a622a73fb39f534f8c101d690126992300bf3207eab9764 \\",
+        "--hash=sha256:5190d403f121660ce8d1d2c1bb2ef1bd05b5f68533fc5c2ea899bd15f4399b35",
     ]
     assert "websockets" not in (ROOT / "requirements-dev.txt").read_text()
 

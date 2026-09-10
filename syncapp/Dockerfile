@@ -1,4 +1,5 @@
-FROM python:3.12.14-slim-bookworm
+# The official Core checker and its integration dependencies must match runtime evidence.
+FROM ghcr.io/home-assistant/home-assistant:2026.9.1
 
 ARG BUILD_VERSION=0.1.0
 ARG BUILD_ARCH
@@ -14,8 +15,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt
+# Keep SyncApp dependencies separate from the official Core Python environment.
+RUN apk add --no-cache git openssh-client libseccomp \
+    && python3 -m venv /opt/syncapp \
+    && /opt/syncapp/bin/python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 COPY src/ /app/
 
 STOPSIGNAL SIGTERM
-ENTRYPOINT ["python", "-m", "ha_syncapp"]
+ENTRYPOINT ["/opt/syncapp/bin/python", "-m", "ha_syncapp"]
+CMD []
