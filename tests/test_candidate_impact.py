@@ -168,6 +168,28 @@ def test_runtime_fingerprint_is_order_independent_for_mapping_keys() -> None:
     assert fingerprint_runtime(first) == fingerprint_runtime(second)
 
 
+def test_runtime_fingerprint_binds_every_runtime_inventory_section() -> None:
+    baseline = RuntimeInventoryInput(
+        manifest={"version": 1},
+        homeassistant={"entities": []},
+        supervisor={"system": {}},
+        hardware={"system": {}},
+        analysis={"topology": {}},
+        deployments={BASELINE_SHA: {"status": "known_good"}},
+    )
+    baseline_digest = fingerprint_runtime(baseline)
+    variants = (
+        replace(baseline, manifest={"version": 2}),
+        replace(baseline, homeassistant={"entities": [{"entity_id": "light.one"}]}),
+        replace(baseline, supervisor={"system": {"state": "running"}}),
+        replace(baseline, hardware={"system": {"arch": "aarch64"}}),
+        replace(baseline, analysis={"topology": {"schema_version": 1}}),
+        replace(baseline, deployments={CANDIDATE_SHA: {"status": "candidate"}}),
+    )
+
+    assert all(fingerprint_runtime(variant) != baseline_digest for variant in variants)
+
+
 def test_rejects_runtime_snapshot_mismatch() -> None:
     runtime = _runtime()
     dependencies = _dependencies(runtime)
