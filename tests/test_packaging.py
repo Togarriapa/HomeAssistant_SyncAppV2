@@ -18,7 +18,7 @@ def test_packaging_exposes_only_required_read_only_home_assistant_access() -> No
     assert manifest.get("apparmor", True) is True
     assert manifest["homeassistant_api"] is True
     assert manifest["hassio_api"] is True
-    assert manifest["hassio_role"] == "default"
+    assert manifest["hassio_role"] == "backup"
     assert manifest["map"] == [
         {
             "type": "homeassistant_config",
