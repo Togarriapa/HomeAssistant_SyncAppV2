@@ -241,9 +241,10 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         runtime_bridge: RuntimeEventBridge | None = None
         if not stop.requested:
             _run_startup_runtime_if_configured(store, config, data_dir)
-            runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
-            if runtime_bridge is not None:
-                runtime_bridge.start()
+            if not stop.requested:
+                runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
+                if runtime_bridge is not None:
+                    runtime_bridge.start()
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
         mode = "active" if runtime_bridge is not None else "passive"
