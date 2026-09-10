@@ -7,6 +7,7 @@ import signal
 import stat
 import sys
 import time
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,10 +61,8 @@ def _ensure_private_work_directory(protected: Path, directory: Path) -> None:
     current = protected
     for part in directory.relative_to(protected).parts:
         current = current / part
-        try:
+        with suppress(FileExistsError):
             current.mkdir(mode=0o700)
-        except FileExistsError:
-            pass
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
