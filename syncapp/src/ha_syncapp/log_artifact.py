@@ -315,7 +315,7 @@ def _file_evidence(path: str, data: bytes) -> LogArtifactFile:
 
 
 def _validate_staging_root(staging_root: Path) -> None:
-    if type(staging_root) is not Path or not staging_root.is_absolute():
+    if not isinstance(staging_root, Path) or not staging_root.is_absolute():
         raise LogArtifactError("log artifact staging root must be an absolute path")
     root_stat = _safe_lstat(staging_root)
     if (
