@@ -56,9 +56,12 @@ backup, Apply, reload, restart or promotion. Those transaction stages remain sep
 The standalone helper starts in isolated Python mode without inherited app credentials.
 Before importing Core it drops root identity, sets resource limits, requires Landlock ABI
 3 or newer for filesystem restrictions, and installs a libseccomp filter. The filesystem
-allowlist includes read-only interpreter resources and the disposable candidate copy;
-it excludes live configuration and app state. Network access and new executable launches
-are denied. Private asyncio wakeup sockets and threads remain available to Core.
+allowlist includes read-only interpreter resources, fixed Core container-identity marker
+files, and the disposable candidate copy; it excludes live configuration and app state.
+Network access is denied. New executable launches are denied by Landlock except for the
+exact bundled `/usr/local/bin/python3` interpreter that Core may relaunch for dependency-
+site discovery; no shell, utility, candidate executable, or alternate interpreter receives
+execute permission. Private asyncio wakeup sockets and threads remain available to Core.
 
 Limits are 180 seconds wall time, 90 seconds CPU, 2 GiB address space, 16 MiB per output
 file, 512 file descriptors and 256 processes/threads per validator user. Input is limited
