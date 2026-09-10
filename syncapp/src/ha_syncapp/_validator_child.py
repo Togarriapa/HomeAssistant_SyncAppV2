@@ -34,7 +34,8 @@ class _Compare(ctypes.Structure):
 
 def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
     # asm-generic and x86_64 share the assigned Landlock syscall numbers.
-    if platform.system() != "Linux" or platform.machine() not in {"x86_64", "aarch64"}:
+    machine = platform.machine()
+    if platform.system() != "Linux" or machine not in {"x86_64", "aarch64"}:
         raise RuntimeError("unsupported platform")
     libc.syscall.restype = ctypes.c_long
     if libc.syscall(444, 0, 0, 1) < 3:
@@ -61,9 +62,17 @@ def _filesystem_sandbox(libc: ctypes.CDLL, config: Path) -> None:
             "/run/.containerenv",
         )
     ]
-    # Home Assistant's checker resolves its dependency site using this exact interpreter.
-    # No other executable is granted Landlock EXECUTE permission.
-    rules.append((Path("/usr/local/bin/python3"), read_file | execute))
+    # Home Assistant's checker resolves its dependency site by relaunching this exact
+    # interpreter. An ELF exec also enters through the architecture-specific musl loader,
+    # so both exact files need EXECUTE while every sibling executable remains denied.
+    elf_loader = {
+        "x86_64": Path("/lib/ld-musl-x86_64.so.1"),
+        "aarch64": Path("/lib/ld-musl-aarch64.so.1"),
+    }[machine]
+    rules += [
+        (Path("/usr/local/bin/python3"), read_file | execute),
+        (elf_loader, read_file | execute),
+    ]
     # Disposable candidate copy only: regular files/directories, not sockets/devices/symlinks.
     writable = read_file | read_dir | (1 << 1) | (1 << 4) | (1 << 5)
     writable |= (1 << 7) | (1 << 8) | (1 << 13) | (1 << 14)
