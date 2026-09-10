@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import pytest
-from ha_syncapp import runtime_startup
+from ha_syncapp import runtime_startup, runtime_sync_process
+from ha_syncapp.core_runtime_bundle import CoreRuntimeBundleError
 from ha_syncapp.runtime_sync_process import RuntimeSyncProcessError, RuntimeSyncProcessResult
 from ha_syncapp.runtime_sync_work import runtime_sync_work_key
 from ha_syncapp.state import StateStore
@@ -73,25 +74,53 @@ def test_startup_schedules_before_processing(
     assert result.processed.processed is None
 
 
+def test_transient_core_failure_remains_durable_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    secret = "supervisor-secret-sentinel"
+
+    def fail(*, token: str | None = None):
+        raise CoreRuntimeBundleError(f"failed with {token}")
+
+    monkeypatch.setattr(runtime_sync_process, "collect_core_runtime_bundle", fail)
+    try:
+        result = runtime_startup.run_startup_runtime_sync(
+            store,
+            tmp_path / "runtime",
+            tmp_path / "snapshots",
+            tmp_path / "workspaces",
+            TARGET,
+            "github-token",
+            core_token=secret,
+        )
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.scheduled.status == "pending"
+    assert result.processed.processed is not None
+    assert result.processed.processed.work.status == "retry"
+    assert result.processed.processed.work.next_attempt_at is not None
+    assert secret not in repr(result)
+
+
 def test_blocked_runtime_generation_remains_blocked(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _store(tmp_path)
     key = runtime_sync_work_key(TARGET)
-    pending = store.enqueue_work("runtime", key)
+    store.enqueue_work("runtime", key)
     claimed = store.claim_work_kind("runtime")
     assert claimed is not None
     blocked = store.fail_work(claimed, transient=False)
     assert blocked.status == "blocked"
-    process_calls = 0
 
-    def process(*args: object, **kwargs: object) -> RuntimeSyncProcessResult:
-        nonlocal process_calls
-        process_calls += 1
-        return RuntimeSyncProcessResult(None)
+    def unexpected_collect(*args: object, **kwargs: object):
+        raise AssertionError("blocked work must not be collected")
 
-    monkeypatch.setattr(runtime_startup, "run_runtime_sync_process", process)
+    monkeypatch.setattr(runtime_sync_process, "collect_core_runtime_bundle", unexpected_collect)
     try:
         result = runtime_startup.run_startup_runtime_sync(
             store,
@@ -104,9 +133,8 @@ def test_blocked_runtime_generation_remains_blocked(
     finally:
         store.__exit__(None, None, None)
 
-    assert pending.work_key == key
     assert result.scheduled.status == "blocked"
-    assert process_calls == 1
+    assert result.processed.processed is None
 
 
 def test_processing_failure_is_sanitized(
