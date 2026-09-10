@@ -12,13 +12,14 @@ The sole product specification for candidate handling is the initial V2 `README.
 
 ## Isolated Fetch boundary
 
-`fetch_trusted_candidate()` implements only the next **Fetch** step. It accepts one present trusted candidate observation plus the exact expected SHA and creates a private transient Git workspace under an explicitly supplied owner-only workspace root.
+`fetch_trusted_candidate()` implements only the next **Fetch** step. It accepts one present trusted candidate observation plus the exact expected SHA, an owner-only workspace root, and the live Home Assistant root used solely to prove that Git metadata will be created outside that live tree.
 
 The fetch boundary:
 
-- initializes Git only in that isolated transient workspace;
+- resolves both roots before creating transient state and fails closed if either contains the other or they are equal;
+- initializes Git only in a private transient workspace beneath the isolated workspace root;
 - uses a credential-free Repo B HTTPS URL and a temporary non-interactive authentication helper;
-- fetches only `refs/heads/candidate` into the private `refs/syncapp/candidate-fetch` ref;
+- fetches only `refs/heads/candidate` into the private `refs/syncapp/candidate-fetch` ref using a normal non-force refspec;
 - resolves that ref as a commit and requires its SHA to equal both the trusted observation and expected durable SHA;
 - verifies the fetched object type is `commit`;
 - removes the authentication helper on every path and removes incomplete staging on failure;
