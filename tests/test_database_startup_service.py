@@ -126,7 +126,7 @@ def test_database_bootstrap_rejects_unavailable_source_without_scheduling(
     try:
         with pytest.raises(DatabaseStartupError, match="failed closed"):
             service._run_startup_database_if_configured(store, config, tmp_path / "data", home)
-        assert store.get_work("database", "0" * 64) is None
+        assert store.claim_work_kind("database") is None
     finally:
         store.__exit__(None, None, None)
 
