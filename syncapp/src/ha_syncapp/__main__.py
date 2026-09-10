@@ -4,8 +4,10 @@ import argparse
 import json
 import os
 import signal
+import stat
 import sys
 import time
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,12 +54,39 @@ class Shutdown:
         return self.requested
 
 
+def _ensure_private_work_directory(protected: Path, directory: Path) -> None:
+    """Create and verify an app-owned private directory without following symlinks."""
+    if directory == protected or protected not in directory.parents:
+        raise RetriggerCycleError("Retrigger work directory escapes protected storage")
+    current = protected
+    for part in directory.relative_to(protected).parts:
+        current = current / part
+        with suppress(FileExistsError):
+            current.mkdir(mode=0o700)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(current, flags)
+        except OSError as exc:
+            raise RetriggerCycleError("Retrigger work directory is unsafe") from exc
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+                raise RetriggerCycleError("Retrigger work directory is unsafe")
+            os.fchmod(descriptor, 0o700)
+        finally:
+            os.close(descriptor)
+
+
 def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
     protected = (data_dir / "syncapp").resolve(strict=True)
     home = home_assistant_root.resolve(strict=True)
     work = protected / "work"
     if protected == home or protected in home.parents or home in protected.parents:
         raise RetriggerCycleError("Retrigger protected work root overlaps Home Assistant source")
+    log_artifact_root = work / "log-artifacts"
+    _ensure_private_work_directory(protected, log_artifact_root)
     return (
         work / "main-snapshots",
         work / "main-workspaces",
@@ -67,7 +96,7 @@ def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
         work / "runtime-staging",
         work / "runtime-snapshots",
         work / "runtime-workspaces",
-        work / "log-artifacts",
+        log_artifact_root,
         work / "log-snapshots",
         work / "log-workspaces",
     )
