@@ -31,8 +31,7 @@ def test_configured_cycle_runs_logs_after_existing_outbound_lanes(
     monkeypatch.setattr(
         retrigger_cycle,
         "run_database_sync_retrigger_pass",
-        lambda *args, **kwargs: calls.append("database")
-        or DatabaseSyncRetriggerResult(0, None),
+        lambda *args, **kwargs: calls.append("database") or DatabaseSyncRetriggerResult(0, None),
     )
     monkeypatch.setattr(
         retrigger_cycle,
