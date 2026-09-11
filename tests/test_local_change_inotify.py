@@ -3,7 +3,10 @@ import time
 from pathlib import Path
 
 import pytest
-from ha_syncapp.local_change_inotify import LocalChangeInotifyError, consume_local_change_events
+from ha_syncapp.local_change_inotify import (
+    LocalChangeInotifyError,
+    consume_local_change_events,
+)
 from ha_syncapp.local_change_mailbox import LocalChangeMailbox
 from ha_syncapp.local_change_worker import LocalChangeWorker, LocalChangeWorkerReason
 
