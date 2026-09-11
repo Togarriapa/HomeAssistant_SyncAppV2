@@ -73,8 +73,14 @@ jobs:
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py exec
       - name: Verify semantic sandbox runtime and workspace boundary
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py runtime-workspace
-      - name: Verify exact-version Core semantic checker
-        run: python3 scripts/semantic_container_smoke.py
+      - name: Verify exact-version Core valid fixture
+        run: python3 scripts/semantic_container_smoke.py semantic_image_check.py valid
+      - name: Verify exact-version Core invalid fixture rejection
+        run: python3 scripts/semantic_container_smoke.py semantic_image_check.py invalid
+      - name: Verify exact-version Core warning rejection
+        run: python3 scripts/semantic_container_smoke.py semantic_image_check.py warning
+      - name: Verify exact-version Core version binding
+        run: python3 scripts/semantic_container_smoke.py semantic_image_check.py version
       - name: Unload AppArmor test profile
         if: always()
         run: python3 scripts/apparmor_ci.py unload
