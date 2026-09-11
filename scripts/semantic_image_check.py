@@ -69,13 +69,16 @@ def run() -> None:
             result = validate_candidate_semantics(*inputs)
         except CandidateSemanticError:
             # The only diagnostic input here is the fixed public valid fixture above.
-            # Production continues to suppress all raw Core output.
-            with tempfile.TemporaryDirectory(prefix="fixture-diagnostic-") as diagnostic:
+            # Enter through the dedicated validator executable so CI preserves the same
+            # mandatory AppArmor child-profile transition as production validation.
+            with tempfile.TemporaryDirectory(
+                prefix="syncapp-validator-", dir="/tmp"
+            ) as diagnostic:
                 config = Path(diagnostic) / "config"
                 _copy_stage(inputs[2], config)
                 subprocess.run(
                     [
-                        "/usr/local/bin/python3",
+                        "/opt/syncapp-validator/python3",
                         "-I",
                         "-B",
                         "/checks/core_fixture_probe.py",
