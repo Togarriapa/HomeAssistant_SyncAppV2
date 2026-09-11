@@ -19,7 +19,9 @@ def run() -> None:
 
     stage = "load-helper"
     try:
-        helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox_probe")
+        helper = runpy.run_path(
+            "/app/ha_syncapp/_validator_child.py", run_name="sandbox_probe"
+        )
         config = Path(sys.argv[1])
 
         stage = "enter-sandbox"
@@ -47,7 +49,9 @@ def run() -> None:
 
             stage = "deny-tmp-write"
             denied(
-                lambda: Path("/tmp/outside-sandbox-write").write_bytes(b"should be denied")
+                lambda: Path("/tmp/outside-sandbox-write").write_bytes(
+                    b"should be denied"
+                )
             )
 
             stage = "deny-data"
