@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
 import pytest
 
 from ha_syncapp.local_change_source import (
