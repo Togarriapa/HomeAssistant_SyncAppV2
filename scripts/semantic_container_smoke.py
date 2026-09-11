@@ -23,40 +23,42 @@ def run() -> None:
     elif len(sys.argv) > 3:
         raise SystemExit("too many semantic smoke arguments")
 
-    with tempfile.TemporaryDirectory(prefix="syncapp-ci-data-") as data_dir:
-        with tempfile.TemporaryDirectory(prefix="syncapp-ci-homeassistant-") as ha_dir:
-            data = Path(data_dir)
-            homeassistant = Path(ha_dir)
-            (data / "validator-canary").write_text("synthetic-data-canary")
-            (homeassistant / "configuration.yaml").write_text("synthetic-ha-canary")
-            subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--init",
-                    "--read-only",
-                    "--security-opt",
-                    "apparmor=ci_homeassistant_syncapp_v2",
-                    "--tmpfs",
-                    "/tmp:rw,nosuid,nodev,noexec,size=256m",
-                    "--volume",
-                    f"{root / 'scripts'}:/checks:ro",
-                    "--volume",
-                    f"{root / 'tests'}:/fixtures:ro",
-                    "--volume",
-                    f"{data}:/data:ro",
-                    "--volume",
-                    f"{homeassistant}:/homeassistant:ro",
-                    "--entrypoint",
-                    "/opt/syncapp/bin/python",
-                    "syncapp:test",
-                    f"/checks/{check_script}",
-                    *check_args,
-                ],
-                check=True,
-                timeout=600,
-            )
+    with (
+        tempfile.TemporaryDirectory(prefix="syncapp-ci-data-") as data_dir,
+        tempfile.TemporaryDirectory(prefix="syncapp-ci-homeassistant-") as ha_dir,
+    ):
+        data = Path(data_dir)
+        homeassistant = Path(ha_dir)
+        (data / "validator-canary").write_text("synthetic-data-canary")
+        (homeassistant / "configuration.yaml").write_text("synthetic-ha-canary")
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--init",
+                "--read-only",
+                "--security-opt",
+                "apparmor=ci_homeassistant_syncapp_v2",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,noexec,size=256m",
+                "--volume",
+                f"{root / 'scripts'}:/checks:ro",
+                "--volume",
+                f"{root / 'tests'}:/fixtures:ro",
+                "--volume",
+                f"{data}:/data:ro",
+                "--volume",
+                f"{homeassistant}:/homeassistant:ro",
+                "--entrypoint",
+                "/opt/syncapp/bin/python",
+                "syncapp:test",
+                f"/checks/{check_script}",
+                *check_args,
+            ],
+            check=True,
+            timeout=600,
+        )
 
 
 if __name__ == "__main__":
