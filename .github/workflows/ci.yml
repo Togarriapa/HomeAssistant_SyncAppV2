@@ -26,14 +26,6 @@ jobs:
           cache: pip
       - run: python -m pip install --require-hashes -r syncapp/requirements.txt
       - run: python -m pip install -r requirements-dev.txt
-      - name: Check sandbox probe formatting
-        run: python -m ruff format --check --diff scripts/sandbox_image_probe.py
-      - name: Check sandbox driver formatting
-        run: python -m ruff format --check --diff scripts/semantic_sandbox_image_check.py
-      - name: Check semantic smoke wrapper formatting
-        run: python -m ruff format --check --diff scripts/semantic_container_smoke.py
-      - name: Check sandbox packaging tests formatting
-        run: python -m ruff format --check --diff tests/test_packaging.py
       - run: python -m ruff format --check --diff .
       - run: python -m ruff check .
       - run: python -m mypy
