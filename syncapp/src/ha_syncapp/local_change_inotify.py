@@ -61,6 +61,7 @@ def consume_local_change_events(
     source: Path,
     notify: Callable[[], None],
     stop: threading.Event,
+    ready: Callable[[], None],
 ) -> int:
     """Forward inotify activity as bounded dirty signals until cooperative shutdown."""
     if not isinstance(source, Path):
@@ -69,6 +70,8 @@ def consume_local_change_events(
         raise LocalChangeInotifyError("local change inotify notifier is invalid")
     if type(stop) is not threading.Event:
         raise LocalChangeInotifyError("local change inotify stop event is invalid")
+    if not callable(ready):
+        raise LocalChangeInotifyError("local change inotify readiness notifier is invalid")
 
     libc = ctypes.CDLL(None, use_errno=True)
     inotify_init1 = libc.inotify_init1
@@ -86,6 +89,7 @@ def consume_local_change_events(
     forwarded = 0
     try:
         _refresh_watches(source, fd, watched, inotify_add_watch)
+        ready()
         while not stop.is_set():
             try:
                 readable, _, _ = select.select([fd], [], [], _STOP_POLL_SECONDS)
