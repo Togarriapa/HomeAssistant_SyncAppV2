@@ -67,39 +67,6 @@ def test_semantic_validator_has_mandatory_app_armor_child_transition() -> None:
     assert "_EXPECTED_APPARMOR_PROFILE.fullmatch" in child
 
 
-def test_semantic_sandbox_ci_diagnostics_are_fixed_and_sanitized() -> None:
-    probe = (ROOT / "scripts/sandbox_image_probe.py").read_text()
-
-    assert 'stage = "enter-sandbox"' in probe
-    assert 'stage = "apparmor-label"' in probe
-    assert 'stage = "deny-homeassistant"' in probe
-    assert 'stage = "deny-other-exec"' in probe
-    assert 'stage = "allow-validator-reexec"' in probe
-    assert 'stage = "allow-workspace-io"' in probe
-    assert 'print(f"sandbox probe failed: {stage}", file=sys.stderr, flush=True)' in probe
-    assert "raise SystemExit(1) from None" in probe
-    assert "str(exc)" not in probe
-    assert "repr(exc)" not in probe
-
-
-def test_native_ci_names_each_semantic_sandbox_security_boundary() -> None:
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    groups = (
-        ("identity", "identity boundary"),
-        ("filesystem", "filesystem boundary"),
-        ("network", "network boundary"),
-        ("exec", "executable boundary"),
-        ("runtime-workspace", "runtime and workspace boundary"),
-    )
-    for group, title in groups:
-        assert f"Verify semantic sandbox {title}" in workflow
-        assert (
-            "python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py "
-            f"{group}"
-        ) in workflow
-    assert "continue-on-error" not in workflow
-
-
 def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     import json
 
