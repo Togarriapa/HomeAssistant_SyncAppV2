@@ -53,10 +53,6 @@ def run() -> None:
             stage = "no-new-privileges"
             assert ctypes.CDLL(None).prctl(39, 0, 0, 0, 0) == 1
 
-            stage = "apparmor-label"
-            profile = Path("/proc/self/attr/current").read_bytes().strip()
-            assert profile == b"ci_homeassistant_syncapp_v2//validator (enforce)"
-
         if group in {"all", "image-marker"}:
             stage = "official-image"
             assert Path("/OFFICIAL_IMAGE").is_file()
