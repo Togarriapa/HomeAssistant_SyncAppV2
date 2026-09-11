@@ -20,9 +20,7 @@ def run() -> None:
 
     stage = "load-helper"
     try:
-        helper = runpy.run_path(
-            "/app/ha_syncapp/_validator_child.py", run_name="sandbox_probe"
-        )
+        helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox_probe")
         config = Path(sys.argv[1])
 
         stage = "enter-sandbox"
@@ -47,12 +45,7 @@ def run() -> None:
             denied(Path("/tmp/world-readable-canary").read_bytes)
 
             stage = "deny-tmp-write"
-            denied(
-                partial(
-                    Path("/tmp/outside-sandbox-write").write_bytes,
-                    b"should be denied",
-                )
-            )
+            denied(partial(Path("/tmp/outside-sandbox-write").write_bytes, b"should be denied"))
 
             stage = "deny-data"
             denied(Path("/data/validator-canary").read_bytes)
@@ -72,12 +65,7 @@ def run() -> None:
             denied(partial(os.execv, "/bin/true", ["/bin/true"]))
 
             stage = "allow-validator-reexec"
-            command = [
-                "/opt/syncapp-validator/python3",
-                "-I",
-                "-c",
-                "raise SystemExit(0)",
-            ]
+            command = ["/opt/syncapp-validator/python3", "-I", "-c", "raise SystemExit(0)"]
             subprocess.run(
                 command,
                 check=True,
