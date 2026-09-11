@@ -7,6 +7,15 @@ from ha_syncapp.config import load_config
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_core_validator_base_is_versioned_and_digest_pinned() -> None:
+    dockerfile = (ROOT / "syncapp/Dockerfile").read_text()
+    bases = [line for line in dockerfile.splitlines() if line.startswith("FROM ")]
+    assert bases == [
+        "FROM ghcr.io/home-assistant/home-assistant:2026.9.1@sha256:"
+        "612d76760b544cb40b7ba01387fdac964c59a6a550a50a4d30b4773c822d2918"
+    ]
+
+
 def test_packaging_exposes_only_required_read_only_home_assistant_access() -> None:
     manifest = yaml.safe_load((ROOT / "syncapp/config.yaml").read_text())
     assert set(manifest["arch"]) == {"aarch64", "amd64"}

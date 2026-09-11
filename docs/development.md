@@ -1,5 +1,27 @@
 # Development
 
+## Bundled Core image identity
+
+The validator base retains the readable Core `2026.9.1` tag and pins the immutable
+multi-platform OCI index digest in `syncapp/Dockerfile` (issue #198). On
+2026-09-10, the official GHCR manifest endpoint for
+`ghcr.io/home-assistant/home-assistant:2026.9.1` returned index digest
+`sha256:612d76760b544cb40b7ba01387fdac964c59a6a550a50a4d30b4773c822d2918`, containing:
+
+- Linux amd64: `sha256:31076d37e3b7dc9681b32d892aa4413fa866c9a90e5c8a50324b397dce415d17`.
+- Linux arm64 (App aarch64): `sha256:134bdc1b5f3d32f201987966134fc6edbba0809c6d5100651b28dc653f443d39`.
+
+The index digest fixes build input identity; it is **not** evidence of the running
+Home Assistant Core version. Runtime-bound exact-version semantic validation is
+still mandatory, with no fallback or privilege changes. This pins the base image,
+not the separately installed Alpine packages.
+
+For an upgrade, inspect the official registry index, verify both supported Linux
+platform manifests, and update the tag, digest, packaging regression expectation,
+and this evidence together. Run quality checks and native amd64/aarch64 container
+semantic smoke checks before merging. Do not replace the index with a single
+platform digest or remove the digest to work around a registry failure.
+
 The root README is the target specification. The first implementation is tracked
 by [epic #1](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/1),
 [story #2](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/2) and
