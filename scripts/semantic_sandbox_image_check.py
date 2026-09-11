@@ -2,11 +2,18 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+_GROUPS = {"all", "identity", "filesystem", "network", "exec", "runtime-workspace"}
+
 
 def run() -> None:
+    group = sys.argv[1] if len(sys.argv) == 2 else "all"
+    if group not in _GROUPS:
+        raise SystemExit("invalid semantic sandbox group")
+
     canary = Path("/tmp/world-readable-canary")
     canary.write_text("credential-canary")
     canary.chmod(0o644)
@@ -23,6 +30,7 @@ def run() -> None:
                 "-B",
                 "/checks/sandbox_image_probe.py",
                 str(config),
+                group,
             ],
             env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
             text=True,
