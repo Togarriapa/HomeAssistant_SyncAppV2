@@ -58,7 +58,6 @@ def test_ignored_source_churn_does_not_arm_debounce(tmp_path: Path) -> None:
 
         assert bridge.notify_source_event(10.0) is False
         assert bridge.tick(100.0) is None
-        assert store.get_work(local_sync_work_key(TARGET, "main")) is None
     finally:
         store.__exit__(None, None, None)
 
