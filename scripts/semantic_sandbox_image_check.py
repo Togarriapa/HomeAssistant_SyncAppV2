@@ -6,7 +6,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-_GROUPS = {"all", "identity", "filesystem", "network", "exec", "runtime-workspace"}
+_GROUPS = {
+    "all",
+    "profile",
+    "sandbox-entry",
+    "identity",
+    "image-marker",
+    "filesystem",
+    "network",
+    "exec",
+    "runtime-workspace",
+}
 
 
 def run() -> None:
