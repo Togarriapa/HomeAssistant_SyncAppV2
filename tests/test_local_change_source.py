@@ -3,12 +3,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
-
 from ha_syncapp.local_change_source import (
     LocalChangeSourceError,
     observe_local_change_source,
 )
+import pytest
 
 
 def test_observation_detects_meaningful_configuration_change(tmp_path: Path) -> None:
