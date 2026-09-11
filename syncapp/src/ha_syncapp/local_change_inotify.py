@@ -153,9 +153,13 @@ def _safe_directories(source: Path) -> tuple[Path, ...]:
             try:
                 metadata = entry.stat(follow_symlinks=False)
             except OSError as exc:
-                raise LocalChangeInotifyError("local change inotify source changed during scan") from exc
+                raise LocalChangeInotifyError(
+                    "local change inotify source changed during scan"
+                ) from exc
             if stat.S_ISLNK(metadata.st_mode):
-                raise LocalChangeInotifyError("local change inotify source contains a symbolic link")
+                raise LocalChangeInotifyError(
+                    "local change inotify source contains a symbolic link"
+                )
             if stat.S_ISDIR(metadata.st_mode):
                 walk(Path(entry.path))
 
