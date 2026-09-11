@@ -27,6 +27,7 @@ class LocalChangeWorkerConsumer(Protocol):
         source: Path,
         notify: Callable[[], None],
         stop: threading.Event,
+        ready: Callable[[], None],
     ) -> int: ...
 
 
@@ -66,12 +67,13 @@ class LocalChangeWorker:
         self._source = source
         self._consumer = consumer
         self._stop = threading.Event()
+        self._startup = threading.Event()
         self._thread: threading.Thread | None = None
         self._result: LocalChangeWorkerResult | None = None
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        """Start exactly one producer thread."""
+        """Start exactly one producer thread and wait for transport readiness or failure."""
         with self._lock:
             if self._thread is not None:
                 raise LocalChangeWorkerError("local change worker was already started")
@@ -82,6 +84,9 @@ class LocalChangeWorker:
             )
             self._thread = thread
             thread.start()
+        if not self._startup.wait(timeout=_DEFAULT_JOIN_TIMEOUT_SECONDS):
+            self._stop.set()
+            raise LocalChangeWorkerError("local change worker did not become ready in time")
 
     def request_stop(self) -> None:
         """Request cooperative transport shutdown without touching durable work state."""
@@ -122,14 +127,24 @@ class LocalChangeWorker:
 
     def _thread_main(self) -> None:
         forwarded = 0
+        ready_called = False
 
         def notify() -> None:
             nonlocal forwarded
             self._mailbox.notify()
             forwarded += 1
 
+        def ready() -> None:
+            nonlocal ready_called
+            if ready_called:
+                raise LocalChangeWorkerError("local change worker readiness was reported twice")
+            ready_called = True
+            self._startup.set()
+
         try:
-            consumed = self._consumer(self._source, notify, self._stop)
+            consumed = self._consumer(self._source, notify, self._stop, ready)
+            if not ready_called:
+                raise LocalChangeWorkerError("local change worker consumer never became ready")
             if type(consumed) is not int or consumed < 0 or consumed != forwarded:
                 raise LocalChangeWorkerError("local change worker consumer result is invalid")
             reason = (
@@ -145,6 +160,7 @@ class LocalChangeWorker:
             )
         with self._lock:
             self._result = result
+        self._startup.set()
 
 
 def _validate_join_timeout(timeout_seconds: float) -> None:
