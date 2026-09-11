@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol
 
-from .local_change_mailbox import LocalChangeMailbox, LocalChangeMailboxError
+from .local_change_mailbox import LocalChangeMailbox
 
 _DEFAULT_JOIN_TIMEOUT_SECONDS: Final = 10.0
 _MAX_JOIN_TIMEOUT_SECONDS: Final = 60.0
@@ -138,7 +138,7 @@ class LocalChangeWorker:
                 else LocalChangeWorkerReason.COMPLETED
             )
             result = LocalChangeWorkerResult(reason=reason, events_forwarded=forwarded)
-        except (LocalChangeMailboxError, Exception):
+        except Exception:
             result = LocalChangeWorkerResult(
                 reason=LocalChangeWorkerReason.FAILED,
                 events_forwarded=forwarded,
