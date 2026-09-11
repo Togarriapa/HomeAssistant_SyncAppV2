@@ -37,6 +37,11 @@ profile homeassistant_syncapp_v2 flags=(attach_disconnected,mediate_deleted) {
     /lib/** mr,
     /lib64/** mr,
 
+    # Home Assistant Core is imported by the exact-version semantic checker from the
+    # immutable official image source tree. Keep this surface read-only and scoped to
+    # the Core Python package rather than granting access to all of /usr/src.
+    /usr/src/homeassistant/homeassistant/** r,
+
     /app/ha_syncapp/** r,
     /etc/localtime r,
     /etc/passwd r,
