@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_sandbox_probe_diagnostics_are_fixed_and_sanitized() -> None:
     probe = (ROOT / "scripts/sandbox_image_probe.py").read_text()
     required = (
+        'stage = "apparmor-profile"',
         'stage = "enter-sandbox"',
-        'stage = "apparmor-label"',
         'stage = "deny-homeassistant"',
         'stage = "deny-other-exec"',
         'stage = "allow-validator-reexec"',
