@@ -82,6 +82,24 @@ def test_semantic_sandbox_ci_diagnostics_are_fixed_and_sanitized() -> None:
     assert "repr(exc)" not in probe
 
 
+def test_native_ci_names_each_semantic_sandbox_security_boundary() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    groups = (
+        ("identity", "identity boundary"),
+        ("filesystem", "filesystem boundary"),
+        ("network", "network boundary"),
+        ("exec", "executable boundary"),
+        ("runtime-workspace", "runtime and workspace boundary"),
+    )
+    for group, title in groups:
+        assert f"Verify semantic sandbox {title}" in workflow
+        assert (
+            "python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py "
+            f"{group}"
+        ) in workflow
+    assert "continue-on-error" not in workflow
+
+
 def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     import json
 
