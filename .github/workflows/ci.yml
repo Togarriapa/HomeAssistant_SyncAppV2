@@ -75,6 +75,12 @@ jobs:
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py runtime-workspace
       - name: Verify exact-version Core valid fixture
         run: python3 scripts/semantic_container_smoke.py semantic_image_check.py valid
+      - name: Report validator AppArmor denials for public fixture
+        if: failure()
+        run: |
+          sudo journalctl -k --since "-2 minutes" --no-pager \
+            | grep -E 'apparmor="DENIED".*profile="ci_homeassistant_syncapp_v2//validator"' \
+            || true
       - name: Verify exact-version Core invalid fixture rejection
         run: python3 scripts/semantic_container_smoke.py semantic_image_check.py invalid
       - name: Verify exact-version Core warning rejection
