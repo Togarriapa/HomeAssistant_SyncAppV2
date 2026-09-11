@@ -22,7 +22,6 @@ _EVENT_HEADER = struct.Struct("iIII")
 _READ_SIZE: Final = 64 * 1024
 _STOP_POLL_SECONDS: Final = 0.1
 
-_IN_ACCESS: Final = 0x00000001
 _IN_MODIFY: Final = 0x00000002
 _IN_ATTRIB: Final = 0x00000004
 _IN_CLOSE_WRITE: Final = 0x00000008
@@ -54,6 +53,8 @@ _WATCH_MASK: Final = (
     | _IN_ONLYDIR
     | _IN_DONT_FOLLOW
 )
+
+InotifyAddWatch = Callable[[int, bytes, int], int]
 
 
 def consume_local_change_events(
@@ -115,7 +116,7 @@ def _refresh_watches(
     source: Path,
     fd: int,
     watched: dict[Path, int],
-    add_watch: ctypes._CFuncPtr,
+    add_watch: InotifyAddWatch,
 ) -> None:
     directories = _safe_directories(source)
     active = set(directories)
