@@ -27,9 +27,9 @@ class LocalChangeBridge:
         *,
         observer: LocalChangeObserver = observe_local_change_source,
     ) -> None:
-        if type(source) is not Path:
+        if not isinstance(source, Path):
             raise LocalChangeBridgeError("local change source path is invalid")
-        if type(debouncer) is not LocalChangeDebouncer:
+        if not isinstance(debouncer, LocalChangeDebouncer):
             raise LocalChangeBridgeError("local change debouncer is invalid")
         if not callable(observer):
             raise LocalChangeBridgeError("local change observer is invalid")
@@ -57,6 +57,4 @@ class LocalChangeBridge:
         try:
             return self._observer(self._source)
         except Exception as exc:
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
             raise LocalChangeBridgeError("local change observation failed closed") from exc
