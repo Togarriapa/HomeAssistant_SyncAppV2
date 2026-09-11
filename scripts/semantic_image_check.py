@@ -71,9 +71,10 @@ def run() -> None:
             # The only diagnostic input here is the fixed public valid fixture above.
             # Enter through the dedicated validator executable so CI preserves the same
             # mandatory AppArmor child-profile transition as production validation.
-            with tempfile.TemporaryDirectory(
+            diagnostic_context = tempfile.TemporaryDirectory(
                 prefix="syncapp-validator-", dir="/tmp"
-            ) as diagnostic:
+            )
+            with diagnostic_context as diagnostic:
                 config = Path(diagnostic) / "config"
                 _copy_stage(inputs[2], config)
                 subprocess.run(
