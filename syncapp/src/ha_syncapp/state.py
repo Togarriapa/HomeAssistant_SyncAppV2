@@ -13,9 +13,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 4
+from .prepared_deployment import (
+    PreparedDeployment,
+    PreparedDeploymentError,
+    validate_deployment_id,
+)
+
+if TYPE_CHECKING:
+    from .candidate_backup import CandidateBackupEvidence
+
+SCHEMA_VERSION = 5
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -257,6 +267,19 @@ class StateStore:
             "PRIMARY KEY (target, branch))"
         )
 
+    @staticmethod
+    def _create_prepared_deployment_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE prepared_deployment ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, "
+            "stage_manifest_sha256 TEXT NOT NULL, runtime_sha256 TEXT NOT NULL, "
+            "risk_level TEXT NOT NULL, core_version TEXT NOT NULL, backup_slug TEXT NOT NULL, "
+            "prepared_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
+            "UNIQUE (repository_id, candidate_sha))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -297,6 +320,7 @@ class StateStore:
                 self._create_work_table(db)
                 self._create_repository_binding_table(db)
                 self._create_synchronization_baseline_table(db)
+                self._create_prepared_deployment_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -304,7 +328,7 @@ class StateStore:
             finally:
                 os.close(root_fd)
         else:
-            if version not in {1, 2, 3, SCHEMA_VERSION}:
+            if version not in {1, 2, 3, 4, SCHEMA_VERSION}:
                 raise StateError("Unsupported state schema")
             self._identity()
             if version == 1:
@@ -323,6 +347,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_synchronization_baseline_table(db)
+                    db.execute("PRAGMA user_version = 4")
+                version = 4
+            if version == 4:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_prepared_deployment_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -486,6 +516,64 @@ class StateStore:
             commit_sha=commit_sha,
             synchronized_at=_parse_timestamp(synchronized_at),
         )
+
+    def prepared_deployment(self, deployment_id: str) -> PreparedDeployment | None:
+        """Read exact immutable preparation evidence and recheck repository identity."""
+        try:
+            validate_deployment_id(deployment_id)
+            rows = self._connection.execute(
+                "SELECT deployment_id, target, repository_id, baseline_sha, candidate_sha, "
+                "stage_manifest_sha256, runtime_sha256, risk_level, core_version, backup_slug, "
+                "prepared_at, record_sha256 FROM prepared_deployment WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchall()
+            if not rows:
+                return None
+            if len(rows) != 1:
+                raise StateError("Invalid prepared deployment record")
+            record = PreparedDeployment.from_database_row(rows[0])
+            if self.repository_id(record.evidence.target) != record.evidence.repository_id:
+                raise StateError("Prepared deployment repository identity mismatch")
+            return record
+        except (sqlite3.Error, PreparedDeploymentError):
+            raise StateError("Unable to read prepared deployment evidence") from None
+
+    def record_prepared_deployment(
+        self,
+        deployment_id: str,
+        evidence: "CandidateBackupEvidence",
+        *,
+        prepared_at: datetime | None = None,
+    ) -> PreparedDeployment:
+        """Persist one candidate/backup association; replay never replaces evidence."""
+        try:
+            when = datetime.now(UTC) if prepared_at is None else prepared_at
+            record = PreparedDeployment(deployment_id, evidence, when)
+            values = record.database_values()
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                if self.repository_id(evidence.target) != evidence.repository_id:
+                    raise StateError("Prepared deployment repository identity mismatch")
+                existing = self.prepared_deployment(deployment_id)
+                if existing is not None:
+                    if existing.evidence != evidence:
+                        raise StateError("Prepared deployment evidence cannot be rebound")
+                    return existing
+                # The unique repository/candidate key rejects alternate deployment IDs,
+                # including aliases of the same pinned repository. Never replace a row.
+                db.execute(
+                    "INSERT INTO prepared_deployment (deployment_id, target, repository_id, "
+                    "baseline_sha, candidate_sha, stage_manifest_sha256, runtime_sha256, "
+                    "risk_level, core_version, backup_slug, prepared_at, record_sha256) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    values,
+                )
+                persisted = self.prepared_deployment(deployment_id)
+                if persisted is None:
+                    raise StateError("Prepared deployment evidence was not persisted")
+                return persisted
+        except (sqlite3.Error, PreparedDeploymentError):
+            raise StateError("Unable to persist prepared deployment evidence") from None
 
     def _work_from_row(self, row: tuple[object, ...]) -> WorkItem:
         if len(row) != 7:
