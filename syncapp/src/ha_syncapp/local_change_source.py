@@ -67,11 +67,9 @@ def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
                 except OSError as exc:
                     raise LocalChangeSourceError("local change source changed during scan") from exc
 
+                if stat.S_ISLNK(metadata.st_mode):
+                    raise LocalChangeSourceError("local change source contains a symbolic link")
                 if stat.S_ISDIR(metadata.st_mode):
-                    if stat.S_ISLNK(metadata.st_mode):
-                        raise LocalChangeSourceError(
-                            "local change source contains a directory symlink"
-                        )
                     walk(Path(child.path), child_relative)
                     continue
 
@@ -82,8 +80,6 @@ def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
                 if not included:
                     continue
 
-                if stat.S_ISLNK(metadata.st_mode):
-                    raise LocalChangeSourceError("local change source contains a symbolic link")
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                     raise LocalChangeSourceError("local change source contains an unsafe file")
 
