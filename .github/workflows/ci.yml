@@ -57,8 +57,16 @@ jobs:
           sudo grep -Fxq "ci_homeassistant_syncapp_v2//validator (enforce)" /sys/kernel/security/apparmor/profiles
       - name: Verify passive lifecycle and restart persistence
         run: python3 scripts/container_smoke.py
-      - name: Verify isolated semantic sandbox boundaries
-        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py
+      - name: Verify semantic sandbox identity boundary
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py identity
+      - name: Verify semantic sandbox filesystem boundary
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py filesystem
+      - name: Verify semantic sandbox network boundary
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py network
+      - name: Verify semantic sandbox executable boundary
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py exec
+      - name: Verify semantic sandbox runtime and workspace boundary
+        run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py runtime-workspace
       - name: Verify exact-version Core semantic checker
         run: python3 scripts/semantic_container_smoke.py
       - name: Unload AppArmor test profile
