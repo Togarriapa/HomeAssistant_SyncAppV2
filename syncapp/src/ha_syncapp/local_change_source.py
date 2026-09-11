@@ -55,7 +55,9 @@ def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
             try:
                 children = sorted(os.scandir(directory), key=lambda item: item.name)
             except OSError as exc:
-                raise LocalChangeSourceError("local change source cannot be scanned safely") from exc
+                raise LocalChangeSourceError(
+                    "local change source cannot be scanned safely"
+                ) from exc
 
             for child in children:
                 child_relative = relative / child.name
@@ -67,7 +69,9 @@ def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
 
                 if stat.S_ISDIR(metadata.st_mode):
                     if stat.S_ISLNK(metadata.st_mode):
-                        raise LocalChangeSourceError("local change source contains a directory symlink")
+                        raise LocalChangeSourceError(
+                            "local change source contains a directory symlink"
+                        )
                     walk(Path(child.path), child_relative)
                     continue
 
