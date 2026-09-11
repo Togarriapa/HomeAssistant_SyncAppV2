@@ -10,7 +10,17 @@ import sys
 from functools import partial
 from pathlib import Path
 
-_GROUPS = {"all", "identity", "filesystem", "network", "exec", "runtime-workspace"}
+_GROUPS = {
+    "all",
+    "profile",
+    "sandbox-entry",
+    "identity",
+    "image-marker",
+    "filesystem",
+    "network",
+    "exec",
+    "runtime-workspace",
+}
 
 
 def run() -> None:
@@ -23,8 +33,18 @@ def run() -> None:
         helper = runpy.run_path("/app/ha_syncapp/_validator_child.py", run_name="sandbox_probe")
         config = Path(sys.argv[1])
 
+        if group == "profile":
+            stage = "apparmor-profile"
+            helper["_verify_apparmor_profile"]()
+            print("sandbox verified")
+            return
+
         stage = "enter-sandbox"
         helper["_sandbox"](config)
+
+        if group == "sandbox-entry":
+            print("sandbox verified")
+            return
 
         if group in {"all", "identity"}:
             stage = "non-root"
@@ -37,6 +57,7 @@ def run() -> None:
             profile = Path("/proc/self/attr/current").read_bytes().strip()
             assert profile == b"ci_homeassistant_syncapp_v2//validator (enforce)"
 
+        if group in {"all", "image-marker"}:
             stage = "official-image"
             assert Path("/OFFICIAL_IMAGE").is_file()
 
