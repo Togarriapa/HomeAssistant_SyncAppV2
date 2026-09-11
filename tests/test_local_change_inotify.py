@@ -1,3 +1,4 @@
+import threading
 import time
 from pathlib import Path
 
@@ -108,8 +109,8 @@ def test_inotify_worker_fails_closed_for_symlink_source(tmp_path: Path) -> None:
     assert mailbox.drain().changed is False
 
 
-def test_inotify_rejects_invalid_source_contract(tmp_path: Path) -> None:
-    stop = __import__("threading").Event()
+def test_inotify_rejects_invalid_source_contract() -> None:
+    stop = threading.Event()
 
     with pytest.raises(LocalChangeInotifyError, match="source is invalid"):
         consume_local_change_events("not-a-path", lambda: None, stop)  # type: ignore[arg-type]
