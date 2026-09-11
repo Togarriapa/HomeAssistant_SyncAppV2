@@ -56,11 +56,19 @@ def test_semantic_validator_has_mandatory_app_armor_child_transition() -> None:
     assert "/opt/syncapp-validator/python3 cx -> validator," in profile
     assert "profile validator flags=" in profile
     assert "complain" not in profile.casefold()
-    assert "/proc/*/attr/current r," in profile
-    assert "/proc/**" not in profile.split("profile validator", 1)[1]
-    assert "/data/**" not in profile.split("profile validator", 1)[1]
-    assert "/homeassistant/**" not in profile.split("profile validator", 1)[1]
-    assert "network," not in profile.split("profile validator", 1)[1]
+    child_profile = profile.split("profile validator", 1)[1]
+    child_rules = {
+        line.strip()
+        for line in child_profile.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert "/proc/*/attr/current r," in child_rules
+    assert "/proc/**" not in child_rules
+    assert not any(rule.startswith("/data/") for rule in child_rules)
+    assert not any(rule.startswith("/homeassistant/") for rule in child_rules)
+    assert "/usr/src/homeassistant/homeassistant/** r," in child_rules
+    assert "/usr/src/** r," not in child_rules
+    assert "network," not in child_rules
     assert "install -m 0555 /usr/local/bin/python3 /opt/syncapp-validator/python3" in dockerfile
     assert '_VALIDATOR_PYTHON = "/opt/syncapp-validator/python3"' in semantics
     assert "homeassistant_syncapp_v2//validator" in child
