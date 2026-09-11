@@ -76,9 +76,7 @@ def test_semantic_sandbox_ci_diagnostics_are_fixed_and_sanitized() -> None:
     assert 'stage = "deny-other-exec"' in probe
     assert 'stage = "allow-validator-reexec"' in probe
     assert 'stage = "allow-workspace-io"' in probe
-    assert (
-        'print(f"sandbox probe failed: {stage}", file=sys.stderr, flush=True)' in probe
-    )
+    assert 'print(f"sandbox probe failed: {stage}", file=sys.stderr, flush=True)' in probe
     assert "raise SystemExit(1) from None" in probe
     assert "str(exc)" not in probe
     assert "repr(exc)" not in probe
