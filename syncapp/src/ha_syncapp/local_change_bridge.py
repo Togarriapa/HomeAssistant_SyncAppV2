@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .local_change_debounce import LocalChangeDebouncer
 from .local_change_source import LocalChangeSnapshot, observe_local_change_source
