@@ -75,12 +75,23 @@ jobs:
         run: python3 scripts/semantic_container_smoke.py semantic_sandbox_image_check.py runtime-workspace
       - name: Verify exact-version Core valid fixture
         run: python3 scripts/semantic_container_smoke.py semantic_image_check.py valid
-      - name: Report validator AppArmor denials for public fixture
+      - name: Collect validator diagnostics for public fixture
         if: failure()
         run: |
+          mkdir -p validator-diagnostics
           sudo journalctl -k --since "-2 minutes" --no-pager \
             | grep -E 'apparmor="DENIED".*profile="ci_homeassistant_syncapp_v2//validator"' \
-            || true
+            > validator-diagnostics/apparmor-denials.txt || true
+          python3 scripts/semantic_container_smoke.py core_fixture_probe.py \
+            > validator-diagnostics/core-fixture-probe.txt 2>&1 || true
+      - name: Upload validator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validator-diagnostics-${{ matrix.arch }}
+          path: validator-diagnostics/
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify exact-version Core invalid fixture rejection
         run: python3 scripts/semantic_container_smoke.py semantic_image_check.py invalid
       - name: Verify exact-version Core warning rejection
