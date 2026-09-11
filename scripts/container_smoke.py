@@ -46,6 +46,8 @@ def run() -> None:
                     "ALL",
                     "--security-opt",
                     "no-new-privileges",
+                    "--security-opt",
+                    "apparmor=ci_homeassistant_syncapp_v2",
                     "--user",
                     f"{data.stat().st_uid}:{data.stat().st_gid}",
                     "--volume",

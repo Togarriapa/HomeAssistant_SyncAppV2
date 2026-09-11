@@ -1,0 +1,71 @@
+#include <tunables/global>
+
+profile homeassistant_syncapp_v2 flags=(attach_disconnected,mediate_deleted) {
+  # The service parent retains the container-visible access already required by SyncApp.
+  # Candidate validation crosses a distinct cx boundary below.
+  #include <abstractions/base>
+
+  file,
+  network,
+  capability,
+  signal (send) set=(kill,term,int,hup,cont),
+
+  # Service/runtime executables. These stay in the parent profile.
+  /sbin/docker-init rix,
+  /opt/syncapp/bin/python rix,
+  /usr/local/bin/python3* rix,
+  /bin/** rix,
+  /usr/bin/** rix,
+  /usr/libexec/git-core/** rix,
+
+  # Force the dedicated validator executable into the nested profile before Python
+  # can import the validator helper or read any candidate/configuration data.
+  /opt/syncapp-validator/python3 cx -> validator,
+
+  profile validator flags=(attach_disconnected,mediate_deleted) {
+    #include <abstractions/base>
+
+    signal (receive) peer=*homeassistant_syncapp_v2,
+    capability setuid,
+    capability setgid,
+
+    # The child may execute only its dedicated interpreter. Python/Core libraries are
+    # data/mmap inputs, not alternate executable entry points.
+    /opt/syncapp-validator/python3 rix,
+    /usr/local/** mr,
+    /usr/lib/** mr,
+    /lib/** mr,
+    /lib64/** mr,
+
+    # Home Assistant Core is imported by the exact-version semantic checker from the
+    # immutable official image source tree. Keep this surface read-only and scoped to
+    # the Core Python package rather than granting access to all of /usr/src.
+    /usr/src/homeassistant/homeassistant/ r,
+    /usr/src/homeassistant/homeassistant/** r,
+
+    /app/ha_syncapp/** r,
+    /etc/localtime r,
+    /etc/passwd r,
+    /etc/group r,
+    /etc/mime.types r,
+    /etc/ssl/** r,
+    /usr/share/zoneinfo/** r,
+    /dev/null rw,
+    /dev/urandom r,
+    # AppArmor mediates /proc/self through its canonical numeric PID path.
+    /proc/*/attr/current r,
+
+    # Fixed official-container identity markers required by Home Assistant Core.
+    /OFFICIAL_IMAGE r,
+    /.dockerenv r,
+    /run/.containerenv r,
+
+    # Only the app-created disposable semantic workspace is writable/readable. The
+    # live Home Assistant mount and durable SyncApp state deliberately have no rules.
+    /tmp/syncapp-validator-*/{,**} rwk,
+
+    # Read-only native-CI probes; these paths are absent in the production image.
+    /checks/** r,
+    /fixtures/** r,
+  }
+}

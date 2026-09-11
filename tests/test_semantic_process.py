@@ -7,7 +7,7 @@ import pytest
 def helper(tmp_path, monkeypatch, body):
     (tmp_path / "_validator_child.py").write_text(body)
     monkeypatch.setattr(semantic, "__file__", str(tmp_path / "candidate_semantics.py"))
-    monkeypatch.setattr(semantic, "_CORE_PYTHON", sys.executable)
+    monkeypatch.setattr(semantic, "_VALIDATOR_PYTHON", sys.executable)
 
 
 def test_only_bound_receipt_is_accepted_and_credentials_are_absent(tmp_path, monkeypatch):

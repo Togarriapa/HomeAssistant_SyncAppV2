@@ -53,36 +53,61 @@ backup, Apply, reload, restart or promotion. Those transaction stages remain sep
 
 ## Validator isolation and supported scope
 
-The standalone helper starts in isolated Python mode without inherited app credentials.
-Before importing Core it drops root identity, sets resource limits, requires Landlock ABI
-3 or newer for filesystem restrictions, and installs a libseccomp filter. The filesystem
-allowlist includes read-only interpreter resources, fixed Core container-identity marker
-files, and the disposable candidate copy; it excludes live configuration and app state.
-Network access is denied. New executable launches are denied by Landlock except for the
-exact bundled `/usr/local/bin/python3` interpreter that Core may relaunch for dependency-
-site discovery and its architecture-specific musl ELF loader. Both exceptions are exact
-files, not executable directories; no shell, utility, candidate executable, or alternate
-interpreter receives execute permission. Private asyncio wakeup sockets and threads remain
-available to Core.
+Home Assistant OS uses AppArmor as its host Linux security module. The App therefore ships
+`apparmor.txt` with a dedicated nested `validator` profile. The service can start semantic
+validation only by executing `/opt/syncapp-validator/python3`; the parent profile applies a
+`cx -> validator` transition to that exact executable path. The child checks
+`/proc/self/attr/current` before candidate access and refuses to continue unless the
+`homeassistant_syncapp_v2//validator` child (with Supervisor's optional repository prefix)
+is reported in **enforce** mode. Missing, wrong, unconfined and complain-mode execution
+all fail closed.
+
+The validator child profile grants read/mmap access to fixed Python/Core runtime resources,
+its helper source and fixed official-container marker files, plus read/write access only to
+the disposable `/tmp/syncapp-validator-*` workspace. It grants no live `/homeassistant` or
+app-state `/data` path and no network rule. The service parent retains the broader file and
+network access required for normal SyncApp duties, but those permissions are not inherited
+across the child-profile transition.
+
+After proving the AppArmor child profile, the helper drops root identity, sets resource
+limits, enables no-new-privileges and installs a mandatory libseccomp filter. Setting
+no-new-privileges occurs after the AppArmor transition because Linux otherwise blocks the
+profile change; native CI asserts that the flag is active inside the child. Landlock ABI
+3+ is also applied as an additional filesystem defense when the host kernel provides it;
+HA OS validation no longer
+depends on Landlock being selected by the host kernel. The seccomp boundary denies network
+socket families, external Unix datagram use, process interference, signals and io_uring
+operations while retaining Core's private asyncio wakeup socket pairs and worker threads.
+
+Core may relaunch `sys.executable` for dependency-site discovery. The dedicated
+`/opt/syncapp-validator/python3` path is the only interpreter executable permitted by the
+validator profile and Landlock layer; the architecture-specific musl loader is admitted
+only where Landlock requires it. Shells, utilities, candidate files and alternate
+interpreters do not receive execute permission. The parent-created receipt is kept inside
+the disposable validator workspace, avoiding a need for child access to unrelated `/tmp`
+content.
 
 Limits are 180 seconds wall time, 90 seconds CPU, 2 GiB address space, 16 MiB per output
 file, 512 file descriptors and 256 processes/threads per validator user. Input is limited
 to 128 MiB / 10,000 files and 4 MiB per YAML document source. Raw Core stdout/stderr are
 discarded; only fixed result codes leave the child. A missing, oversized, malformed or
-incorrectly bound receipt fails closed, as do checker failures or unavailable sandboxing.
+incorrectly bound receipt fails closed, as do checker failures or unavailable mandatory
+AppArmor/seccomp confinement.
 
-This initial path rejects candidate `custom_components/` and `deps/` directories and
+This path rejects candidate `custom_components/` and `deps/` directories and
 absolute/traversing YAML includes, including in unchanged files. It runs Core's schema
 validation, not a live HA instance. It cannot prove device behavior, integration runtime
 health, or correctness of arbitrary custom Python. Unsupported candidates stay blocked.
 
-No Docker socket, elevated Supervisor role, protection change or host privilege is added.
-Native amd64 and aarch64 container CI runs real valid and semantically invalid fixtures,
-the warning rejection case, and filesystem/network/exec/identity isolation probes. The
-device must also support the required kernel features; no physical HA OS installation
-has been validated by these CI checks.
+No Docker socket, manager/admin Supervisor role, protection change or host privilege is
+added. Native amd64 and aarch64 CI adjusts the outer profile name as Supervisor does, loads
+the shipped AppArmor profile, runs the parent lifecycle under it, requires the nested
+validator profile to be enforced, runs filesystem/network/exec/identity probes under it,
+and runs real valid, invalid and warning-producing Core fixtures. Physical Home Assistant
+OS installation remains a separate on-device verification requirement.
 
-Implementation references: [official Core check_config CLI](https://www.home-assistant.io/docs/tools/check_config/),
+Implementation references: [Home Assistant AppArmor guidance](https://developers.home-assistant.io/docs/apps/presentation/#apparmor),
+[official Core check_config CLI](https://www.home-assistant.io/docs/tools/check_config/),
 [Core 2026.9.1 checker](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/scripts/check_config.py),
 [Landlock filesystem restrictions](https://docs.kernel.org/userspace-api/landlock.html),
 and [seccomp filters](https://docs.kernel.org/userspace-api/seccomp_filter.html).

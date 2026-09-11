@@ -1,6 +1,5 @@
 """Container-only checks: no mocks, real staged bytes, real bundled Core CLI."""
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -17,6 +16,8 @@ from ha_syncapp.candidate_semantics import (  # noqa: E402
 )
 from semantic_fixtures import candidate_inputs  # noqa: E402
 
+_GROUPS = {"all", "valid", "invalid", "warning", "version"}
+
 
 def require_failure(inputs: tuple, reason: str) -> None:
     try:
@@ -28,70 +29,71 @@ def require_failure(inputs: tuple, reason: str) -> None:
         raise AssertionError("Unsafe candidate was accepted")
 
 
-def verify_sandbox() -> None:
-    # Readable canary outside the isolated config must remain inaccessible to the child.
-    canary = Path("/tmp/world-readable-canary")
-    canary.write_text("credential-canary")
-    canary.chmod(0o644)
-    with tempfile.TemporaryDirectory(prefix="sandbox-probe-") as directory:
-        probe_root = Path(directory)
-        config = probe_root / "config"
-        config.mkdir(mode=0o700)
-        os.chown(config, 65534, 65534)
-        os.chown(probe_root, 65534, 65534)
-        output = subprocess.check_output(
-            ["/usr/local/bin/python3", "-I", "-B", "/checks/sandbox_image_probe.py", str(config)],
-            env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
-            text=True,
-            timeout=30,
-        )
-        assert output.strip() == "sandbox verified", output
+def valid_fixture() -> dict[str, bytes]:
+    return {
+        "configuration.yaml": (
+            b"homeassistant:\n  name: Validator fixture\nscene: !include scenes.yaml\n"
+        ),
+        "scenes.yaml": b"- name: Example\n  entities:\n    light.example: 'on'\n",
+    }
+
+
+def check_valid(parent: Path, valid: dict[str, bytes]) -> None:
+    inputs = candidate_inputs(parent, valid)
+    try:
+        result = validate_candidate_semantics(*inputs)
+    except CandidateSemanticError:
+        # The only diagnostic input here is the fixed public valid fixture above.
+        # Enter through the dedicated validator executable so CI preserves the same
+        # mandatory AppArmor child-profile transition as production validation.
+        with tempfile.TemporaryDirectory(prefix="syncapp-validator-", dir="/tmp") as diagnostic:
+            config = Path(diagnostic) / "config"
+            _copy_stage(inputs[2], config)
+            subprocess.run(
+                [
+                    "/opt/syncapp-validator/python3",
+                    "-I",
+                    "-B",
+                    "/checks/core_fixture_probe.py",
+                    str(config),
+                ],
+                env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+                check=False,
+                timeout=30,
+            )
+        raise
+    verify_candidate_semantic_validation(result, *inputs)
 
 
 def run() -> None:
-    verify_sandbox()
+    group = sys.argv[1] if len(sys.argv) == 2 else "all"
+    if group not in _GROUPS or len(sys.argv) > 2:
+        raise SystemExit("invalid semantic fixture group")
+
     with tempfile.TemporaryDirectory() as directory:
         parent = Path(directory)
-        valid = {
-            "configuration.yaml": (
-                b"homeassistant:\n  name: Validator fixture\nscene: !include scenes.yaml\n"
-            ),
-            "scenes.yaml": b"- name: Example\n  entities:\n    light.example: 'on'\n",
-        }
-        inputs = candidate_inputs(parent, valid)
-        try:
-            result = validate_candidate_semantics(*inputs)
-        except CandidateSemanticError:
-            # The only diagnostic input here is the fixed public valid fixture above.
-            # Production continues to suppress all raw Core output.
-            with tempfile.TemporaryDirectory(prefix="fixture-diagnostic-") as diagnostic:
-                config = Path(diagnostic) / "config"
-                _copy_stage(inputs[2], config)
-                subprocess.run(
-                    [
-                        "/usr/local/bin/python3",
-                        "-I",
-                        "-B",
-                        "/checks/core_fixture_probe.py",
-                        str(config),
-                    ],
-                    env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
-                    check=False,
-                    timeout=30,
-                )
-            raise
-        verify_candidate_semantic_validation(result, *inputs)
+        valid = valid_fixture()
 
-        # Syntactically valid YAML must still fail real Core schema validation.
-        invalid = dict(
-            valid, **{"configuration.yaml": b"homeassistant:\n  latitude: credential-canary\n"}
-        )
-        require_failure(candidate_inputs(parent, invalid), "failed Home Assistant")
-        # Core reports this integration schema error as a warning: --fail-on-warnings is essential.
-        warning = dict(valid, **{"scenes.yaml": b"- name: Example\n  entities: 42\n"})
-        require_failure(candidate_inputs(parent, warning), "failed Home Assistant")
-        require_failure(candidate_inputs(parent, valid, "2026.9.2"), "version")
-    print("Exact-version Core valid/invalid/warning checks and process isolation verified")
+        if group in {"all", "valid"}:
+            check_valid(parent, valid)
+
+        if group in {"all", "invalid"}:
+            invalid = dict(
+                valid,
+                **{"configuration.yaml": b"homeassistant:\n  latitude: credential-canary\n"},
+            )
+            require_failure(candidate_inputs(parent, invalid), "failed Home Assistant")
+
+        if group in {"all", "warning"}:
+            # Core reports this integration schema error as a warning:
+            # --fail-on-warnings is essential.
+            warning = dict(valid, **{"scenes.yaml": b"- name: Example\n  entities: 42\n"})
+            require_failure(candidate_inputs(parent, warning), "failed Home Assistant")
+
+        if group in {"all", "version"}:
+            require_failure(candidate_inputs(parent, valid, "2026.9.2"), "version")
+
+    print(f"Exact-version Core semantic fixture verified: {group}")
 
 
 if __name__ == "__main__":
