@@ -61,13 +61,8 @@ def test_inotify_refreshes_watches_after_new_directory_event(tmp_path: Path) -> 
     worker.start()
     try:
         new_directory = source / "packages"
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            new_directory.mkdir(exist_ok=True)
-            if _wait_for_change(mailbox, 0.05):
-                break
-        else:
-            pytest.fail("inotify worker did not observe new directory creation")
+        new_directory.mkdir()
+        assert _wait_for_change(mailbox) is True
 
         target = new_directory / "lights.yaml"
         _write_until_change(target, mailbox)
@@ -116,4 +111,9 @@ def test_inotify_rejects_invalid_source_contract() -> None:
     stop = threading.Event()
 
     with pytest.raises(LocalChangeInotifyError, match="source is invalid"):
-        consume_local_change_events("not-a-path", lambda: None, stop)  # type: ignore[arg-type]
+        consume_local_change_events(
+            "not-a-path",  # type: ignore[arg-type]
+            lambda: None,
+            stop,
+            lambda: None,
+        )
