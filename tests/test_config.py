@@ -18,6 +18,7 @@ def test_defaults_are_passive(tmp_path: Path) -> None:
         repo_b=None,
         github_token=None,
         recorder_database_path=None,
+        recorder_retention_days=7,
     )
 
 
@@ -31,6 +32,7 @@ def test_explicit_options(tmp_path: Path) -> None:
                 "repo_b": "Owner/Home",
                 "github_token": "secret-sentinel",
                 "recorder_database_path": "/homeassistant/recorder.db",
+                "recorder_retention_days": 14,
             },
         )
     )
@@ -39,6 +41,7 @@ def test_explicit_options(tmp_path: Path) -> None:
     assert config.repo_b == "Owner/Home"
     assert config.github_token == "secret-sentinel"
     assert config.recorder_database_path == "/homeassistant/recorder.db"
+    assert config.recorder_retention_days == 14
 
 
 @pytest.mark.parametrize(
@@ -74,6 +77,12 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"recorder_database_path": "/homeassistant/secret-sentinel\n.db"},
         {"recorder_database_path": "/homeassistant/secret-sentinel\x7f.db"},
         {"recorder_database_path": 42},
+        {"recorder_retention_days": True},
+        {"recorder_retention_days": "7"},
+        {"recorder_retention_days": 7.0},
+        {"recorder_retention_days": 0},
+        {"recorder_retention_days": -1},
+        {"recorder_retention_days": 366},
     ],
 )
 def test_invalid_options_fail_without_disclosing_input(tmp_path: Path, value: object) -> None:
