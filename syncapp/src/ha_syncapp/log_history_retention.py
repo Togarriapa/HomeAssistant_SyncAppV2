@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-
 LOG_HISTORY_BRANCH = "logs"
 LOG_RETENTION_DAYS = 30
 MAX_HISTORY_COMMITS = 4096
