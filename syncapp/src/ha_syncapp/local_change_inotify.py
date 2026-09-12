@@ -209,6 +209,4 @@ def _current_errno() -> int:
 
 def _raise_errno(message: str, error_number: int | None = None) -> None:
     resolved_error = _current_errno() if error_number is None else error_number
-    raise LocalChangeInotifyError(message) from OSError(
-        resolved_error, os.strerror(resolved_error)
-    )
+    raise LocalChangeInotifyError(message) from OSError(resolved_error, os.strerror(resolved_error))
