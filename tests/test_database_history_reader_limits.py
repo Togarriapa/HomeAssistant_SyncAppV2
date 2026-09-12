@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from io import BytesIO
+from urllib.request import Request
 
 import pytest
 from ha_syncapp.database_history_evidence import DatabaseHistoryRecord
 from ha_syncapp.database_history_reader import (
     DatabaseHistoryReadError,
     _fetch_history_records,
+    _read_history_page,
     fetch_trusted_database_history_evidence,
 )
 from ha_syncapp.database_retention import MAX_DATABASE_SNAPSHOTS
@@ -28,19 +31,25 @@ def _head() -> BranchHead:
     )
 
 
-def test_reader_rejects_oversized_history_before_accumulating(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reader_rejects_oversized_history_before_accumulating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     oversized = tuple(
         DatabaseHistoryRecord(sha=_sha(index), committed_at=REFERENCE, parent_shas=())
         for index in range(MAX_DATABASE_SNAPSHOTS + 1)
     )
     monkeypatch.setattr("ha_syncapp.database_history_reader._read_history_page", lambda request: [])
-    monkeypatch.setattr("ha_syncapp.database_history_reader._parse_history_page", lambda page: oversized)
+    monkeypatch.setattr(
+        "ha_syncapp.database_history_reader._parse_history_page", lambda page: oversized
+    )
 
     with pytest.raises(DatabaseHistoryReadError, match="evidence limit"):
         _fetch_history_records("owner/private-repo", "secret-token", head_sha=_sha(1))
 
 
-def test_reader_preserves_sanitized_history_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reader_preserves_sanitized_history_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "ha_syncapp.database_history_reader.fetch_trusted_branch_head",
         lambda *args, **kwargs: _head(),
@@ -61,3 +70,13 @@ def test_reader_preserves_sanitized_history_transport_failure(monkeypatch: pytes
         )
 
     assert "secret-token" not in str(error.value)
+
+
+def test_reader_rejects_duplicate_json_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = BytesIO(b'[{"sha":"first","sha":"second"}]')
+    monkeypatch.setattr(
+        "ha_syncapp.database_history_reader.urlopen", lambda *args, **kwargs: response
+    )
+
+    with pytest.raises(DatabaseHistoryReadError, match="invalid database history metadata"):
+        _read_history_page(Request("https://api.github.com/example"))
