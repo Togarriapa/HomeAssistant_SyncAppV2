@@ -131,7 +131,8 @@ def _read_history_page(request: Request) -> object:
     if len(raw) > _MAX_HISTORY_PAGE_BYTES:
         raise LogHistoryReadError("GitHub logs history page exceeded the size limit")
     try:
-        return json.loads(raw.decode("utf-8"))
+        parsed: object = json.loads(raw.decode("utf-8"))
+        return parsed
     except (UnicodeError, ValueError, RecursionError):
         raise LogHistoryReadError("GitHub returned invalid logs history metadata") from None
 
@@ -147,7 +148,11 @@ def _parse_history_page(page: object) -> tuple[LogHistoryRecord, ...]:
         sha = item.get("sha")
         commit = item.get("commit")
         parents = item.get("parents")
-        if not isinstance(sha, str) or not isinstance(commit, dict) or not isinstance(parents, list):
+        if (
+            not isinstance(sha, str)
+            or not isinstance(commit, dict)
+            or not isinstance(parents, list)
+        ):
             raise LogHistoryReadError("GitHub returned invalid logs history metadata")
 
         committer = commit.get("committer")
@@ -157,9 +162,12 @@ def _parse_history_page(page: object) -> tuple[LogHistoryRecord, ...]:
 
         parent_shas: list[str] = []
         for parent in parents:
-            if not isinstance(parent, dict) or not isinstance(parent.get("sha"), str):
+            if not isinstance(parent, dict):
                 raise LogHistoryReadError("GitHub returned invalid logs history metadata")
-            parent_shas.append(parent["sha"])
+            parent_sha = parent.get("sha")
+            if not isinstance(parent_sha, str):
+                raise LogHistoryReadError("GitHub returned invalid logs history metadata")
+            parent_shas.append(parent_sha)
 
         records.append(
             LogHistoryRecord(
