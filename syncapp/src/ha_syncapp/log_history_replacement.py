@@ -59,7 +59,9 @@ def authorize_log_history_replacement(
         or type(evidence.repository_id) is not int
         or evidence.repository_id <= 0
     ):
-        raise LogHistoryReplacementAuthorizationError("trusted logs repository identity is invalid")
+        raise LogHistoryReplacementAuthorizationError(
+            "trusted logs repository identity is invalid"
+        )
 
     if (
         evidence.target != prewrite.target
@@ -70,7 +72,9 @@ def authorize_log_history_replacement(
             "trusted logs prewrite proof does not match retention evidence"
         )
     if plan.expected_head_sha != evidence.expected_head_sha:
-        raise LogHistoryReplacementAuthorizationError("trusted logs retention head is inconsistent")
+        raise LogHistoryReplacementAuthorizationError(
+            "trusted logs retention head is inconsistent"
+        )
 
     retained = plan.retained_shas
     pruned = plan.pruned_shas
@@ -100,7 +104,9 @@ def authorize_log_history_replacement(
     except LogHistoryRetentionError as error:
         raise LogHistoryReplacementAuthorizationError(str(error)) from None
     if validated_plan != plan:
-        raise LogHistoryReplacementAuthorizationError("trusted logs retention plan is inconsistent")
+        raise LogHistoryReplacementAuthorizationError(
+            "trusted logs retention plan is inconsistent"
+        )
 
     return LogHistoryReplacementAuthorization(
         target=evidence.target,
