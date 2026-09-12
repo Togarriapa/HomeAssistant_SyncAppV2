@@ -35,8 +35,6 @@ Before a future cleanup or history-maintenance capability may rely on a retentio
 - Each validated commit becomes immutable snapshot evidence using its commit SHA and commit timestamp, then the existing retention planner determines the retained/prunable partition.
 - The resulting trusted evidence keeps the repository identity and expected head alongside the retention plan so later capabilities cannot detach a plan from the history it classified.
 
-This evidence step is still side-effect free. It performs no Git/network operation, ref mutation, history rewrite, filesystem deletion, database restore, or Home Assistant mutation. A future mutation-capable retention transport must be a separate reviewed increment and must re-prove its target and current head immediately before destructive history maintenance.
-
 ## Read-only history collection
 
 History collection re-verifies the configured private repository ID and exact `database` branch head before requesting commit metadata. It then reads from that immutable head SHA, never from the moving branch name.
@@ -46,6 +44,12 @@ History collection re-verifies the configured private repository ID and exact `d
 - Duplicate JSON fields, malformed responses, invalid timestamps and transport failures fail closed with sanitized errors.
 - Complete-history validation and retention classification remain delegated to the trusted-evidence and deterministic-planning layers.
 
-The reader has no Git push, ref-update, deletion, restore, database-write, or Home Assistant mutation capability.
+## Replacement authorization boundary
+
+`authorize_database_history_replacement()` is a side-effect-free gate for a future cleanup transport. It accepts only immutable trusted database history plus a fresh prewrite identity/head proof for the same private repository and exact `database` head.
+
+The gate revalidates the deterministic retention plan from the original explicit UTC reference time and retention-days value, requires the retained/prunable identities to form the exact complete history partition, requires the current head to remain the first retained commit, and fails closed on identity, branch or head divergence. A no-op plan is represented explicitly by `requires_replacement == false` and grants no replacement authority.
+
+This authorization performs no network request, Git command, ref mutation, filesystem deletion, database restore, or Home Assistant mutation. A future mutation transport must separately obtain the fresh prewrite proof immediately before use and perform an atomic expected-head-bound update restricted to `database`; service integration remains separate work.
 
 Candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging and rollback remain separate controlled deployment capabilities. The Retrigger Work Cron Job remains enabled and independent.
