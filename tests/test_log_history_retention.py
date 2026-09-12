@@ -3,14 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-
 from ha_syncapp.log_history_retention import (
     MAX_HISTORY_COMMITS,
     LogHistoryCommit,
     LogHistoryRetentionError,
     plan_log_history_retention,
 )
-
 
 REFERENCE = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 
