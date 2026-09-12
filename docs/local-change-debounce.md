@@ -10,6 +10,9 @@ A tick before the deadline does nothing. The first tick at or after the deadline
 
 The component rejects invalid or backward-moving monotonic time rather than risking premature synchronization. It stores no file paths, file contents, Git credentials, or Home Assistant configuration bytes.
 
-This increment intentionally does not select or activate a filesystem event backend and does not invent a polling cadence. A later service-integration slice must provide a bounded local event source compatible with Home Assistant OS and feed only normalized change signals into this debouncer. Snapshot creation, integrity verification, Git publication and divergence handling remain in the existing Local synchronization pipeline.
+The bounded Linux event producer and owner-thread service integration are now
+documented in [Event-driven local configuration synchronization](local-change-events.md).
+Snapshot creation, integrity verification, Git publication and divergence handling
+remain in the existing Local synchronization pipeline.
 
 Candidate validation, backup, Apply, reload/restart, observation, promotion and rollback are unchanged. The Retrigger Work Cron Job is not used as the normal scheduler by this component.

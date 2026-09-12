@@ -107,7 +107,11 @@ def consume_local_change_events(
             if not payload:
                 raise LocalChangeInotifyError("local change inotify closed unexpectedly")
 
-            _validate_event_payload(payload)
+            invalidated_watches = _validate_event_payload(payload)
+            if invalidated_watches:
+                for path, watch in tuple(watched.items()):
+                    if watch in invalidated_watches:
+                        del watched[path]
             notify()
             forwarded += 1
             _refresh_watches(source, fd, watched, inotify_add_watch)
@@ -171,16 +175,21 @@ def _safe_directories(source: Path) -> tuple[Path, ...]:
     return tuple(directories)
 
 
-def _validate_event_payload(payload: bytes) -> None:
+def _validate_event_payload(payload: bytes) -> frozenset[int]:
+    """Validate one kernel payload and return watches whose path identity was lost."""
     offset = 0
     size = len(payload)
+    invalidated: set[int] = set()
     while offset < size:
         if size - offset < _EVENT_HEADER.size:
             raise LocalChangeInotifyError("local change inotify event payload is truncated")
-        _, _, _, name_length = _EVENT_HEADER.unpack_from(payload, offset)
+        watch, mask, _, name_length = _EVENT_HEADER.unpack_from(payload, offset)
+        if mask & (_IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT | _IN_IGNORED):
+            invalidated.add(watch)
         offset += _EVENT_HEADER.size + name_length
         if offset > size:
             raise LocalChangeInotifyError("local change inotify event payload is truncated")
+    return frozenset(invalidated)
 
 
 def _raise_errno(message: str) -> None:
