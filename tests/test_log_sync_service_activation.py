@@ -207,6 +207,47 @@ def test_periodic_logs_failure_stops_service_and_preserves_interrupted_run(
         )
 
 
+def test_shutdown_requested_by_earlier_component_skips_logs_tick(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_config(tmp_path)
+    stop = service.Shutdown()
+    order: list[str] = []
+    _patch_common(monkeypatch, order)
+    logs_service = FakeLogService(order, stop)
+
+    class StopBeforeLogs:
+        def start(self) -> None:
+            order.append("bridge_start")
+
+        def tick(self) -> None:
+            order.append("bridge_tick")
+            stop.requested = True
+
+        def stop(self) -> None:
+            order.append("bridge_stop")
+
+    monkeypatch.setattr(service, "_run_startup_local_if_configured", lambda *args: None)
+    monkeypatch.setattr(service, "_run_startup_database_if_configured", lambda *args: None)
+    monkeypatch.setattr(service, "_run_startup_runtime_if_configured", lambda *args: None)
+    monkeypatch.setattr(
+        service,
+        "_runtime_event_bridge_if_configured",
+        lambda *args: StopBeforeLogs(),
+    )
+    monkeypatch.setattr(
+        service,
+        "_log_sync_service_if_configured",
+        lambda *args: logs_service,
+    )
+
+    service.run(tmp_path, stop)
+
+    assert "logs_tick" not in order
+    assert order[-4:] == ["logs_start", "bridge_tick", "bridge_stop", "logs_stop"]
+
+
 def test_unconfigured_logs_service_is_disabled(tmp_path: Path) -> None:
     data = tmp_path / "data"
     data.mkdir()

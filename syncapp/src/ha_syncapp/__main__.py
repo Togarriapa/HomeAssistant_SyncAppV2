@@ -530,15 +530,23 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                     if stop.requested:
                         break
                     now = time.monotonic()
-                    if local_change_started and local_change_service is not None:
+                    if (
+                        not stop.requested
+                        and local_change_started
+                        and local_change_service is not None
+                    ):
                         local_change_service.tick(now)
-                    if database_sync_started and database_sync_service is not None:
+                    if (
+                        not stop.requested
+                        and database_sync_started
+                        and database_sync_service is not None
+                    ):
                         database_sync_service.tick(now)
-                    if runtime_bridge_started and runtime_bridge is not None:
+                    if not stop.requested and runtime_bridge_started and runtime_bridge is not None:
                         runtime_bridge.tick()
-                    if log_sync_started and log_sync_service is not None:
+                    if not stop.requested and log_sync_started and log_sync_service is not None:
                         log_sync_service.tick(now)
-                    if now >= next_status:
+                    if not stop.requested and now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
                         next_status = now + config.status_interval_seconds
