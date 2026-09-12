@@ -81,9 +81,7 @@ def test_plan_is_deterministic() -> None:
     assert first == second
 
 
-@pytest.mark.parametrize(
-    "branch", ["main", "candidate", "runtime", "logs", "Database", ""]
-)
+@pytest.mark.parametrize("branch", ["main", "candidate", "runtime", "logs", "Database", ""])
 def test_plan_rejects_every_non_database_branch(branch: str) -> None:
     with pytest.raises(DatabaseRetentionError, match="branch"):
         plan_database_retention(
@@ -104,14 +102,34 @@ def test_plan_requires_at_least_one_snapshot() -> None:
         )
 
 
-@pytest.mark.parametrize("retention_days", [0, -1, 366, True, False])
-def test_plan_rejects_retention_outside_config_contract(retention_days: int) -> None:
+@pytest.mark.parametrize("retention_days", [0, -1, 366, True, False, 7.0, "7"])
+def test_plan_rejects_retention_outside_config_contract(retention_days: object) -> None:
     with pytest.raises(DatabaseRetentionError, match="retention"):
         plan_database_retention(
             branch="database",
             snapshots=(_snapshot("snapshot-1", timedelta(days=1)),),
             reference_time=REFERENCE,
-            retention_days=retention_days,
+            retention_days=retention_days,  # type: ignore[arg-type]
+        )
+
+
+def test_plan_rejects_invalid_reference_time_type() -> None:
+    with pytest.raises(DatabaseRetentionError, match="reference_time"):
+        plan_database_retention(
+            branch="database",
+            snapshots=(_snapshot("snapshot-1", timedelta(days=1)),),
+            reference_time="2026-09-12T12:00:00Z",  # type: ignore[arg-type]
+            retention_days=7,
+        )
+
+
+def test_plan_rejects_invalid_snapshot_record_type() -> None:
+    with pytest.raises(DatabaseRetentionError, match="invalid record"):
+        plan_database_retention(
+            branch="database",
+            snapshots=("snapshot-1",),  # type: ignore[arg-type]
+            reference_time=REFERENCE,
+            retention_days=7,
         )
 
 
