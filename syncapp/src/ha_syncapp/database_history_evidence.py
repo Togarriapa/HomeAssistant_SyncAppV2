@@ -61,7 +61,10 @@ def validate_trusted_database_history_evidence(
         or branch_head.repository_id <= 0
     ):
         raise DatabaseHistoryEvidenceError("trusted repository identity is invalid")
-    if not isinstance(branch_head.commit_sha, str) or _SHA_PATTERN.fullmatch(branch_head.commit_sha) is None:
+    if (
+        not isinstance(branch_head.commit_sha, str)
+        or _SHA_PATTERN.fullmatch(branch_head.commit_sha) is None
+    ):
         raise DatabaseHistoryEvidenceError("trusted database head is invalid")
 
     history = _bounded_records(records)
