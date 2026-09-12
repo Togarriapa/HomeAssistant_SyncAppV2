@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -12,7 +12,6 @@ from ha_syncapp.log_history_retention import (
 )
 
 
-UTC = timezone.utc
 REFERENCE = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 
 
