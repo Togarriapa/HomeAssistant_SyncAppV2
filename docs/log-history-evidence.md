@@ -22,6 +22,12 @@ The previous retention planner classifies generated `logs` history against the f
 
 This read boundary grants no ref-update or history-rewrite authority. A later mutation increment must re-prove both repository identity and the exact remote head immediately before replacement and fail closed on any divergence.
 
+## Immediate prewrite re-proof
+
+`ha_syncapp.log_history_prewrite.reprove_log_history_prewrite()` is the final read-only guard before any future history mutation. It accepts only validated `logs` evidence, invokes the trusted branch verifier with the pinned repository ID, and requires the fresh target, repository ID, branch, and head SHA to match the evidence exactly. A moved head, changed repository identity, wrong branch, inconsistent evidence, or repository-verification failure blocks replacement with a sanitized error.
+
+The returned proof is evidence only; it cannot push, force-update a ref, rewrite history, or mutate Home Assistant. A future writer must consume the proof immediately and remain responsible for an atomic expected-head-bound replacement operation.
+
 ## Safety boundary
 
 This increment performs no Git fetch, clone, push, force-push, ref update, history rewrite, Home Assistant mutation, candidate Fetch/Stage, validation execution, backup, Apply, reload/restart, observation, promotion, tagging, or rollback.
