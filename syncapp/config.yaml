@@ -23,9 +23,11 @@ map:
 options:
   log_level: info
   status_interval_seconds: 300
+  recorder_retention_days: 7
 schema:
   log_level: list(info|warning|error)
   status_interval_seconds: int(30,3600)
   repo_b: str?
   github_token: password?
   recorder_database_path: str?
+  recorder_retention_days: int(1,365)

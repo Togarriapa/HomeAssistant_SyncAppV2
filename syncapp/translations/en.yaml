@@ -5,3 +5,9 @@ configuration:
   status_interval_seconds:
     name: Status interval (seconds)
     description: How often the passive service reports that it is idle, from 30 to 3600 seconds.
+  recorder_database_path:
+    name: Recorder database path
+    description: Optional absolute path to the Recorder database below /homeassistant.
+  recorder_retention_days:
+    name: Recorder snapshot retention (days)
+    description: Number of days to retain generated database snapshots, from 1 to 365.

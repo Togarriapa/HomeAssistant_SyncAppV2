@@ -25,6 +25,7 @@ class Config:
     repo_b: str | None = None
     github_token: str | None = field(default=None, repr=False)
     recorder_database_path: str | None = None
+    recorder_retention_days: int = 7
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -92,6 +93,7 @@ def load_config(path: Path) -> Config:
         "repo_b",
         "github_token",
         "recorder_database_path",
+        "recorder_retention_days",
     }
     if not isinstance(options, dict) or options.keys() - supported:
         raise ConfigError("Options must contain only supported keys")
@@ -117,10 +119,15 @@ def load_config(path: Path) -> Config:
     ):
         raise ConfigError("Invalid Recorder database path")
 
+    recorder_retention_days = options.get("recorder_retention_days", 7)
+    if type(recorder_retention_days) is not int or not 1 <= recorder_retention_days <= 365:
+        raise ConfigError("Recorder retention must be an integer from 1 to 365 days")
+
     return Config(
         log_level=level,
         status_interval_seconds=interval,
         repo_b=cast(str | None, repo_b),
         github_token=cast(str | None, github_token),
         recorder_database_path=cast(str | None, recorder_database_path),
+        recorder_retention_days=recorder_retention_days,
     )

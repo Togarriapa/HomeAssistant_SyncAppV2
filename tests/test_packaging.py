@@ -93,11 +93,19 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     config = load_config(path)
     assert config.log_level == "info"
     assert config.status_interval_seconds == 300
+    assert config.recorder_retention_days == 7
     assert manifest["options"].keys() <= manifest["schema"].keys()
     assert "repo_b" not in manifest["options"]
     assert "github_token" not in manifest["options"]
     assert manifest["schema"]["repo_b"].endswith("?")
     assert manifest["schema"]["github_token"].endswith("?")
+    assert manifest["schema"]["recorder_retention_days"] == "int(1,365)"
+
+    translations = yaml.safe_load((ROOT / "syncapp/translations/en.yaml").read_text())
+    assert "recorder_retention_days" in translations["configuration"]
+
+    operator_docs = (ROOT / "syncapp/DOCS.md").read_text()
+    assert "`recorder_retention_days` | `7` | Integer from 1 through 365" in operator_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
