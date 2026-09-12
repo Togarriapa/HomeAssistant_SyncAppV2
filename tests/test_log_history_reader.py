@@ -169,7 +169,13 @@ def test_parse_history_page_accepts_minimal_commit_metadata() -> None:
         [{"sha": _sha(1), "commit": {"committer": {"date": 7}}, "parents": []}],
         [{"sha": _sha(1), "commit": {"committer": {"date": "not-a-date"}}, "parents": []}],
         [{"sha": _sha(1), "commit": {"committer": {"date": "2026-09-11T12:00:00"}}, "parents": []}],
-        [{"sha": _sha(1), "commit": {"committer": {"date": "2026-09-11T12:00:00Z"}}, "parents": [{}]}],
+        [
+            {
+                "sha": _sha(1),
+                "commit": {"committer": {"date": "2026-09-11T12:00:00Z"}},
+                "parents": [{}],
+            }
+        ],
     ],
 )
 def test_parse_history_page_rejects_malformed_metadata(page: object) -> None:
