@@ -10,4 +10,10 @@ For a valid work item, the processor delegates to the existing guarded exact-art
 
 `log_sync_retrigger.run_log_sync_retrigger_pass()` remains the recovery adapter. It first recovers interrupted durable work and then delegates one bounded attempt to the normal processor. The normal processor itself never performs interrupted-work recovery or administrative retry.
 
-This slice does not invent a log collection cadence and does not implement Git-history retention pruning. Those are separate requirements from the initial README, including its 30-day logs retention objective. It also does not deploy Candidate bytes, write the live Home Assistant configuration tree, or bypass validation, backup, Apply, observation, promotion, or rollback safeguards.
+The bounded processor is now driven by the
+[routine log service](routine-log-service.md), which owns a one-hour monotonic
+normal collection cadence. Git-history retention pruning remains separate from
+that cadence and from the initial README's 30-day logs retention objective. The
+processor does not deploy Candidate bytes, write the live Home Assistant
+configuration tree, or bypass validation, backup, Apply, observation, promotion,
+or rollback safeguards.

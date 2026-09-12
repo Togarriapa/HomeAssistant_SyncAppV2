@@ -15,9 +15,10 @@ The lane adapters preserve the existing deterministic identities:
 - `runtime_sync_schedule.schedule_runtime_sync_generation()` identifies the Repo B runtime publication lane for one target.
 
 These adapters schedule work only. They do not execute synchronization and they do
-not change Retrigger passes. The Local event bridge, Runtime event bridge, and
-[routine Recorder service](routine-recorder-service.md) provide bounded normal
-producers while preserving that separation.
+not change Retrigger passes. The Local event bridge, Runtime event bridge,
+[routine Recorder service](routine-recorder-service.md), and
+[routine log service](routine-log-service.md) provide bounded normal producers
+while preserving that separation.
 
 ## Normal runtime processing
 
@@ -77,6 +78,9 @@ Backoff waits are interruptible through an `asyncio.Event`. Shutdown therefore p
 
 The token remains an ephemeral argument to the subscriber and is not persisted or returned in lifecycle results. Raw Home Assistant event payloads still terminate at the transport normalization boundary.
 
-The long-running reconnect lifecycle remains intentionally **unwired from `__main__.py`** in this increment. Service activation must independently solve safe ownership/concurrency between asynchronous event transport and the process-exclusive synchronous `StateStore` before attaching that task to the application lifecycle.
+The long-running reconnect lifecycle is wired through a bounded mailbox. The
+transport thread never owns or mutates StateStore; `RuntimeEventBridge.tick()`
+drains normalized signals and performs bounded processing only on the synchronous
+owner loop.
 
 This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
