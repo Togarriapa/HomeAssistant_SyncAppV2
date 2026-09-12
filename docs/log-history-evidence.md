@@ -1,0 +1,25 @@
+# Trusted logs history evidence
+
+This increment is derived only from the initial V2 root `README.md` at commit `71d284ce447d79b044e332c9bc01ae801dc91947` and continues issue #222.
+
+The previous retention planner classifies generated `logs` history against the fixed 30-day policy but deliberately accepts explicit evidence rather than reading repository state. Before any future history replacement can be considered, that evidence must be bound to the exact private Repo B identity and exact `logs` head already proven by the existing trusted branch-head verifier.
+
+## This increment
+
+`ha_syncapp.log_history_evidence` is still side-effect free. It accepts an already verified `BranchHead`, complete commit records, and an explicit UTC reference time. It then:
+
+- accepts only the exact `logs` branch;
+- requires a valid positive Repo B identity and exact 40-character current head;
+- requires the first history record to equal the verified remote head;
+- requires a complete linear single-parent chain all the way to the root commit;
+- rejects merge history, broken parent links, truncated evidence, malformed identities, and oversized input;
+- delegates duplicate, timestamp, ordering, future-time, cutoff, and retention classification to the already-green retention planner;
+- returns one immutable evidence object containing the bound Repo B identity, expected head, validated commits, and retention plan.
+
+A future read-only transport may collect these records from the trusted private Repo B, but it must re-prove repository identity and the exact `logs` head before collection. A later mutation increment must re-check both immediately before replacement and fail closed on any divergence.
+
+## Safety boundary
+
+This increment performs no Git fetch, clone, push, force-push, ref update, history rewrite, Home Assistant mutation, candidate Fetch/Stage, validation execution, backup, Apply, reload/restart, observation, promotion, tagging, or rollback.
+
+History rewriting remains retention management, not forensic secure deletion. The separate Retrigger Work Cron Job remains enabled, independent, and unchanged.
