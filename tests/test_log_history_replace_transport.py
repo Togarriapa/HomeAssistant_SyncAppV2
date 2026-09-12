@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.log_history_replace_transport import (
     LogHistoryReplacementTransportError,
     replace_logs_history,
@@ -15,7 +16,9 @@ EXPECTED = "1" * 40
 REPLACEMENT = "2" * 40
 
 
-def _authorization(*, pruned: bool = True, branch: str = "logs") -> LogHistoryReplacementAuthorization:
+def _authorization(
+    *, pruned: bool = True, branch: str = "logs"
+) -> LogHistoryReplacementAuthorization:
     return LogHistoryReplacementAuthorization(
         target="owner/private-repo",
         repository_id=123,
@@ -48,9 +51,15 @@ def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
     assert calls == [
         (
             (
-                "git",
+                shutil.which("git"),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "credential.helper=",
                 "push",
-                "origin",
+                "--porcelain",
+                "--no-verify",
+                "https://github.com/owner/private-repo.git",
                 f"{REPLACEMENT}:refs/heads/logs",
                 f"--force-with-lease=refs/heads/logs:{EXPECTED}",
             ),
@@ -58,6 +67,43 @@ def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
             12.0,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("target", "repository_id"),
+    [("invalid", 123), ("owner/repo", 0), ("owner/..", 123), ("owner/repo name", 123)],
+)
+def test_replacement_rejects_invalid_authorized_repository_identity(
+    tmp_path: Path,
+    target: str,
+    repository_id: int,
+) -> None:
+    authorization = replace(
+        _authorization(),
+        target=target,
+        repository_id=repository_id,
+    )
+
+    with pytest.raises(LogHistoryReplacementTransportError, match="identity is invalid"):
+        replace_logs_history(
+            authorization=authorization,
+            repository=tmp_path,
+            replacement_head_sha=REPLACEMENT,
+        )
+
+
+def test_replacement_rejects_symlink_repository(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(repository, target_is_directory=True)
+
+    with pytest.raises(LogHistoryReplacementTransportError, match="path is invalid"):
+        replace_logs_history(
+            authorization=_authorization(),
+            repository=link,
+            replacement_head_sha=REPLACEMENT,
+        )
 
 
 def test_noop_authorization_runs_no_transport(tmp_path: Path) -> None:
@@ -86,10 +132,8 @@ def test_replacement_rejects_non_logs_authorization(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("replacement", ["bad", EXPECTED, "A" * 40])
-def test_replacement_rejects_invalid_replacement_head(
-    tmp_path: Path, replacement: str
-) -> None:
+@pytest.mark.parametrize("replacement", ["bad", EXPECTED, "A" * 40, "2" * 64])
+def test_replacement_rejects_invalid_replacement_head(tmp_path: Path, replacement: str) -> None:
     with pytest.raises(LogHistoryReplacementTransportError, match="head is invalid"):
         replace_logs_history(
             authorization=_authorization(),
@@ -122,15 +166,27 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
     assert "secret-token" not in str(caught.value)
 
 
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), 301, True])
+def test_replacement_rejects_invalid_or_unbounded_timeout(
+    tmp_path: Path,
+    timeout: float,
+) -> None:
+    with pytest.raises(LogHistoryReplacementTransportError, match="timeout is invalid"):
+        replace_logs_history(
+            authorization=_authorization(),
+            repository=tmp_path,
+            replacement_head_sha=REPLACEMENT,
+            timeout=timeout,
+        )
+
+
 def test_transport_exception_is_sanitized(tmp_path: Path) -> None:
     def runner(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         raise OSError("https://secret-token@github.com/owner/repo")
 
-    with pytest.raises(
-        LogHistoryReplacementTransportError, match="transport failed"
-    ) as caught:
+    with pytest.raises(LogHistoryReplacementTransportError, match="transport failed") as caught:
         replace_logs_history(
             authorization=_authorization(),
             repository=tmp_path,
