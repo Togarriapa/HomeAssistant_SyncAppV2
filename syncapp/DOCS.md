@@ -43,10 +43,13 @@ that writes from the app are denied.
 | `status_interval_seconds` | `300` | Integer from 30 through 3600 |
 | `repo_b` | unset | GitHub `owner/repository` target |
 | `github_token` | unset | Credential used only for trusted Repo B operations |
+| `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
+| `recorder_retention_days` | `7` | Integer from 1 through 365 |
 
 The interval controls idle log messages, **not the Retrigger Work Cron Job**.
 Unsupported keys, duplicate JSON keys and invalid values prevent startup. Repo B
-configuration remains optional while the service is passive.
+configuration remains optional. Recorder retention configures generated `database`
+snapshot history only; it never authorizes restoring GitHub data into Home Assistant.
 
 ## Lifecycle and diagnostics
 
