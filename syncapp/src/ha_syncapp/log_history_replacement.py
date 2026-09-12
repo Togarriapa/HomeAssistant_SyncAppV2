@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 from ha_syncapp.log_history_evidence import TrustedLogHistoryEvidence
 from ha_syncapp.log_history_prewrite import TrustedLogHistoryPrewrite
-from ha_syncapp.log_history_retention import LOG_HISTORY_BRANCH
+from ha_syncapp.log_history_retention import (
+    LOG_HISTORY_BRANCH,
+    LogHistoryRetentionError,
+    plan_log_history_retention,
+)
 
 
 class LogHistoryReplacementAuthorizationError(ValueError):
@@ -50,7 +54,15 @@ def authorize_log_history_replacement(
         )
 
     if (
-        evidence.target.casefold() != prewrite.target.casefold()
+        not isinstance(evidence.target, str)
+        or not evidence.target.strip()
+        or type(evidence.repository_id) is not int
+        or evidence.repository_id <= 0
+    ):
+        raise LogHistoryReplacementAuthorizationError("trusted logs repository identity is invalid")
+
+    if (
+        evidence.target != prewrite.target
         or evidence.repository_id != prewrite.repository_id
         or evidence.expected_head_sha != prewrite.expected_head_sha
     ):
@@ -78,6 +90,17 @@ def authorize_log_history_replacement(
         raise LogHistoryReplacementAuthorizationError(
             "trusted logs retention authorization does not match history evidence"
         )
+
+    try:
+        validated_plan = plan_log_history_retention(
+            branch=LOG_HISTORY_BRANCH,
+            commits=evidence.commits,
+            reference_time=plan.reference_time,
+        )
+    except LogHistoryRetentionError as error:
+        raise LogHistoryReplacementAuthorizationError(str(error)) from None
+    if validated_plan != plan:
+        raise LogHistoryReplacementAuthorizationError("trusted logs retention plan is inconsistent")
 
     return LogHistoryReplacementAuthorization(
         target=evidence.target,
