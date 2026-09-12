@@ -36,7 +36,10 @@ def _roots(tmp_path: Path) -> tuple[Path, Path]:
 
 def _blocking_consumer(
     captured_notify: list[Callable[[], None]],
-) -> Callable[[Path, Callable[[], None], threading.Event, Callable[[], None]], int]:
+) -> Callable[
+    [Path, Callable[[], None], threading.Event, Callable[[], None]],
+    int,
+]:
     def consume(
         source: Path,
         notify: Callable[[], None],
@@ -68,7 +71,15 @@ def test_service_drains_event_into_existing_durable_processor(tmp_path: Path) ->
         token: str,
     ) -> LocalSyncProcessResult:
         assert observed_store is store
-        processed.append((observed_source, observed_snapshot, observed_workspace, target, token))
+        processed.append(
+            (
+                observed_source,
+                observed_snapshot,
+                observed_workspace,
+                target,
+                token,
+            )
+        )
         return LocalSyncProcessResult(processed=None)
 
     try:
@@ -127,7 +138,14 @@ def test_service_rechecks_source_after_transport_readiness(tmp_path: Path) -> No
         token: str,
     ) -> LocalSyncProcessResult:
         nonlocal processed
-        del observed_store, observed_source, observed_snapshot, observed_workspace, target, token
+        del (
+            observed_store,
+            observed_source,
+            observed_snapshot,
+            observed_workspace,
+            target,
+            token,
+        )
         processed += 1
         return LocalSyncProcessResult(processed=None)
 
@@ -169,7 +187,14 @@ def test_change_during_processing_remains_bounded_follow_up_work(tmp_path: Path)
         token: str,
     ) -> LocalSyncProcessResult:
         nonlocal calls
-        del observed_store, observed_source, observed_snapshot, observed_workspace, target, token
+        del (
+            observed_store,
+            observed_source,
+            observed_snapshot,
+            observed_workspace,
+            target,
+            token,
+        )
         calls += 1
         if calls == 1:
             (source / "scripts.yaml").write_text("{}\n")
