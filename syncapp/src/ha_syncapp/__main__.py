@@ -14,6 +14,10 @@ from pathlib import Path
 from types import FrameType
 
 from . import __version__
+from .candidate_detection_service import (
+    CandidateDetectionService,
+    CandidateDetectionServiceError,
+)
 from .config import Config, ConfigError, load_config
 from .database_startup import (
     DatabaseStartupError,
@@ -40,6 +44,7 @@ from .state import AlreadyRunning, StateError, StateStore
 _LOCAL_CHANGE_QUIET_SECONDS = 1.0
 _DATABASE_SYNC_INTERVAL_SECONDS = 60.0 * 60.0
 _LOG_SYNC_INTERVAL_SECONDS = 60.0 * 60.0
+_CANDIDATE_DETECTION_INTERVAL_SECONDS = 60.0
 
 
 def emit(event: str, *, level: str = "info", **fields: object) -> None:
@@ -387,6 +392,23 @@ def _log_sync_service_if_configured(
     )
 
 
+def _candidate_detection_service_if_configured(
+    store: StateStore,
+    config: Config,
+) -> CandidateDetectionService | None:
+    """Build periodic trusted candidate intake for a configured Repo B."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise CandidateDetectionServiceError("candidate service repository is not trusted")
+    return CandidateDetectionService(
+        store,
+        config.repo_b,
+        config.github_token,
+        interval_seconds=_CANDIDATE_DETECTION_INTERVAL_SECONDS,
+    )
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -463,6 +485,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         database_sync_service: DatabaseSyncService | None = None
         runtime_bridge: RuntimeEventBridge | None = None
         log_sync_service: LogSyncService | None = None
+        candidate_detection_service: CandidateDetectionService | None = None
         if not stop.requested:
             _run_startup_local_if_configured(store, config, data_dir)
             if not stop.requested:
@@ -479,6 +502,10 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
             if not stop.requested:
                 log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
+            if not stop.requested:
+                candidate_detection_service = _candidate_detection_service_if_configured(
+                    store, config
+                )
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
         mode = (
@@ -487,12 +514,14 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             or database_sync_service is not None
             or runtime_bridge is not None
             or log_sync_service is not None
+            or candidate_detection_service is not None
             else "passive"
         )
         local_change_started = False
         database_sync_started = False
         runtime_bridge_started = False
         log_sync_started = False
+        candidate_detection_started = False
 
         try:
             if not stop.requested and local_change_service is not None:
@@ -507,6 +536,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if not stop.requested and log_sync_service is not None:
                 log_sync_service.start(time.monotonic())
                 log_sync_started = True
+            if not stop.requested and candidate_detection_service is not None:
+                candidate_detection_service.start(time.monotonic())
+                candidate_detection_started = True
             with RetriggerServer(socket_path) as retrigger_server:
                 fields = {**asdict(boot), "version": __version__, "mode": mode}
                 level = "warning" if boot.interrupted_run_id else "info"
@@ -546,6 +578,12 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         runtime_bridge.tick()
                     if not stop.requested and log_sync_started and log_sync_service is not None:
                         log_sync_service.tick(now)
+                    if (
+                        not stop.requested
+                        and candidate_detection_started
+                        and candidate_detection_service is not None
+                    ):
+                        candidate_detection_service.tick(now)
                     if not stop.requested and now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
@@ -563,6 +601,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if log_sync_started and log_sync_service is not None:
                 with suppress(LogSyncServiceError):
                     log_sync_service.stop()
+            if candidate_detection_started and candidate_detection_service is not None:
+                with suppress(CandidateDetectionServiceError):
+                    candidate_detection_service.stop()
             raise
 
         if local_change_started and local_change_service is not None:
@@ -573,6 +614,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             runtime_bridge.stop()
         if log_sync_started and log_sync_service is not None:
             log_sync_service.stop()
+        if candidate_detection_started and candidate_detection_service is not None:
+            candidate_detection_service.stop()
         store.finish_run()
         if config.log_level == "info":
             emit("service_stopped", run_id=boot.run_id)
@@ -657,6 +700,9 @@ def main() -> int:
     except LogSyncServiceError:
         emit("service_failed", level="error", reason="log_sync_service_failed")
         return 12
+    except CandidateDetectionServiceError:
+        emit("service_failed", level="error", reason="candidate_detection_service_failed")
+        return 13
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1

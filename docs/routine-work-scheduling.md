@@ -17,8 +17,11 @@ The lane adapters preserve the existing deterministic identities:
 These adapters schedule work only. They do not execute synchronization and they do
 not change Retrigger passes. The Local event bridge, Runtime event bridge,
 [routine Recorder service](routine-recorder-service.md), and
-[routine log service](routine-log-service.md) provide bounded normal producers
-while preserving that separation.
+[routine log service](routine-log-service.md) provide bounded Home Assistant to
+GitHub producers. The
+[routine candidate detector](routine-candidate-detection.md) separately polls
+only the trusted Repo B candidate head and enqueues immutable candidate identity;
+all preserve the separation from Retrigger recovery.
 
 ## Normal runtime processing
 
