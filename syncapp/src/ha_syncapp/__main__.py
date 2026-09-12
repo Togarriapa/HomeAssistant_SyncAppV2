@@ -388,13 +388,21 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
-        mode = "active" if local_change_service is not None or runtime_bridge is not None else "passive"
+        mode = (
+            "active"
+            if local_change_service is not None or runtime_bridge is not None
+            else "passive"
+        )
+        local_change_started = False
+        runtime_bridge_started = False
 
         try:
-            if local_change_service is not None:
+            if not stop.requested and local_change_service is not None:
                 local_change_service.start(time.monotonic())
-            if runtime_bridge is not None:
+                local_change_started = True
+            if not stop.requested and runtime_bridge is not None:
                 runtime_bridge.start()
+                runtime_bridge_started = True
             with RetriggerServer(socket_path) as retrigger_server:
                 fields = {**asdict(boot), "version": __version__, "mode": mode}
                 level = "warning" if boot.interrupted_run_id else "info"
@@ -418,26 +426,26 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                     if stop.requested:
                         break
                     now = time.monotonic()
-                    if local_change_service is not None:
+                    if local_change_started and local_change_service is not None:
                         local_change_service.tick(now)
-                    if runtime_bridge is not None:
+                    if runtime_bridge_started and runtime_bridge is not None:
                         runtime_bridge.tick()
                     if now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
                         next_status = now + config.status_interval_seconds
         except BaseException:
-            if local_change_service is not None:
+            if local_change_started and local_change_service is not None:
                 with suppress(LocalChangeServiceError):
                     local_change_service.stop()
-            if runtime_bridge is not None:
+            if runtime_bridge_started and runtime_bridge is not None:
                 with suppress(RuntimeEventBridgeError):
                     runtime_bridge.stop()
             raise
 
-        if local_change_service is not None:
+        if local_change_started and local_change_service is not None:
             local_change_service.stop()
-        if runtime_bridge is not None:
+        if runtime_bridge_started and runtime_bridge is not None:
             runtime_bridge.stop()
         store.finish_run()
         if config.log_level == "info":
