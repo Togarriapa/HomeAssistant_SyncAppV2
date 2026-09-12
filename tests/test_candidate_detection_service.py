@@ -129,7 +129,9 @@ def test_candidate_service_rejects_invalid_clock_lifecycle_and_configuration(
         with pytest.raises(candidate_service.CandidateDetectionServiceError, match="clock"):
             service.start(float("nan"))
         service.start(10.0)
-        with pytest.raises(candidate_service.CandidateDetectionServiceError, match="already started"):
+        with pytest.raises(
+            candidate_service.CandidateDetectionServiceError, match="already started"
+        ):
             service.start(11.0)
         with pytest.raises(candidate_service.CandidateDetectionServiceError, match="backwards"):
             service.tick(9.999)
