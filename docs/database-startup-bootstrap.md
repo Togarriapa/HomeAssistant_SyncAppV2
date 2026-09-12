@@ -12,4 +12,7 @@ Database staging, snapshot staging and Git workspace roots are app-owned private
 
 This bootstrap uses the normal routine scheduler and normal processor only. It does not call interrupted-work recovery or administrative retry, and a deterministic blocked generation remains blocked.
 
-This increment intentionally does not invent a periodic interval. Periodic scheduling remains a separate normal-work producer milestone. Candidate integrity/semantic validation, pre-deployment backup, Apply, reload/restart, observation, promotion, rollback and Home Assistant write permissions are unchanged.
+After this startup generation succeeds, the long-running service arms the bounded
+[routine Recorder snapshot service](routine-recorder-service.md). Candidate
+integrity/semantic validation, pre-deployment backup, Apply, reload/restart,
+observation, promotion, rollback and Home Assistant write permissions are unchanged.

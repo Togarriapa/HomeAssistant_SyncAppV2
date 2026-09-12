@@ -60,26 +60,28 @@ class DatabaseSyncService:
         self._github_token = github_token
         self._interval_seconds = float(interval_seconds)
         self._next_due: float | None = None
+        self._last_now: float | None = None
+        self._stopped = False
 
     def start(self, now: float) -> None:
         """Arm the first routine deadline without scheduling work immediately."""
-        self._validate_now(now)
-        if self._next_due is not None:
+        current = self._advance_clock(now)
+        if self._next_due is not None or self._stopped:
             raise DatabaseSyncServiceError("database service is already started")
-        self._next_due = now + self._interval_seconds
+        self._next_due = current + self._interval_seconds
 
     def tick(self, now: float) -> DatabaseSyncTickResult:
         """Run at most one schedule/process transaction when the deadline is due."""
-        self._validate_now(now)
-        if self._next_due is None:
+        current = self._advance_clock(now)
+        if self._next_due is None or self._stopped:
             raise DatabaseSyncServiceError("database service is not started")
-        if now < self._next_due:
+        if current < self._next_due:
             return DatabaseSyncTickResult(due=False, processed=None)
 
         # Advance from the observation time rather than replaying missed intervals.
         # This makes a delayed owner loop coalesce elapsed periods into one bounded
         # generation instead of creating a catch-up storm.
-        self._next_due = now + self._interval_seconds
+        self._next_due = current + self._interval_seconds
         try:
             schedule_database_sync_generation(
                 self._store,
@@ -99,8 +101,14 @@ class DatabaseSyncService:
             raise DatabaseSyncServiceError("database service tick failed closed") from exc
         return DatabaseSyncTickResult(due=True, processed=processed)
 
-    @staticmethod
-    def _validate_now(now: float) -> None:
+    def stop(self) -> None:
+        """Disarm future scheduling before the owner releases durable state."""
+        if self._next_due is None or self._stopped:
+            raise DatabaseSyncServiceError("database service is not started")
+        self._stopped = True
+        self._next_due = None
+
+    def _advance_clock(self, now: float) -> float:
         if (
             isinstance(now, bool)
             or not isinstance(now, (int, float))
@@ -108,3 +116,8 @@ class DatabaseSyncService:
             or now < 0
         ):
             raise DatabaseSyncServiceError("database service clock is invalid")
+        current = float(now)
+        if self._last_now is not None and current < self._last_now:
+            raise DatabaseSyncServiceError("database service clock moved backwards")
+        self._last_now = current
+        return current

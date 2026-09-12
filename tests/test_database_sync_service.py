@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import database_sync_service as database_service
+from ha_syncapp import database_sync_work
+from ha_syncapp.database_sync import DatabaseSyncError, DatabaseSyncResult
 from ha_syncapp.database_sync_process import DatabaseSyncProcessResult
 from ha_syncapp.state import StateStore
 
@@ -18,7 +20,9 @@ def _opened_store(tmp_path: Path) -> StateStore:
     return store
 
 
-def _service(tmp_path: Path, store: StateStore, *, interval: float = 60.0) -> database_service.DatabaseSyncService:
+def _service(
+    tmp_path: Path, store: StateStore, *, interval: float = 60.0
+) -> database_service.DatabaseSyncService:
     return database_service.DatabaseSyncService(
         store,
         tmp_path / "homeassistant" / "recorder.db",
@@ -156,9 +160,16 @@ def test_database_service_rejects_invalid_clock_and_lifecycle(tmp_path: Path) ->
             service.tick(0.0)
         with pytest.raises(database_service.DatabaseSyncServiceError, match="clock"):
             service.start(float("nan"))
-        service.start(0.0)
+        service.start(10.0)
         with pytest.raises(database_service.DatabaseSyncServiceError, match="already started"):
-            service.start(1.0)
+            service.start(11.0)
+        with pytest.raises(database_service.DatabaseSyncServiceError, match="backwards"):
+            service.tick(9.999)
+        service.stop()
+        with pytest.raises(database_service.DatabaseSyncServiceError, match="not started"):
+            service.tick(70.0)
+        with pytest.raises(database_service.DatabaseSyncServiceError, match="not started"):
+            service.stop()
     finally:
         store.__exit__(None, None, None)
 
@@ -186,5 +197,33 @@ def test_database_service_wraps_schedule_failure_without_processing(
         with pytest.raises(database_service.DatabaseSyncServiceError, match="tick failed closed"):
             service.tick(60.0)
         assert processed is False
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_database_service_hands_transient_failure_to_durable_retrigger_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _opened_store(tmp_path)
+    source = tmp_path / "homeassistant" / "recorder.db"
+    source.parent.mkdir()
+    source.write_bytes(b"sqlite-placeholder")
+
+    def fail(*args: object, **kwargs: object) -> DatabaseSyncResult:
+        raise DatabaseSyncError("temporary transport failure")
+
+    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", fail)
+    service = _service(tmp_path, store)
+    try:
+        service.start(0.0)
+        result = service.tick(60.0)
+        assert result.processed is not None
+        assert result.processed.processed is not None
+        assert result.processed.processed.synchronization is None
+        assert result.processed.processed.work.status == "retry"
+        assert result.processed.processed.work.next_attempt_at is not None
+        assert database_sync_work.claim_database_sync_work(store) is None
+        service.stop()
     finally:
         store.__exit__(None, None, None)

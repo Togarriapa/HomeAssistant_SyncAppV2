@@ -10,6 +10,8 @@ A work-key mismatch is treated as deterministic and blocked before any publicati
 
 `database_sync_retrigger.run_database_sync_retrigger_pass()` remains the recovery adapter. It first invokes interrupted-work recovery, then delegates one bounded processing attempt to the same normal processor. This preserves one publication implementation while preventing Retrigger from becoming the ordinary scheduler.
 
-This slice does not add a periodic producer. A later scheduling milestone must independently define the normal periodic cadence from the initial README and invoke the existing routine database scheduling adapter before calling the normal processor.
+The bounded [routine Recorder snapshot service](routine-recorder-service.md) now
+invokes this processor after its monotonic periodic scheduler becomes due. Retrigger
+remains independently responsible for recovery.
 
 All database copies, snapshots and Git metadata remain in the already-established protected staging/workspace paths. No Git operation is performed in the live Home Assistant configuration tree, and this processing boundary does not implement Candidate deployment, backup, Apply, reload/restart, observation, promotion or rollback.
