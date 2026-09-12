@@ -83,8 +83,7 @@ def validate_trusted_log_history_evidence(
             raise LogHistoryEvidenceError("logs history parent chain is inconsistent")
 
     commits = tuple(
-        LogHistoryCommit(sha=record.sha, committed_at=record.committed_at)
-        for record in history
+        LogHistoryCommit(sha=record.sha, committed_at=record.committed_at) for record in history
     )
     try:
         plan = plan_log_history_retention(
