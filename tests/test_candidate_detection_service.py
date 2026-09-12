@@ -7,6 +7,7 @@ from ha_syncapp.candidate_detection import (
     CandidateDetectionResult,
     CandidateObservation,
 )
+from ha_syncapp.github_repo import RepositoryVerificationError
 from ha_syncapp.state import StateStore
 
 TARGET = "Owner/Home"
@@ -147,14 +148,22 @@ def test_candidate_service_rejects_invalid_clock_lifecycle_and_configuration(
         store.__exit__(None, None, None)
 
 
-def test_candidate_service_wraps_detection_failure_without_leaking_detail(
+@pytest.mark.parametrize(
+    "failure",
+    [
+        CandidateDetectionError("github-secret-sentinel detector detail"),
+        RepositoryVerificationError("github-secret-sentinel repository detail"),
+    ],
+)
+def test_candidate_service_wraps_detection_failures_without_leaking_detail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
 ) -> None:
     store = _opened_store(tmp_path)
 
     def fail(*args: object, **kwargs: object) -> CandidateDetectionResult:
-        raise CandidateDetectionError("github-secret-sentinel upstream detail")
+        raise failure
 
     monkeypatch.setattr(candidate_service, "detect_and_enqueue_trusted_candidate", fail)
     service = _service(store)
