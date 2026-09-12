@@ -81,7 +81,9 @@ def test_plan_is_deterministic() -> None:
     assert first == second
 
 
-@pytest.mark.parametrize("branch", ["main", "candidate", "runtime", "logs", "Database", ""])
+@pytest.mark.parametrize(
+    "branch", ["main", "candidate", "runtime", "logs", "Database", ""]
+)
 def test_plan_rejects_every_non_database_branch(branch: str) -> None:
     with pytest.raises(DatabaseRetentionError, match="branch"):
         plan_database_retention(
@@ -158,7 +160,9 @@ def test_plan_rejects_future_snapshot_timestamp() -> None:
         )
 
 
-@pytest.mark.parametrize("identity", ["", " snapshot", "snapshot ", "snapshot/name", "snapshot\nname"])
+@pytest.mark.parametrize(
+    "identity", ["", " snapshot", "snapshot ", "snapshot/name", "snapshot\nname"]
+)
 def test_plan_rejects_invalid_snapshot_identity(identity: str) -> None:
     snapshot = DatabaseSnapshotEvidence(
         identity=identity,
