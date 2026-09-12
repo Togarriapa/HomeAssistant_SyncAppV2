@@ -28,6 +28,12 @@ This read boundary grants no ref-update or history-rewrite authority. A later mu
 
 The returned proof is evidence only; it cannot push, force-update a ref, rewrite history, or mutate Home Assistant. A future writer must consume the proof immediately and remain responsible for an atomic expected-head-bound replacement operation.
 
+## Replacement authorization boundary
+
+`ha_syncapp.log_history_replacement.authorize_log_history_replacement()` binds the validated retention plan to that fresh prewrite proof without performing any repository operation. It accepts only the exact `logs` branch, requires target/repository/head equality between the two trusted inputs, verifies that the retained and pruned commit identities form the exact validated history partition, and keeps the current head as the first retained commit.
+
+The returned immutable authorization explicitly reports whether replacement is required. An empty pruned set is a no-op and grants no mutation authority. The authorization does not recalculate the retention cutoff, inspect repository state, execute Git, contact GitHub, or mutate Home Assistant. A later transport must consume this exact authorization together with a still-fresh expected-head guarantee and remain restricted to `logs`.
+
 ## Safety boundary
 
 This increment performs no Git fetch, clone, push, force-push, ref update, history rewrite, Home Assistant mutation, candidate Fetch/Stage, validation execution, backup, Apply, reload/restart, observation, promotion, tagging, or rollback.
