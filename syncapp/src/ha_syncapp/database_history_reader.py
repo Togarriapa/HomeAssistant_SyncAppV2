@@ -27,6 +27,15 @@ class DatabaseHistoryReadError(RuntimeError):
     """Trusted Recorder database history could not be collected safely."""
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
 def fetch_trusted_database_history_evidence(
     *,
     target: str,
@@ -132,10 +141,12 @@ def _read_history_page(request: Request) -> object:
     if len(raw) > _MAX_HISTORY_PAGE_BYTES:
         raise DatabaseHistoryReadError("GitHub database history page exceeded the size limit")
     try:
-        parsed: object = json.loads(raw.decode("utf-8"))
+        parsed: object = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
         return parsed
     except (UnicodeError, ValueError, RecursionError):
-        raise DatabaseHistoryReadError("GitHub returned invalid database history metadata") from None
+        raise DatabaseHistoryReadError(
+            "GitHub returned invalid database history metadata"
+        ) from None
 
 
 def _parse_history_page(page: object) -> tuple[DatabaseHistoryRecord, ...]:
@@ -187,7 +198,9 @@ def _parse_timestamp(value: object) -> datetime:
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        raise DatabaseHistoryReadError("GitHub returned invalid database history metadata") from None
+        raise DatabaseHistoryReadError(
+            "GitHub returned invalid database history metadata"
+        ) from None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise DatabaseHistoryReadError("GitHub returned invalid database history metadata")
     return parsed
