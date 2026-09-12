@@ -67,8 +67,7 @@ def _fetch_history_records(
 
     owner, repository = _target_parts(target)
     base_url = (
-        f"https://api.github.com/repos/{quote(owner, safe='')}/"
-        f"{quote(repository, safe='')}/commits"
+        f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/commits"
     )
     records: list[LogHistoryRecord] = []
     page_number = 1
