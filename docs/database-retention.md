@@ -13,10 +13,17 @@ The `database` branch is generated from Home Assistant and remains a one-way Hom
 - The value must be a JSON integer; booleans, strings, floating-point values, zero, negative values and larger values are rejected.
 - Invalid input is rejected without echoing the supplied value into the error text.
 
-## Current increment
+## Deterministic planning contract
 
-This increment adds only the validated configuration contract and Home Assistant App schema. It does not delete database snapshots, rewrite Git history, modify Repo B refs, or mutate Home Assistant.
+Retention planning is a side-effect-free classification step and is restricted to the exact `database` branch.
 
-Any later retention planner or cleanup transport must be implemented as a separate tested increment. It must use explicit timezone-aware UTC time and deterministic snapshot evidence, remain confined to generated `database` data, preserve a usable newest snapshot, fail closed on malformed or unexpected state, and be re-audited against the initial README before gaining mutation authority.
+- The caller supplies an explicit timezone-aware UTC reference time and the already validated retention-days value; the planner does not read the wall clock.
+- Each snapshot is represented by an immutable identity and timezone-aware UTC creation timestamp.
+- Evidence must be bounded, ordered newest-first, contain no duplicate or malformed identities, and contain no future timestamps.
+- Snapshots at or newer than the cutoff are retained; older snapshots are classified as prunable.
+- The newest valid snapshot is always retained, even when every supplied snapshot is older than the configured cutoff.
+- The planner cannot target `main`, `candidate`, `runtime`, or `logs`.
+
+The planner performs no filesystem deletion, Git operation, network operation, Repo B ref mutation, history rewrite, or Home Assistant/Recorder mutation. Any cleanup or history-maintenance transport remains a separate future increment and must be independently guarded and re-audited before gaining mutation authority.
 
 Candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging and rollback remain separate controlled deployment capabilities. The Retrigger Work Cron Job remains enabled and independent.
