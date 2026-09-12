@@ -169,6 +169,7 @@ def test_service_orders_database_between_local_and_runtime(
 
     monkeypatch.setattr(service, "fetch_and_verify_private_repository", verify)
     monkeypatch.setattr(service, "_run_startup_local_if_configured", local)
+    monkeypatch.setattr(service, "_local_change_service_if_configured", lambda *args: None)
     monkeypatch.setattr(service, "_run_startup_database_if_configured", database)
     monkeypatch.setattr(service, "_run_startup_runtime_if_configured", runtime)
 
@@ -197,6 +198,7 @@ def test_shutdown_after_database_bootstrap_skips_runtime(
         lambda target, token, expected_id=None: RepoIdentity(target=target, repository_id=123),
     )
     monkeypatch.setattr(service, "_run_startup_local_if_configured", lambda *args: None)
+    monkeypatch.setattr(service, "_local_change_service_if_configured", lambda *args: None)
 
     def database(*args: object, **kwargs: object) -> None:
         stop_after_database.requested = True
