@@ -3,7 +3,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from ha_syncapp import local_sync_work
 from ha_syncapp.local_change_service import LocalChangeService, LocalChangeServiceError
+from ha_syncapp.local_sync import LocalSyncError, LocalSyncResult
 from ha_syncapp.local_sync_process import LocalSyncProcessResult
 from ha_syncapp.state import StateStore
 
@@ -232,6 +234,50 @@ def test_change_during_processing_remains_bounded_follow_up_work(tmp_path: Path)
         assert service.tick(31.1) is None
         assert service.tick(32.1) == LocalSyncProcessResult(processed=None)
         assert calls == 2
+        service.stop()
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_real_processor_hands_transient_failure_to_durable_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    source = _source(tmp_path)
+    snapshot, workspace = _roots(tmp_path)
+    notify: list[Callable[[], None]] = []
+
+    def fail(*args: object, **kwargs: object) -> LocalSyncResult:
+        raise LocalSyncError("sanitized")
+
+    monkeypatch.setattr(local_sync_work, "synchronize_local_configuration", fail)
+
+    try:
+        service = LocalChangeService(
+            store,
+            source,
+            snapshot,
+            workspace,
+            TARGET,
+            TOKEN,
+            quiet_seconds=1.0,
+            consumer=_blocking_consumer(notify),
+        )
+        service.start(35.0)
+        (source / "automations.yaml").write_text("[]\n")
+        notify[0]()
+
+        assert service.tick(35.0) is None
+        result = service.tick(36.0)
+
+        assert result is not None
+        assert result.processed is not None
+        assert result.processed.synchronization is None
+        assert result.processed.work.status == "retry"
+        assert result.processed.work.attempts == 1
+        assert result.processed.work.next_attempt_at is not None
+        assert local_sync_work.claim_local_sync_work(store) is None
         service.stop()
     finally:
         store.__exit__(None, None, None)
