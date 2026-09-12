@@ -47,10 +47,17 @@ def _blocking_consumer(
         ready: Callable[[], None],
     ) -> int:
         del source
-        captured_notify.append(notify)
+        forwarded = 0
+
+        def forward() -> None:
+            nonlocal forwarded
+            notify()
+            forwarded += 1
+
+        captured_notify.append(forward)
         ready()
         stop.wait()
-        return 0
+        return forwarded
 
     return consume
 
