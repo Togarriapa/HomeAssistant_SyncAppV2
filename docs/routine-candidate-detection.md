@@ -8,9 +8,10 @@ controlled deployment pipeline can proceed, while the separate Retrigger Work
 Cron Job remains recovery for unprocessed candidate commits. Candidate detection
 therefore has a normal producer that is independent of Retrigger recovery.
 
-`CandidateDetectionService` is a bounded owner-loop primitive. It uses an
-explicit monotonic interval and performs no remote observation when merely
-started. When due, one tick reuses the existing repository-ID-bound candidate
+`CandidateDetectionService` is a bounded owner-loop component. It uses an
+explicit 60-second monotonic interval, independent of status logging and
+Retrigger, and performs no remote observation when merely started. When due,
+one tick reuses the existing repository-ID-bound candidate
 detector to re-prove the configured private Repo B, observe only the exact
 `candidate` branch, and durably enqueue only its immutable head SHA. A delayed
 owner loop advances the next deadline from the current observation, so missed
@@ -38,6 +39,16 @@ The existing Retrigger candidate detector remains unchanged and independent. It
 continues to identify missed or unprocessed candidate commits if the normal
 producer is interrupted or unavailable.
 
-This increment intentionally introduces the bounded primitive before wiring it
-into `__main__.py`. Owner-loop activation and shutdown integration are a separate
-increment and require the primitive's exact pull-request head to pass CI first.
+The primitive was wired into `__main__.py` only after its isolated exact head
+passed quality and native-architecture CI. Construction requires an already
+verified Repo B binding. Startup arms the detector after other normal components;
+each owner-loop call performs at most one observation. Shutdown is rechecked
+between components, then the detector is disarmed before StateStore ownership is
+released. Unexpected detection failure stops active components and preserves the
+interrupted run for recovery diagnostics.
+
+Issue #219 includes deterministic tests for deadlines, coalescing, branch absence,
+idempotent blocked/succeeded SHA observation, repository failure sanitization,
+trusted service construction, owner-loop ordering, shutdown, and interrupted-run
+preservation. The final exact head must pass formatting, Ruff, mypy, Bandit, full
+pytest, and native amd64/aarch64 CI before merge.
