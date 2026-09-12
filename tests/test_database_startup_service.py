@@ -171,6 +171,7 @@ def test_service_orders_database_between_local_and_runtime(
     monkeypatch.setattr(service, "_run_startup_local_if_configured", local)
     monkeypatch.setattr(service, "_local_change_service_if_configured", lambda *args: None)
     monkeypatch.setattr(service, "_run_startup_database_if_configured", database)
+    monkeypatch.setattr(service, "_database_sync_service_if_configured", lambda *args: None)
     monkeypatch.setattr(service, "_run_startup_runtime_if_configured", runtime)
 
     service.run(tmp_path, stop_after_runtime)

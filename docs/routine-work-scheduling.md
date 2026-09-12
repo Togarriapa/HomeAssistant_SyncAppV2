@@ -14,7 +14,10 @@ The lane adapters preserve the existing deterministic identities:
 - `database_sync_schedule.schedule_database_sync_generation()` identifies one Repo B target and absolute Recorder database path.
 - `runtime_sync_schedule.schedule_runtime_sync_generation()` identifies the Repo B runtime publication lane for one target.
 
-These adapters schedule work only. They do not execute synchronization and they do not change Retrigger passes. Future normal producers may invoke them after independently establishing the appropriate event or periodic trigger required by the initial README.
+These adapters schedule work only. They do not execute synchronization and they do
+not change Retrigger passes. The Local event bridge, Runtime event bridge, and
+[routine Recorder service](routine-recorder-service.md) provide bounded normal
+producers while preserving that separation.
 
 ## Normal runtime processing
 

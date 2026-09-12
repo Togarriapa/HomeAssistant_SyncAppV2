@@ -20,6 +20,7 @@ from .database_startup import (
     DatabaseStartupResult,
     run_startup_database_sync,
 )
+from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
@@ -36,6 +37,7 @@ from .runtime_startup import RuntimeStartupError, RuntimeStartupResult, run_star
 from .state import AlreadyRunning, StateError, StateStore
 
 _LOCAL_CHANGE_QUIET_SECONDS = 1.0
+_DATABASE_SYNC_INTERVAL_SECONDS = 60.0 * 60.0
 
 
 def emit(event: str, *, level: str = "info", **fields: object) -> None:
@@ -254,6 +256,48 @@ def _run_startup_database_if_configured(
         raise DatabaseStartupError("startup database synchronization failed closed") from exc
 
 
+def _database_sync_service_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> DatabaseSyncService | None:
+    """Build periodic Recorder processing only after the trusted startup generation."""
+    if (
+        config.repo_b is None
+        or config.github_token is None
+        or config.recorder_database_path is None
+    ):
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise DatabaseSyncServiceError("database service repository is not trusted")
+
+    source_database = Path(config.recorder_database_path)
+    try:
+        canonical_home = home_assistant_root.resolve(strict=True)
+        canonical_source = source_database.resolve(strict=True)
+        if not canonical_home.is_dir():
+            raise DatabaseSyncServiceError("database service Home Assistant source is invalid")
+        if canonical_source == canonical_home or canonical_home not in canonical_source.parents:
+            raise DatabaseSyncServiceError("database service source escapes Home Assistant source")
+        database_staging_root, snapshot_staging_root, workspace_root = _database_work_roots(
+            data_dir, home_assistant_root
+        )
+    except (RetriggerCycleError, OSError) as exc:
+        raise DatabaseSyncServiceError("database service work roots are unavailable") from exc
+
+    return DatabaseSyncService(
+        store,
+        source_database,
+        database_staging_root,
+        snapshot_staging_root,
+        workspace_root,
+        config.repo_b,
+        config.github_token,
+        interval_seconds=_DATABASE_SYNC_INTERVAL_SECONDS,
+    )
+
+
 def _run_startup_runtime_if_configured(
     store: StateStore,
     config: Config,
@@ -375,6 +419,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
         local_change_service: LocalChangeService | None = None
+        database_sync_service: DatabaseSyncService | None = None
         runtime_bridge: RuntimeEventBridge | None = None
         if not stop.requested:
             _run_startup_local_if_configured(store, config, data_dir)
@@ -383,6 +428,10 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if not stop.requested:
                 _run_startup_database_if_configured(store, config, data_dir)
             if not stop.requested:
+                database_sync_service = _database_sync_service_if_configured(
+                    store, config, data_dir
+                )
+            if not stop.requested:
                 _run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
@@ -390,16 +439,22 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         next_status = time.monotonic() + config.status_interval_seconds
         mode = (
             "active"
-            if local_change_service is not None or runtime_bridge is not None
+            if local_change_service is not None
+            or database_sync_service is not None
+            or runtime_bridge is not None
             else "passive"
         )
         local_change_started = False
+        database_sync_started = False
         runtime_bridge_started = False
 
         try:
             if not stop.requested and local_change_service is not None:
                 local_change_service.start(time.monotonic())
                 local_change_started = True
+            if not stop.requested and database_sync_service is not None:
+                database_sync_service.start(time.monotonic())
+                database_sync_started = True
             if not stop.requested and runtime_bridge is not None:
                 runtime_bridge.start()
                 runtime_bridge_started = True
@@ -428,6 +483,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                     now = time.monotonic()
                     if local_change_started and local_change_service is not None:
                         local_change_service.tick(now)
+                    if database_sync_started and database_sync_service is not None:
+                        database_sync_service.tick(now)
                     if runtime_bridge_started and runtime_bridge is not None:
                         runtime_bridge.tick()
                     if now >= next_status:
@@ -438,6 +495,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if local_change_started and local_change_service is not None:
                 with suppress(LocalChangeServiceError):
                     local_change_service.stop()
+            if database_sync_started and database_sync_service is not None:
+                with suppress(DatabaseSyncServiceError):
+                    database_sync_service.stop()
             if runtime_bridge_started and runtime_bridge is not None:
                 with suppress(RuntimeEventBridgeError):
                     runtime_bridge.stop()
@@ -445,6 +505,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
 
         if local_change_started and local_change_service is not None:
             local_change_service.stop()
+        if database_sync_started and database_sync_service is not None:
+            database_sync_service.stop()
         if runtime_bridge_started and runtime_bridge is not None:
             runtime_bridge.stop()
         store.finish_run()
@@ -525,6 +587,9 @@ def main() -> int:
     except LocalChangeServiceError:
         emit("service_failed", level="error", reason="local_events_unavailable")
         return 10
+    except DatabaseSyncServiceError:
+        emit("service_failed", level="error", reason="database_sync_service_failed")
+        return 11
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
