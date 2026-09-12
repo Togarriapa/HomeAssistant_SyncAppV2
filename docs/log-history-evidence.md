@@ -34,8 +34,14 @@ The returned proof is evidence only; it cannot push, force-update a ref, rewrite
 
 The returned immutable authorization explicitly reports whether replacement is required. An empty pruned set is a no-op and grants no mutation authority. Revalidation uses the plan's explicit reference time and cannot choose a new cutoff. The authorization does not inspect repository state, execute Git, contact GitHub, or mutate Home Assistant. A later transport must consume this exact authorization together with a still-fresh expected-head guarantee and remain restricted to `logs`.
 
+## Expected-head replacement transport
+
+`ha_syncapp.log_history_replace_transport.replace_logs_history()` is the narrow final mutation boundary. It performs no operation for a no-op authorization. Otherwise it validates the exact authorized private repository target and numeric identity, accepts only a distinct Git SHA using the same object format as the expected head, and addresses the authorized repository URL directly instead of trusting a mutable local `origin` alias. The only writable ref in its command is `refs/heads/logs`, protected by `--force-with-lease=refs/heads/logs:<expected-head>` so concurrent remote movement rejects the replacement.
+
+The transport uses an absolute Git executable, disables repository hooks and credential-helper configuration, rejects symlink or non-directory workspaces, bounds execution time to five minutes, and sanitizes all process and lease failures. It does not build replacement commits, select retained identities, or reach candidate deployment and Home Assistant mutation paths.
+
 ## Safety boundary
 
-This increment performs no Git fetch, clone, push, force-push, ref update, history rewrite, Home Assistant mutation, candidate Fetch/Stage, validation execution, backup, Apply, reload/restart, observation, promotion, tagging, or rollback.
+Only the final expected-head-guarded `logs` ref replacement can mutate Git history. This capability performs no Git fetch or clone, Home Assistant mutation, candidate Fetch/Stage, validation execution, backup, Apply, reload/restart, observation, promotion, tagging, or rollback.
 
 History rewriting remains retention management, not forensic secure deletion. The separate Retrigger Work Cron Job remains enabled, independent, and unchanged.
