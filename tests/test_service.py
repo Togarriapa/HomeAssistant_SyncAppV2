@@ -169,6 +169,10 @@ def test_normal_bootstraps_occur_only_after_repository_trust(
 
     monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
     monkeypatch.setattr("ha_syncapp.__main__._run_startup_local_if_configured", local_bootstrap)
+    monkeypatch.setattr(
+        "ha_syncapp.__main__._local_change_service_if_configured",
+        lambda store, config, data_dir: None,
+    )
     monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap)
 
     run(tmp_path, stop_after_bootstrap)

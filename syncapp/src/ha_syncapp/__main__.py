@@ -21,6 +21,7 @@ from .database_startup import (
     run_startup_database_sync,
 )
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
+from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
 from .retrigger_cycle import RetriggerCycleError, run_retrigger_cycle
 from .retrigger_ipc import (
@@ -33,6 +34,8 @@ from .retrigger_ipc import (
 from .runtime_event_bridge import RuntimeEventBridge, RuntimeEventBridgeError
 from .runtime_startup import RuntimeStartupError, RuntimeStartupResult, run_startup_runtime_sync
 from .state import AlreadyRunning, StateError, StateStore
+
+_LOCAL_CHANGE_QUIET_SECONDS = 1.0
 
 
 def emit(event: str, *, level: str = "info", **fields: object) -> None:
@@ -183,6 +186,32 @@ def _run_startup_local_if_configured(
         )
     except (RetriggerCycleError, OSError) as exc:
         raise LocalStartupError("startup Local synchronization failed closed") from exc
+
+
+def _local_change_service_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> LocalChangeService | None:
+    """Build, but do not start, event-driven Local synchronization after bootstrap."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise LocalChangeServiceError("local change service repository is not trusted")
+    try:
+        snapshot_root, workspace_root = _local_work_roots(data_dir, home_assistant_root)
+    except (RetriggerCycleError, OSError) as exc:
+        raise LocalChangeServiceError("local change service work roots are unavailable") from exc
+    return LocalChangeService(
+        store,
+        home_assistant_root,
+        snapshot_root,
+        workspace_root,
+        config.repo_b,
+        config.github_token,
+        quiet_seconds=_LOCAL_CHANGE_QUIET_SECONDS,
+    )
 
 
 def _run_startup_database_if_configured(
@@ -345,22 +374,35 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             store.bind_repository(config.repo_b, identity.repository_id)
         boot = store.start_run()
+        local_change_service: LocalChangeService | None = None
         runtime_bridge: RuntimeEventBridge | None = None
         if not stop.requested:
             _run_startup_local_if_configured(store, config, data_dir)
+            if not stop.requested:
+                local_change_service = _local_change_service_if_configured(store, config, data_dir)
             if not stop.requested:
                 _run_startup_database_if_configured(store, config, data_dir)
             if not stop.requested:
                 _run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
-                if runtime_bridge is not None:
-                    runtime_bridge.start()
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
-        mode = "active" if runtime_bridge is not None else "passive"
+        mode = (
+            "active"
+            if local_change_service is not None or runtime_bridge is not None
+            else "passive"
+        )
+        local_change_started = False
+        runtime_bridge_started = False
 
         try:
+            if not stop.requested and local_change_service is not None:
+                local_change_service.start(time.monotonic())
+                local_change_started = True
+            if not stop.requested and runtime_bridge is not None:
+                runtime_bridge.start()
+                runtime_bridge_started = True
             with RetriggerServer(socket_path) as retrigger_server:
                 fields = {**asdict(boot), "version": __version__, "mode": mode}
                 level = "warning" if boot.interrupted_run_id else "info"
@@ -383,20 +425,27 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         raise
                     if stop.requested:
                         break
-                    if runtime_bridge is not None:
-                        runtime_bridge.tick()
                     now = time.monotonic()
+                    if local_change_started and local_change_service is not None:
+                        local_change_service.tick(now)
+                    if runtime_bridge_started and runtime_bridge is not None:
+                        runtime_bridge.tick()
                     if now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
                         next_status = now + config.status_interval_seconds
         except BaseException:
-            if runtime_bridge is not None:
+            if local_change_started and local_change_service is not None:
+                with suppress(LocalChangeServiceError):
+                    local_change_service.stop()
+            if runtime_bridge_started and runtime_bridge is not None:
                 with suppress(RuntimeEventBridgeError):
                     runtime_bridge.stop()
             raise
 
-        if runtime_bridge is not None:
+        if local_change_started and local_change_service is not None:
+            local_change_service.stop()
+        if runtime_bridge_started and runtime_bridge is not None:
             runtime_bridge.stop()
         store.finish_run()
         if config.log_level == "info":
@@ -473,6 +522,9 @@ def main() -> int:
     except DatabaseStartupError:
         emit("service_failed", level="error", reason="database_sync_startup_failed")
         return 9
+    except LocalChangeServiceError:
+        emit("service_failed", level="error", reason="local_events_unavailable")
+        return 10
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
