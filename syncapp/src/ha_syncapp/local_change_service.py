@@ -103,9 +103,7 @@ class LocalChangeService:
             self._bridge.notify_source_event(now)
         except (LocalChangeBridgeError, LocalChangeWorkerError):
             self._stop_worker_after_failed_start()
-            raise LocalChangeServiceError(
-                "local change service startup failed closed"
-            ) from None
+            raise LocalChangeServiceError("local change service startup failed closed") from None
         self._started = True
 
     def tick(self, now: float) -> LocalSyncProcessResult | None:
@@ -115,9 +113,7 @@ class LocalChangeService:
         try:
             terminal = self._worker.result_if_finished()
             if terminal is not None:
-                raise LocalChangeServiceError(
-                    "local change event transport stopped unexpectedly"
-                )
+                raise LocalChangeServiceError("local change event transport stopped unexpectedly")
 
             drained = self._mailbox.drain()
             if drained.changed:
@@ -140,9 +136,7 @@ class LocalChangeService:
             LocalChangeWorkerError,
             LocalSyncProcessError,
         ) as exc:
-            raise LocalChangeServiceError(
-                "local change service tick failed closed"
-            ) from exc
+            raise LocalChangeServiceError("local change service tick failed closed") from exc
 
     def stop(self) -> None:
         """Stop event production before relinquishing owner-thread service state."""
@@ -152,14 +146,10 @@ class LocalChangeService:
         try:
             result = self._worker.join()
             if result.reason is not LocalChangeWorkerReason.STOPPED:
-                raise LocalChangeServiceError(
-                    "local change event transport did not stop cleanly"
-                )
+                raise LocalChangeServiceError("local change event transport did not stop cleanly")
             self._mailbox.close()
         except (LocalChangeMailboxError, LocalChangeWorkerError) as exc:
-            raise LocalChangeServiceError(
-                "local change service shutdown failed closed"
-            ) from exc
+            raise LocalChangeServiceError("local change service shutdown failed closed") from exc
         self._stopped = True
 
     def _stop_worker_after_failed_start(self) -> None:
