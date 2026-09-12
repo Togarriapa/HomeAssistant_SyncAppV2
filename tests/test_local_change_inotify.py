@@ -94,10 +94,9 @@ def test_inotify_replaces_invalidated_watch_when_directory_path_is_recreated(
         assert _wait_for_change(mailbox) is True
 
         nested.mkdir()
+        # Delivery of the parent-directory notification is the synchronization
+        # point: recursive watch reconciliation must already be complete.
         assert _wait_for_change(mailbox) is True
-        # Let the parent-directory event refresh the recursive watch set, then
-        # discard that signal so only activity inside the replacement proves it.
-        time.sleep(0.05)
         while mailbox.drain().changed:
             pass
 
