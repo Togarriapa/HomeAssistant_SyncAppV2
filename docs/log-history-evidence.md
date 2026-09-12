@@ -30,9 +30,9 @@ The returned proof is evidence only; it cannot push, force-update a ref, rewrite
 
 ## Replacement authorization boundary
 
-`ha_syncapp.log_history_replacement.authorize_log_history_replacement()` binds the validated retention plan to that fresh prewrite proof without performing any repository operation. It accepts only the exact `logs` branch, requires target/repository/head equality between the two trusted inputs, verifies that the retained and pruned commit identities form the exact validated history partition, and keeps the current head as the first retained commit.
+`ha_syncapp.log_history_replacement.authorize_log_history_replacement()` binds the validated retention plan to that fresh prewrite proof without performing any repository operation. It accepts only the exact `logs` branch, requires byte-exact target plus repository/head equality between the two trusted inputs, recalculates the deterministic plan from the trusted commit evidence, verifies that the retained and pruned commit identities form the exact validated history partition, and keeps the current head as the first retained commit.
 
-The returned immutable authorization explicitly reports whether replacement is required. An empty pruned set is a no-op and grants no mutation authority. The authorization does not recalculate the retention cutoff, inspect repository state, execute Git, contact GitHub, or mutate Home Assistant. A later transport must consume this exact authorization together with a still-fresh expected-head guarantee and remain restricted to `logs`.
+The returned immutable authorization explicitly reports whether replacement is required. An empty pruned set is a no-op and grants no mutation authority. Revalidation uses the plan's explicit reference time and cannot choose a new cutoff. The authorization does not inspect repository state, execute Git, contact GitHub, or mutate Home Assistant. A later transport must consume this exact authorization together with a still-fresh expected-head guarantee and remain restricted to `logs`.
 
 ## Safety boundary
 
