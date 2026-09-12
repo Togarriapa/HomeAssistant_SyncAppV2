@@ -120,6 +120,51 @@ def test_configured_service_activates_local_events_after_bootstrap_and_stops_cle
     assert active_run_id is None
 
 
+def test_shutdown_after_local_build_does_not_activate_or_stop_inactive_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_config(tmp_path)
+    stop = Shutdown()
+    order: list[str] = []
+    _trusted_repo(monkeypatch, order)
+    local_service = FakeLocalService(order, stop)
+
+    monkeypatch.setattr(
+        "ha_syncapp.__main__._run_startup_local_if_configured",
+        lambda store, config, data_dir: order.append("local_bootstrap"),
+    )
+
+    def build_local(store, config, data_dir: Path) -> FakeLocalService:
+        order.append("local_build")
+        return local_service
+
+    def runtime_bootstrap(store, config, data_dir: Path) -> None:
+        order.append("runtime_bootstrap")
+        stop.requested = True
+
+    monkeypatch.setattr("ha_syncapp.__main__._local_change_service_if_configured", build_local)
+    monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", runtime_bootstrap)
+    monkeypatch.setattr(
+        "ha_syncapp.__main__._runtime_event_bridge_if_configured",
+        lambda store, config, data_dir: pytest.fail("shutdown built a runtime bridge"),
+    )
+
+    run(tmp_path, stop)
+
+    assert order == [
+        "trust",
+        "local_bootstrap",
+        "local_build",
+        "runtime_bootstrap",
+    ]
+    with sqlite3.connect(tmp_path / "syncapp/state.sqlite3") as database:
+        active_run_id = database.execute(
+            "SELECT active_run_id FROM installation WHERE singleton = 1"
+        ).fetchone()[0]
+    assert active_run_id is None
+
+
 def test_local_event_failure_stops_transport_and_leaves_run_interrupted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
