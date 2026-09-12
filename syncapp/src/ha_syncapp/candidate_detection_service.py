@@ -10,6 +10,7 @@ from .candidate_detection import (
     CandidateDetectionResult,
     detect_and_enqueue_trusted_candidate,
 )
+from .github_repo import RepositoryVerificationError
 from .state import StateStore
 
 
@@ -82,7 +83,7 @@ class CandidateDetectionService:
                 self._target,
                 self._github_token,
             )
-        except CandidateDetectionError as exc:
+        except (CandidateDetectionError, RepositoryVerificationError) as exc:
             raise CandidateDetectionServiceError("candidate service tick failed closed") from exc
         return CandidateDetectionTickResult(due=True, detection=detection)
 
