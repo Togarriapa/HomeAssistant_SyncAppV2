@@ -96,6 +96,7 @@ def test_authorization_represents_noop_without_mutation_authority() -> None:
     ("field", "value"),
     [
         ("target", "other/private-repo"),
+        ("target", "OWNER/PRIVATE-REPO"),
         ("repository_id", 999),
         ("branch", "main"),
         ("expected_head_sha", _sha(9)),
@@ -122,6 +123,29 @@ def test_authorization_rejects_plan_with_overlapping_history() -> None:
         authorize_log_history_replacement(evidence=forged, prewrite=_prewrite(evidence))
 
 
+def test_authorization_revalidates_forged_plan_metadata() -> None:
+    evidence = _evidence()
+    forged = replace(
+        evidence,
+        plan=replace(evidence.plan, cutoff=evidence.plan.cutoff - timedelta(days=1)),
+    )
+
+    with pytest.raises(LogHistoryReplacementAuthorizationError, match="plan is inconsistent"):
+        authorize_log_history_replacement(evidence=forged, prewrite=_prewrite(evidence))
+
+
+@pytest.mark.parametrize(("target", "repository_id"), [("", 123), ("owner/repo", 0)])
+def test_authorization_rejects_forged_shared_repository_identity(
+    target: str,
+    repository_id: int,
+) -> None:
+    evidence = replace(_evidence(), target=target, repository_id=repository_id)
+    prewrite = replace(_prewrite(evidence), target=target, repository_id=repository_id)
+
+    with pytest.raises(LogHistoryReplacementAuthorizationError, match="identity is invalid"):
+        authorize_log_history_replacement(evidence=evidence, prewrite=prewrite)
+
+
 def test_authorization_rejects_plan_that_does_not_partition_evidence() -> None:
     evidence = _evidence()
     forged_plan = replace(
@@ -144,5 +168,7 @@ def test_authorization_rejects_plan_without_current_head_retained() -> None:
     )
     forged = replace(evidence, plan=forged_plan)
 
-    with pytest.raises(LogHistoryReplacementAuthorizationError, match="retained history is invalid"):
+    with pytest.raises(
+        LogHistoryReplacementAuthorizationError, match="retained history is invalid"
+    ):
         authorize_log_history_replacement(evidence=forged, prewrite=_prewrite(evidence))
