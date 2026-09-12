@@ -112,9 +112,9 @@ def consume_local_change_events(
                 for path, watch in tuple(watched.items()):
                     if watch in invalidated_watches:
                         del watched[path]
+            _refresh_watches(source, fd, watched, inotify_add_watch)
             notify()
             forwarded += 1
-            _refresh_watches(source, fd, watched, inotify_add_watch)
         return forwarded
     finally:
         os.close(fd)
@@ -137,41 +137,51 @@ def _refresh_watches(
         encoded = os.fsencode(path)
         watch = add_watch(fd, encoded, _WATCH_MASK)
         if watch < 0:
-            _raise_errno("local change inotify watch registration failed")
+            error_number = _current_errno()
+            if error_number == errno.ENOENT and path != source:
+                continue
+            _raise_errno("local change inotify watch registration failed", error_number)
         watched[path] = watch
 
 
 def _safe_directories(source: Path) -> tuple[Path, ...]:
-    try:
-        root = source.lstat()
-    except OSError as exc:
-        raise LocalChangeInotifyError("local change inotify source is unavailable") from exc
-    if not stat.S_ISDIR(root.st_mode) or stat.S_ISLNK(root.st_mode):
-        raise LocalChangeInotifyError("local change inotify source is not a real directory")
-
     directories: list[Path] = []
 
-    def walk(directory: Path) -> None:
-        directories.append(directory)
+    def walk(directory: Path, *, is_root: bool) -> None:
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            if not is_root and exc.errno == errno.ENOENT:
+                return
+            raise LocalChangeInotifyError("local change inotify source is unavailable") from exc
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise LocalChangeInotifyError("local change inotify source is not a real directory")
+
         try:
             entries = tuple(os.scandir(directory))
         except OSError as exc:
+            if not is_root and exc.errno == errno.ENOENT:
+                return
             raise LocalChangeInotifyError("local change inotify source cannot be scanned") from exc
+        directories.append(directory)
+
         for entry in entries:
             try:
-                metadata = entry.stat(follow_symlinks=False)
+                entry_metadata = entry.stat(follow_symlinks=False)
             except OSError as exc:
+                if exc.errno == errno.ENOENT:
+                    continue
                 raise LocalChangeInotifyError(
                     "local change inotify source changed during scan"
                 ) from exc
-            if stat.S_ISLNK(metadata.st_mode):
+            if stat.S_ISLNK(entry_metadata.st_mode):
                 raise LocalChangeInotifyError(
                     "local change inotify source contains a symbolic link"
                 )
-            if stat.S_ISDIR(metadata.st_mode):
-                walk(Path(entry.path))
+            if stat.S_ISDIR(entry_metadata.st_mode):
+                walk(Path(entry.path), is_root=False)
 
-    walk(source)
+    walk(source, is_root=True)
     return tuple(directories)
 
 
@@ -192,8 +202,11 @@ def _validate_event_payload(payload: bytes) -> frozenset[int]:
     return frozenset(invalidated)
 
 
-def _raise_errno(message: str) -> None:
+def _current_errno() -> int:
     error_number = ctypes.get_errno()
-    if error_number == 0:
-        error_number = errno.EIO
-    raise LocalChangeInotifyError(message) from OSError(error_number, os.strerror(error_number))
+    return error_number if error_number != 0 else errno.EIO
+
+
+def _raise_errno(message: str, error_number: int | None = None) -> None:
+    resolved_error = _current_errno() if error_number is None else error_number
+    raise LocalChangeInotifyError(message) from OSError(resolved_error, os.strerror(resolved_error))

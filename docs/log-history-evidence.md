@@ -16,7 +16,11 @@ The previous retention planner classifies generated `logs` history against the f
 - delegates duplicate, timestamp, ordering, future-time, cutoff, and retention classification to the already-green retention planner;
 - returns one immutable evidence object containing the bound Repo B identity, expected head, validated commits, and retention plan.
 
-A future read-only transport may collect these records from the trusted private Repo B, but it must re-prove repository identity and the exact `logs` head before collection. A later mutation increment must re-check both immediately before replacement and fail closed on any divergence.
+## Read-only collection
+
+`ha_syncapp.log_history_reader.fetch_trusted_log_history_evidence()` collects the evidence from the private Repo B without mutating Git. It first re-proves the pinned repository identity and exact `logs` head, then requests commit metadata by that immutable SHA rather than by a moving branch name. Pagination is limited to 100 commits per response, each response is limited to 1 MiB, and a complete history is limited to 4,096 commits. Incomplete, nonlinear, malformed, oversized, or divergent evidence fails closed with sanitized diagnostics that never include the GitHub token.
+
+This read boundary grants no ref-update or history-rewrite authority. A later mutation increment must re-prove both repository identity and the exact remote head immediately before replacement and fail closed on any divergence.
 
 ## Safety boundary
 
