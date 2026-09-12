@@ -49,7 +49,7 @@ def _blocking_consumer(
         del source
         captured_notify.append(notify)
         ready()
-        stop.wait(timeout=5.0)
+        stop.wait()
         return 0
 
     return consume
@@ -126,7 +126,7 @@ def test_service_rechecks_source_after_transport_readiness(tmp_path: Path) -> No
         notify.append(event_notify)
         (source / "scripts.yaml").write_text("{}\n")
         ready()
-        stop.wait(timeout=5.0)
+        stop.wait()
         return 0
 
     def processor(
