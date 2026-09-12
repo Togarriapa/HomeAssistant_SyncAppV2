@@ -21,6 +21,10 @@ That timestamp choice means this bounded collector is a current diagnostic snaps
 
 `collect_and_enqueue_supervisor_logs()` does not create an artifact until **both** required source requests succeed. It then uses the existing atomic `build_log_artifact()` primitive and idempotently enqueues that exact artifact ID into the durable `logs` work lane. Publication remains asynchronous and guarded by the existing logs synchronization/retrigger transaction.
 
+Normal collection is orchestrated by the
+[routine log service](routine-log-service.md). Its monotonic deadline and bounded
+owner-loop tick remain independent of Retrigger recovery.
+
 A source failure therefore creates neither a mixed partial artifact nor durable publication work. Repeating an identical collection with the same reference time produces the same artifact/work identity.
 
 This capability does not modify Home Assistant configuration, perform candidate validation, create a deployment backup, Apply candidate bytes, alter rollback behavior, or change the Retrigger Work Cron Job schedule. Git retention still does not provide forensic secure deletion; the README's history-retention requirement remains a separate concern.

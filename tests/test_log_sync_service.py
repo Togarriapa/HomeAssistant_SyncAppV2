@@ -4,9 +4,15 @@ from typing import cast
 
 import pytest
 from ha_syncapp import log_sync_service as log_service
-from ha_syncapp.log_collection import LogCollectionResult
+from ha_syncapp import log_sync_work
+from ha_syncapp.log_collection import (
+    LogCollectionResult,
+    collect_and_enqueue_supervisor_logs,
+)
+from ha_syncapp.log_sync import LogSyncError
 from ha_syncapp.log_sync_process import LogSyncProcessResult
 from ha_syncapp.state import StateStore
+from ha_syncapp.supervisor_logs import SupervisorLogResponse
 
 TARGET = "Owner/Home"
 GITHUB_TOKEN = "github-secret-sentinel"
@@ -244,3 +250,53 @@ def test_log_service_wraps_processing_failure_after_collection(
             service.tick(60.0)
     finally:
         store.__exit__(None, None, None)
+
+
+def test_log_service_transient_publication_failure_hands_off_durable_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _opened_store(tmp_path)
+    artifact_root = tmp_path / "log-artifacts"
+    artifact_root.mkdir(mode=0o700)
+
+    def collect_with_bounded_transport(
+        state: StateStore,
+        root: Path,
+        target: str,
+        *,
+        reference_time: datetime,
+        token: str | None = None,
+    ) -> LogCollectionResult:
+        def transport(*args: object) -> SupervisorLogResponse:
+            return SupervisorLogResponse(200, "text/plain", b"bounded log line\n")
+
+        return collect_and_enqueue_supervisor_logs(
+            state,
+            root,
+            target,
+            reference_time=reference_time,
+            token=token,
+            transport=transport,
+        )
+
+    def fail_publication(*args: object, **kwargs: object) -> None:
+        raise LogSyncError("transient transport sentinel")
+
+    monkeypatch.setattr(
+        log_service,
+        "collect_and_enqueue_supervisor_logs",
+        collect_with_bounded_transport,
+    )
+    monkeypatch.setattr(log_sync_work, "synchronize_log_artifact", fail_publication)
+    service = _service(tmp_path, store)
+    try:
+        service.start(0.0)
+        result = service.tick(60.0)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.collection is not None
+    assert result.processed is not None
+    assert result.processed.processed is not None
+    assert result.processed.processed.work.status == "retry"

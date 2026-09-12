@@ -24,6 +24,7 @@ from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
+from .log_sync_service import LogSyncService, LogSyncServiceError
 from .retrigger_cycle import RetriggerCycleError, run_retrigger_cycle
 from .retrigger_ipc import (
     RetriggerIPCError,
@@ -38,6 +39,7 @@ from .state import AlreadyRunning, StateError, StateStore
 
 _LOCAL_CHANGE_QUIET_SECONDS = 1.0
 _DATABASE_SYNC_INTERVAL_SECONDS = 60.0 * 60.0
+_LOG_SYNC_INTERVAL_SECONDS = 60.0 * 60.0
 
 
 def emit(event: str, *, level: str = "info", **fields: object) -> None:
@@ -142,14 +144,27 @@ def _runtime_work_roots(data_dir: Path) -> tuple[Path, Path, Path]:
     return roots
 
 
+def _log_work_roots(data_dir: Path) -> tuple[Path, Path, Path]:
+    """Return verified app-owned roots for immutable log artifacts and Git metadata."""
+    protected = (data_dir / "syncapp").resolve(strict=True)
+    work = protected / "work"
+    roots = (
+        work / "log-artifacts",
+        work / "log-snapshots",
+        work / "log-workspaces",
+    )
+    for root in roots:
+        _ensure_private_work_directory(protected, root)
+    return roots
+
+
 def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
     protected = (data_dir / "syncapp").resolve(strict=True)
     home = home_assistant_root.resolve(strict=True)
     work = protected / "work"
     if protected == home or protected in home.parents or home in protected.parents:
         raise RetriggerCycleError("Retrigger protected work root overlaps Home Assistant source")
-    log_artifact_root = work / "log-artifacts"
-    _ensure_private_work_directory(protected, log_artifact_root)
+    log_artifact_root, log_snapshot_root, log_workspace_root = _log_work_roots(data_dir)
     return (
         work / "main-snapshots",
         work / "main-workspaces",
@@ -160,8 +175,8 @@ def _work_roots(data_dir: Path, home_assistant_root: Path) -> tuple[Path, ...]:
         work / "runtime-snapshots",
         work / "runtime-workspaces",
         log_artifact_root,
-        work / "log-snapshots",
-        work / "log-workspaces",
+        log_snapshot_root,
+        log_workspace_root,
     )
 
 
@@ -346,6 +361,32 @@ def _runtime_event_bridge_if_configured(
     )
 
 
+def _log_sync_service_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> LogSyncService | None:
+    """Build periodic log collection only for a trusted configured Repo B."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise LogSyncServiceError("logs service repository is not trusted")
+    try:
+        artifact_root, snapshot_root, workspace_root = _log_work_roots(data_dir)
+    except (RetriggerCycleError, OSError) as exc:
+        raise LogSyncServiceError("logs service work roots are unavailable") from exc
+    return LogSyncService(
+        store,
+        artifact_root,
+        snapshot_root,
+        workspace_root,
+        config.repo_b,
+        config.github_token,
+        core_token=os.environ.get("SUPERVISOR_TOKEN"),
+        interval_seconds=_LOG_SYNC_INTERVAL_SECONDS,
+    )
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -421,6 +462,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         local_change_service: LocalChangeService | None = None
         database_sync_service: DatabaseSyncService | None = None
         runtime_bridge: RuntimeEventBridge | None = None
+        log_sync_service: LogSyncService | None = None
         if not stop.requested:
             _run_startup_local_if_configured(store, config, data_dir)
             if not stop.requested:
@@ -435,6 +477,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 _run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
                 runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
+            if not stop.requested:
+                log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
         mode = (
@@ -442,11 +486,13 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if local_change_service is not None
             or database_sync_service is not None
             or runtime_bridge is not None
+            or log_sync_service is not None
             else "passive"
         )
         local_change_started = False
         database_sync_started = False
         runtime_bridge_started = False
+        log_sync_started = False
 
         try:
             if not stop.requested and local_change_service is not None:
@@ -458,6 +504,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if not stop.requested and runtime_bridge is not None:
                 runtime_bridge.start()
                 runtime_bridge_started = True
+            if not stop.requested and log_sync_service is not None:
+                log_sync_service.start(time.monotonic())
+                log_sync_started = True
             with RetriggerServer(socket_path) as retrigger_server:
                 fields = {**asdict(boot), "version": __version__, "mode": mode}
                 level = "warning" if boot.interrupted_run_id else "info"
@@ -487,6 +536,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         database_sync_service.tick(now)
                     if runtime_bridge_started and runtime_bridge is not None:
                         runtime_bridge.tick()
+                    if log_sync_started and log_sync_service is not None:
+                        log_sync_service.tick(now)
                     if now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
@@ -501,6 +552,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if runtime_bridge_started and runtime_bridge is not None:
                 with suppress(RuntimeEventBridgeError):
                     runtime_bridge.stop()
+            if log_sync_started and log_sync_service is not None:
+                with suppress(LogSyncServiceError):
+                    log_sync_service.stop()
             raise
 
         if local_change_started and local_change_service is not None:
@@ -509,6 +563,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             database_sync_service.stop()
         if runtime_bridge_started and runtime_bridge is not None:
             runtime_bridge.stop()
+        if log_sync_started and log_sync_service is not None:
+            log_sync_service.stop()
         store.finish_run()
         if config.log_level == "info":
             emit("service_stopped", run_id=boot.run_id)
@@ -590,6 +646,9 @@ def main() -> int:
     except DatabaseSyncServiceError:
         emit("service_failed", level="error", reason="database_sync_service_failed")
         return 11
+    except LogSyncServiceError:
+        emit("service_failed", level="error", reason="log_sync_service_failed")
+        return 12
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1
