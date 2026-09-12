@@ -71,7 +71,9 @@ def validate_trusted_database_history_evidence(
     if not history:
         raise DatabaseHistoryEvidenceError("trusted database history must not be empty")
     if history[0].sha != branch_head.commit_sha:
-        raise DatabaseHistoryEvidenceError("trusted database history does not match the verified head")
+        raise DatabaseHistoryEvidenceError(
+            "trusted database history does not match the verified head"
+        )
 
     for index, record in enumerate(history):
         if not isinstance(record.sha, str) or _SHA_PATTERN.fullmatch(record.sha) is None:
