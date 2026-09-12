@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
@@ -39,7 +39,7 @@ def _run_git(
     cwd: Path,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # nosec B603
         command,
         cwd=cwd,
         check=False,
