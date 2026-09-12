@@ -58,6 +58,10 @@ def _trusted_repo(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
         return RepoIdentity(target=TARGET, repository_id=123)
 
     monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
+    monkeypatch.setattr(
+        "ha_syncapp.__main__._local_change_service_if_configured",
+        lambda store, config, data_dir: None,
+    )
 
 
 def test_configured_service_starts_bridge_after_trust_and_normal_bootstraps(
