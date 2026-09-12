@@ -24,6 +24,17 @@ Retention planning is a side-effect-free classification step and is restricted t
 - The newest valid snapshot is always retained, even when every supplied snapshot is older than the configured cutoff.
 - The planner cannot target `main`, `candidate`, `runtime`, or `logs`.
 
-The planner performs no filesystem deletion, Git operation, network operation, Repo B ref mutation, history rewrite, or Home Assistant/Recorder mutation. Any cleanup or history-maintenance transport remains a separate future increment and must be independently guarded and re-audited before gaining mutation authority.
+## Trusted history evidence
+
+Before a future cleanup or history-maintenance capability may rely on a retention plan, the plan must be bound to complete history evidence for one already verified private Repo B `database` head.
+
+- The trusted branch head carries the configured repository target, pinned repository ID, exact `database` branch and expected head SHA.
+- History is non-empty and its first record must equal that exact verified head.
+- Evidence must describe a complete linear parent chain through the root. Merge commits, broken parent links and truncated history fail closed.
+- History input is bounded to the same maximum evidence set used by the deterministic planner.
+- Each validated commit becomes immutable snapshot evidence using its commit SHA and commit timestamp, then the existing retention planner determines the retained/prunable partition.
+- The resulting trusted evidence keeps the repository identity and expected head alongside the retention plan so later capabilities cannot detach a plan from the history it classified.
+
+This evidence step is still side-effect free. It performs no Git/network operation, ref mutation, history rewrite, filesystem deletion, database restore, or Home Assistant mutation. A future mutation-capable retention transport must be a separate reviewed increment and must re-prove its target and current head immediately before destructive history maintenance.
 
 Candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging and rollback remain separate controlled deployment capabilities. The Retrigger Work Cron Job remains enabled and independent.
