@@ -37,4 +37,15 @@ Before a future cleanup or history-maintenance capability may rely on a retentio
 
 This evidence step is still side-effect free. It performs no Git/network operation, ref mutation, history rewrite, filesystem deletion, database restore, or Home Assistant mutation. A future mutation-capable retention transport must be a separate reviewed increment and must re-prove its target and current head immediately before destructive history maintenance.
 
+## Read-only history collection
+
+History collection re-verifies the configured private repository ID and exact `database` branch head before requesting commit metadata. It then reads from that immutable head SHA, never from the moving branch name.
+
+- GitHub responses and the complete evidence set are bounded before retention planning.
+- Only commit SHA, committer timestamp and parent SHA metadata are retained.
+- Duplicate JSON fields, malformed responses, invalid timestamps and transport failures fail closed with sanitized errors.
+- Complete-history validation and retention classification remain delegated to the trusted-evidence and deterministic-planning layers.
+
+The reader has no Git push, ref-update, deletion, restore, database-write, or Home Assistant mutation capability.
+
 Candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging and rollback remain separate controlled deployment capabilities. The Retrigger Work Cron Job remains enabled and independent.
