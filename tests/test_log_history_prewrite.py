@@ -88,6 +88,34 @@ def test_prewrite_rejects_moved_remote_head(monkeypatch: pytest.MonkeyPatch) -> 
         reprove_log_history_prewrite(evidence=_evidence(), token="secret-token")
 
 
+@pytest.mark.parametrize(
+    ("target", "repository_id", "branch"),
+    [
+        ("other/private-repo", 123, "logs"),
+        ("owner/private-repo", 999, "logs"),
+        ("owner/private-repo", 123, "main"),
+    ],
+)
+def test_prewrite_rejects_changed_remote_identity_or_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    repository_id: int,
+    branch: str,
+) -> None:
+    monkeypatch.setattr(
+        "ha_syncapp.log_history_prewrite.fetch_trusted_branch_head",
+        lambda *args, **kwargs: BranchHead(
+            target=target,
+            repository_id=repository_id,
+            branch=branch,
+            commit_sha=_sha(3),
+        ),
+    )
+
+    with pytest.raises(LogHistoryPrewriteError, match="changed before replacement"):
+        reprove_log_history_prewrite(evidence=_evidence(), token="secret-token")
+
+
 def test_prewrite_sanitizes_repository_verification_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
