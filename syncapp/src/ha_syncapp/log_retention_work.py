@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import UTC
 
 from .log_history_evidence import TrustedLogHistoryEvidence
 from .log_history_retention import LOG_HISTORY_BRANCH
@@ -47,7 +48,7 @@ def log_retention_work_key(evidence: TrustedLogHistoryEvidence) -> str:
             "branch": LOG_HISTORY_BRANCH,
             "head": evidence.expected_head_sha,
             "pruned": evidence.plan.pruned_shas,
-            "reference_time": evidence.plan.reference_time.astimezone().isoformat(),
+            "reference_time": evidence.plan.reference_time.astimezone(UTC).isoformat(),
             "repository_id": evidence.repository_id,
             "retained": evidence.plan.retained_shas,
             "retention_days": 30,
