@@ -11,6 +11,7 @@ from ha_syncapp.database_history_evidence import (
 )
 from ha_syncapp.database_history_prewrite import (
     DatabaseHistoryPrewriteError,
+    TrustedDatabaseHistoryPrewrite,
     reprove_database_history_prewrite,
 )
 from ha_syncapp.github_repo import BranchHead, RepositoryVerificationError
@@ -38,6 +39,16 @@ def _evidence() -> TrustedDatabaseHistoryEvidence:
         reference_time=REFERENCE,
         retention_days=7,
     )
+
+
+def test_prewrite_proof_cannot_be_constructed_directly() -> None:
+    with pytest.raises(TypeError, match="reprove_database_history_prewrite"):
+        TrustedDatabaseHistoryPrewrite(
+            target="owner/private-repo",
+            repository_id=123,
+            branch="database",
+            expected_head_sha=_sha(3),
+        )
 
 
 def test_prewrite_reproves_exact_repository_and_database_head(
