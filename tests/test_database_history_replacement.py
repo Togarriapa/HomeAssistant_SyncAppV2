@@ -45,12 +45,8 @@ def _evidence(
             commit_sha=_sha(head_value),
         ),
         records=(
-            DatabaseHistoryRecord(
-                _sha(head_value), REFERENCE - timedelta(days=1), (_sha(middle),)
-            ),
-            DatabaseHistoryRecord(
-                _sha(middle), REFERENCE - timedelta(days=5), (_sha(root),)
-            ),
+            DatabaseHistoryRecord(_sha(head_value), REFERENCE - timedelta(days=1), (_sha(middle),)),
+            DatabaseHistoryRecord(_sha(middle), REFERENCE - timedelta(days=5), (_sha(root),)),
             DatabaseHistoryRecord(_sha(root), REFERENCE - timedelta(days=root_age), ()),
         ),
         reference_time=REFERENCE,
