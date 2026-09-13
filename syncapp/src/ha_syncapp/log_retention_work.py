@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from .github_repo import RepositoryVerificationError, fetch_trusted_branch_head
 from .log_history_evidence import TrustedLogHistoryEvidence
 from .log_history_prewrite import LogHistoryPrewriteError, reprove_log_history_prewrite
 from .log_history_reader import LogHistoryReadError, fetch_trusted_log_history_evidence
@@ -40,6 +41,7 @@ class LogRetentionWorkDisposition(StrEnum):
 
     NO_CHANGE = "no_change"
     REPLACED = "replaced"
+    STALE = "stale"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,10 +118,7 @@ def discover_log_retention_work(
             expected_id=repository_id,
             reference_time=reference_time,
         )
-        if (
-            evidence.target.casefold() != target.casefold()
-            or evidence.repository_id != repository_id
-        ):
+        if evidence.target.casefold() != target.casefold() or evidence.repository_id != repository_id:
             raise LogRetentionWorkError("logs retention evidence describes another repository")
         return store.enqueue_work(
             LOG_RETENTION_WORK_KIND,
@@ -198,6 +197,37 @@ def _execute_claimed(
         repository_id = store.repository_id(target)
         if repository_id is None:
             return _fail(store, item, transient=False, now=reference_time)
+
+        intent = store.log_retention_intent(item.work_key)
+        if intent is not None:
+            if intent.target.casefold() != target.casefold() or intent.repository_id != repository_id:
+                return _fail(store, item, transient=False, now=reference_time)
+            current = fetch_trusted_branch_head(
+                target,
+                token,
+                expected_id=repository_id,
+                branch=LOG_HISTORY_BRANCH,
+            )
+            if current.commit_sha == intent.replacement_head_sha:
+                baseline = store.synchronization_baseline(target, LOG_HISTORY_BRANCH)
+                if baseline is None or baseline.snapshot_id != intent.snapshot_id:
+                    return _fail(store, item, transient=False, now=reference_time)
+                if baseline.commit_sha == intent.expected_head_sha:
+                    store.record_synchronization_baseline(
+                        target,
+                        LOG_HISTORY_BRANCH,
+                        intent.snapshot_id,
+                        intent.replacement_head_sha,
+                        synchronized_at=reference_time,
+                    )
+                elif baseline.commit_sha != intent.replacement_head_sha:
+                    return _fail(store, item, transient=False, now=reference_time)
+                completed = store.complete_work(item, now=reference_time)
+                return LogRetentionWorkResult(completed, LogRetentionWorkDisposition.REPLACED)
+            if current.commit_sha != intent.expected_head_sha:
+                blocked = store.fail_work(item, transient=False, now=reference_time)
+                return LogRetentionWorkResult(blocked, LogRetentionWorkDisposition.STALE)
+
         evidence = fetch_trusted_log_history_evidence(
             target=target,
             token=token,
@@ -205,6 +235,16 @@ def _execute_claimed(
             reference_time=item.created_at,
         )
         if item.work_key != log_retention_work_key(evidence):
+            blocked = store.fail_work(item, transient=False, now=reference_time)
+            return LogRetentionWorkResult(blocked, LogRetentionWorkDisposition.STALE)
+
+        baseline = store.synchronization_baseline(target, LOG_HISTORY_BRANCH)
+        if (
+            baseline is None
+            or baseline.target.casefold() != target.casefold()
+            or baseline.branch != LOG_HISTORY_BRANCH
+            or baseline.commit_sha != evidence.expected_head_sha
+        ):
             return _fail(store, item, transient=False, now=reference_time)
 
         prewrite = reprove_log_history_prewrite(evidence=evidence, token=token)
@@ -222,22 +262,35 @@ def _execute_claimed(
             authorization=authorization,
             repository=repository,
         )
+        persisted_intent = store.record_log_retention_intent(
+            item,
+            target,
+            repository_id,
+            authorization.expected_head_sha,
+            artifact.replacement_head_sha,
+            baseline.snapshot_id,
+            recorded_at=item.created_at,
+        )
+        if persisted_intent.replacement_head_sha != artifact.replacement_head_sha:
+            return _fail(store, item, transient=False, now=reference_time)
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
             token=token,
+        )
+        store.record_synchronization_baseline(
+            target,
+            LOG_HISTORY_BRANCH,
+            baseline.snapshot_id,
+            artifact.replacement_head_sha,
+            synchronized_at=reference_time,
         )
         completed = store.complete_work(item, now=reference_time)
         return LogRetentionWorkResult(completed, LogRetentionWorkDisposition.REPLACED)
     except LogHistoryReplacementTransportError as error:
         return _fail(store, item, transient=error.retryable, now=reference_time)
     except LogHistoryReadError as error:
-        return _fail(
-            store,
-            item,
-            transient=_read_failure_is_transient(error),
-            now=reference_time,
-        )
+        return _fail(store, item, transient=_read_failure_is_transient(error), now=reference_time)
     except LogHistoryPrewriteError as error:
         return _fail(
             store,
@@ -246,14 +299,11 @@ def _execute_claimed(
             now=reference_time,
         )
     except LogRetentionStagingError as error:
-        return _fail(
-            store,
-            item,
-            transient=_staging_failure_is_transient(error),
-            now=reference_time,
-        )
+        return _fail(store, item, transient=_staging_failure_is_transient(error), now=reference_time)
     except LogHistoryReplacementAuthorizationError:
         return _fail(store, item, transient=False, now=reference_time)
+    except RepositoryVerificationError as error:
+        return _fail(store, item, transient=_repository_failure_is_transient(error), now=reference_time)
     except StateError:
         raise LogRetentionWorkError("logs retention outcome could not be recorded") from None
     finally:
@@ -276,6 +326,15 @@ def _fail(
 
 
 def _read_failure_is_transient(error: LogHistoryReadError) -> bool:
+    message = str(error)
+    return (
+        "transport" in message
+        or "HTTP 429" in message
+        or any(f"HTTP {status}" in message for status in range(500, 600))
+    )
+
+
+def _repository_failure_is_transient(error: RepositoryVerificationError) -> bool:
     message = str(error)
     return (
         "transport" in message
