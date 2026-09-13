@@ -21,11 +21,13 @@ For every retained snapshot commit, oldest to newest, the builder:
 5. rewrites only the parent link, making the oldest retained commit a new root and each newer retained commit point to the previously rebuilt retained commit;
 6. writes only generated commit objects into the staging repository object database, without changing any local or remote ref.
 
-The resulting head is returned only inside a sealed `DatabaseHistoryReplacementArtifact` bound to the staging repository, Repo B target and repository ID, `database` branch, expected pre-mutation head and retained commit set.
+The resulting head is returned inside a `DatabaseHistoryReplacementArtifact` bound to the staging repository, Repo B target and repository ID, `database` branch, expected pre-mutation head and retained commit set. The object itself is not treated as a security boundary: callers can forge Python objects, so publication authority is established again from Git object content immediately before mutation.
 
 ## Mutation-time proof and atomic publication
 
-Immediately before publication, the transport re-fetches authenticated GitHub metadata through `fetch_trusted_branch_head()` and therefore re-proves that Repo B is private, has the pinned repository ID, and still has the exact authorized `database` head.
+Before any remote mutation, the transport independently re-reads both the authorized original retained commits and the proposed rebuilt commit chain from the staging Git object database. It requires every proposed commit tree to equal the corresponding authorized snapshot tree, requires the original retained ancestry to match the authorization, requires the rebuilt history to remain linear, and requires the oldest retained snapshot to be a new root. A valid-looking arbitrary SHA or a forged `DatabaseHistoryReplacementArtifact` therefore cannot gain publication authority.
+
+After that local proof, immediately before publication, the transport re-fetches authenticated GitHub metadata through `fetch_trusted_branch_head()` and therefore re-proves that Repo B is private, has the pinned repository ID, and still has the exact authorized `database` head.
 
 Only then may the artifact be published. The push targets exactly `refs/heads/database` and uses `--force-with-lease=refs/heads/database:<expected-head>`. A concurrent branch update therefore fails closed. The transport never writes `main`, `candidate`, `runtime`, `logs`, Home Assistant configuration, or Recorder files.
 
