@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from .core_runtime_bundle import CoreRuntimeBundleError, collect_core_runtime_bundle
+from .core_runtime_bundle import (
+    CoreRuntimeBundleError,
+    collect_core_runtime_bundle,
+    merge_runtime_inventory_inputs,
+)
+from .retrigger_runtime_status import (
+    RetriggerRuntimeStatusError,
+    collect_retrigger_runtime_inventory,
+)
 from .runtime_sync_work import (
     RuntimeSyncWorkError,
     RuntimeSyncWorkResult,
@@ -53,8 +62,13 @@ def run_runtime_sync_process(
             )
 
         try:
-            inventory = collect_core_runtime_bundle(token=core_token)
-        except CoreRuntimeBundleError:
+            core_inventory = collect_core_runtime_bundle(token=core_token)
+            recovery_inventory = collect_retrigger_runtime_inventory(
+                store,
+                reference_time=datetime.now(UTC),
+            )
+            inventory = merge_runtime_inventory_inputs(core_inventory, recovery_inventory)
+        except (CoreRuntimeBundleError, RetriggerRuntimeStatusError):
             retry = store.fail_work(item, transient=True)
             return RuntimeSyncProcessResult(
                 processed=RuntimeSyncWorkResult(retry, None),
