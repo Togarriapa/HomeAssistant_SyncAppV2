@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 import pytest
-
 from ha_syncapp.retrigger_schedule import RetriggerSchedule, RetriggerScheduleError
 
 
