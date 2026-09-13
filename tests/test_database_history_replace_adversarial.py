@@ -122,3 +122,59 @@ def test_valid_looking_forged_sha_cannot_gain_database_publication_authority(
     assert caught.value.kind is DatabaseHistoryReplacementFailureKind.INVALID
     assert not caught.value.retryable
     assert pushed is False
+
+
+def test_same_tree_forged_commit_metadata_cannot_gain_publication_authority(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    authorization = _authorization()
+    artifact = _forged_artifact(tmp_path)
+
+    def runner(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "push" in command:
+            raise AssertionError("forged commit metadata reached publication")
+        if "cat-file" in command and command[-1] == EXPECTED:
+            payload = "\n".join(
+                (
+                    f"tree {AUTHORIZED_TREE}",
+                    f"parent {PRUNED}",
+                    "author A <a@b> 1 +0000",
+                    "committer A <a@b> 1 +0000",
+                    "",
+                    "authorized message",
+                    "",
+                )
+            )
+            return subprocess.CompletedProcess(command, 0, payload, "")
+        if "cat-file" in command and command[-1] == FORGED:
+            payload = "\n".join(
+                (
+                    f"tree {AUTHORIZED_TREE}",
+                    "author Attacker <x@y> 1 +0000",
+                    "committer Attacker <x@y> 1 +0000",
+                    "",
+                    "forged message",
+                    "",
+                )
+            )
+            return subprocess.CompletedProcess(command, 0, payload, "")
+        raise AssertionError(command)
+
+    with (
+        patch("ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head") as fetch,
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="artifact is invalid",
+        ),
+    ):
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
+
+    fetch.assert_not_called()
