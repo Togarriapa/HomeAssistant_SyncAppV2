@@ -15,6 +15,7 @@ from ha_syncapp.log_history_replace_transport import (
 from ha_syncapp.log_history_replacement import LogHistoryReplacementAuthorization
 
 EXPECTED = "1" * 40
+TOKEN = "github-secret-sentinel"
 
 
 def _git(repository: Path, *args: str, input_text: str | None = None) -> str:
@@ -132,30 +133,25 @@ def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
+            token=TOKEN,
             timeout=12,
             runner=_delegating_runner(calls=calls),
         )
         is True
     )
-    assert calls == [
-        (
-            (
-                shutil.which("git"),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "credential.helper=",
-                "push",
-                "--porcelain",
-                "--no-verify",
-                "https://github.com/owner/private-repo.git",
-                f"{artifact.replacement_head_sha}:refs/heads/logs",
-                (f"--force-with-lease=refs/heads/logs:{authorization.expected_head_sha}"),
-            ),
-            repository,
-            12.0,
-        )
-    ]
+    assert len(calls) == 1
+    command, cwd, timeout = calls[0]
+    assert cwd == repository
+    assert timeout == 12.0
+    assert command[0] == shutil.which("git")
+    assert TOKEN not in " ".join(command)
+    assert "credential.helper=" in command
+    assert any(value.startswith("core.askPass=") for value in command)
+    assert command[-3:] == (
+        "https://github.com/owner/private-repo.git",
+        f"{artifact.replacement_head_sha}:refs/heads/logs",
+        f"--force-with-lease=refs/heads/logs:{authorization.expected_head_sha}",
+    )
 
 
 @pytest.mark.parametrize(
@@ -273,6 +269,7 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
+            token=TOKEN,
             runner=runner,
         )
 
@@ -294,6 +291,7 @@ def test_transport_exception_is_sanitized(tmp_path: Path) -> None:
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
+            token=TOKEN,
             runner=runner,
         )
 
