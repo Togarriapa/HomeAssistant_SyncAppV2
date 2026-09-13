@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+
 # Fixed interpreter/module argv only; no shell or user-selected executable.
 import subprocess  # nosec B404
 import sys
