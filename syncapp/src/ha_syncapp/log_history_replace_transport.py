@@ -7,6 +7,7 @@ import shutil
 import stat
 import subprocess  # nosec B404
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -19,6 +20,7 @@ LOG_HISTORY_BRANCH = "logs"
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_TOKEN = re.compile(r"^[!-~]{1,512}$")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
@@ -84,9 +86,21 @@ def _run_git(
     cwd: Path,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
+    executable = command[0]
+    environment = {
+        "PATH": os.path.dirname(executable),
+        "HOME": str(cwd),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+        "LC_ALL": "C",
+    }
     return subprocess.run(  # nosec B603
         command,
         cwd=cwd,
+        env=environment,
+        stdin=subprocess.DEVNULL,
         check=False,
         capture_output=True,
         text=True,
@@ -153,6 +167,7 @@ def replace_logs_history(
     authorization: LogHistoryReplacementAuthorization,
     artifact: LogHistoryReplacementArtifact | None = None,
     repository: Path | None = None,
+    token: str = "",
     timeout: float = 30.0,
     runner: CommandRunner = _run_git,
 ) -> bool:
@@ -169,6 +184,7 @@ def replace_logs_history(
         if supplied != artifact.repository:
             raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
     timeout_value = _validate_timeout(timeout)
+    token_value = _validate_token(token)
     _validate_artifact_history(
         authorization=authorization,
         artifact=artifact,
@@ -178,12 +194,15 @@ def replace_logs_history(
 
     executable = _git_executable()
     ref = f"refs/heads/{LOG_HISTORY_BRANCH}"
+    askpass, token_file = _create_askpass(artifact.repository, token_value)
     command = (
         executable,
         "-c",
         f"core.hooksPath={os.devnull}",
         "-c",
         "credential.helper=",
+        "-c",
+        f"core.askPass={askpass}",
         "push",
         "--porcelain",
         "--no-verify",
@@ -192,12 +211,18 @@ def replace_logs_history(
         f"--force-with-lease={ref}:{authorization.expected_head_sha}",
     )
     try:
-        result = runner(command, cwd=artifact.repository, timeout=timeout_value)
-    except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
-        raise LogHistoryReplacementTransportError(
-            "logs history replacement transport failed",
-            kind=LogHistoryReplacementFailureKind.TRANSIENT,
-        ) from None
+        try:
+            result = runner(command, cwd=artifact.repository, timeout=timeout_value)
+        except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
+            raise LogHistoryReplacementTransportError(
+                "logs history replacement transport failed",
+                kind=LogHistoryReplacementFailureKind.TRANSIENT,
+            ) from None
+    finally:
+        with suppress(OSError):
+            askpass.unlink(missing_ok=True)
+        with suppress(OSError):
+            token_file.unlink(missing_ok=True)
     if not isinstance(result, subprocess.CompletedProcess):
         raise LogHistoryReplacementTransportError("logs history replacement transport failed")
     if result.returncode != 0:
@@ -496,6 +521,51 @@ def _validate_timeout(timeout: float) -> float:
     ):
         raise LogHistoryReplacementTransportError("logs replacement timeout is invalid")
     return float(timeout)
+
+
+def _validate_token(token: str) -> str:
+    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
+        raise LogHistoryReplacementTransportError("GitHub authentication is invalid")
+    return token
+
+
+def _create_askpass(repository: Path, token: str) -> tuple[Path, Path]:
+    helper = repository / ".syncapp-log-push-askpass"
+    token_file = helper.with_suffix(".token")
+    script = """#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\\n' 'x-access-token' ;;
+  *) IFS= read -r token < "${0%/*}/.syncapp-log-push-askpass.token"; printf '%s\\n' "$token" ;;
+esac
+"""
+    try:
+        token_descriptor = os.open(
+            token_file,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(token_descriptor, "w", encoding="utf-8") as handle:
+            handle.write(token)
+            handle.flush()
+            os.fsync(handle.fileno())
+        helper_descriptor = os.open(
+            helper,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o700,
+        )
+        with os.fdopen(helper_descriptor, "w", encoding="utf-8") as handle:
+            handle.write(script)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        with suppress(OSError):
+            helper.unlink(missing_ok=True)
+        with suppress(OSError):
+            token_file.unlink(missing_ok=True)
+        raise LogHistoryReplacementTransportError(
+            "logs replacement authentication could not be prepared"
+        ) from None
+    return helper, token_file
 
 
 def _repository_url(target: str) -> str:
