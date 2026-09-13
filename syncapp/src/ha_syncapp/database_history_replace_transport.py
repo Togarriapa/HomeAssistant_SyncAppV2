@@ -177,7 +177,10 @@ def replace_database_history(
         return False
 
     _validate_artifact(authorization=authorization, artifact=artifact)
-    assert artifact is not None
+    if artifact is None:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement artifact is invalid"
+        )
     if repository is not None:
         supplied_repository = _validate_repository_path(repository)
         if supplied_repository != artifact.repository:
