@@ -16,7 +16,7 @@ class DatabaseHistoryReplacementAuthorizationError(ValueError):
     """Raised when database history replacement cannot be authorized safely."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class DatabaseHistoryReplacementAuthorization:
     """Side-effect-free authorization for one exact database retention replacement."""
 
@@ -26,6 +26,12 @@ class DatabaseHistoryReplacementAuthorization:
     expected_head_sha: str
     retained_shas: tuple[str, ...]
     pruned_shas: tuple[str, ...]
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise TypeError(
+            "DatabaseHistoryReplacementAuthorization must be produced by "
+            "authorize_database_history_replacement()"
+        )
 
     @property
     def requires_replacement(self) -> bool:
@@ -113,11 +119,28 @@ def authorize_database_history_replacement(
             "trusted database retention plan is inconsistent"
         )
 
-    return DatabaseHistoryReplacementAuthorization(
+    return _database_history_replacement_authorization(
         target=evidence.target,
         repository_id=evidence.repository_id,
-        branch=DATABASE_BRANCH,
         expected_head_sha=evidence.expected_head_sha,
         retained_shas=retained,
         pruned_shas=pruned,
     )
+
+
+def _database_history_replacement_authorization(
+    *,
+    target: str,
+    repository_id: int,
+    expected_head_sha: str,
+    retained_shas: tuple[str, ...],
+    pruned_shas: tuple[str, ...],
+) -> DatabaseHistoryReplacementAuthorization:
+    authorization = object.__new__(DatabaseHistoryReplacementAuthorization)
+    object.__setattr__(authorization, "target", target)
+    object.__setattr__(authorization, "repository_id", repository_id)
+    object.__setattr__(authorization, "branch", DATABASE_BRANCH)
+    object.__setattr__(authorization, "expected_head_sha", expected_head_sha)
+    object.__setattr__(authorization, "retained_shas", retained_shas)
+    object.__setattr__(authorization, "pruned_shas", pruned_shas)
+    return authorization
