@@ -9,9 +9,9 @@ from ha_syncapp.database_history_evidence import (
     TrustedDatabaseHistoryEvidence,
     validate_trusted_database_history_evidence,
 )
+from ha_syncapp.database_history_prewrite import TrustedDatabaseHistoryPrewrite
 from ha_syncapp.database_history_replacement import (
     DatabaseHistoryReplacementAuthorizationError,
-    TrustedDatabaseHistoryPrewrite,
     authorize_database_history_replacement,
 )
 from ha_syncapp.github_repo import BranchHead
