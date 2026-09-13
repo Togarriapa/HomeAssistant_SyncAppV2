@@ -32,7 +32,7 @@ def _store(tmp_path: Path) -> StateStore:
     return store
 
 
-def _evidence():
+def _evidence(*, reference_time: datetime = REFERENCE):
     return validate_trusted_log_history_evidence(
         branch_head=BranchHead(TARGET, 123, "logs", HEAD),
         records=(
@@ -40,7 +40,7 @@ def _evidence():
             LogHistoryRecord(MID, REFERENCE - timedelta(days=10), (ROOT,)),
             LogHistoryRecord(ROOT, REFERENCE - timedelta(days=45), ()),
         ),
-        reference_time=REFERENCE,
+        reference_time=reference_time,
     )
 
 
@@ -54,6 +54,15 @@ def test_log_retention_work_identity_is_deterministic_and_head_bound() -> None:
     assert first == second
     assert first.startswith(f"{HEAD}:")
     assert len(first) == 105
+
+
+def test_same_head_and_retention_outcome_converge_across_discovery_times() -> None:
+    first = _evidence(reference_time=REFERENCE)
+    later = _evidence(reference_time=REFERENCE + timedelta(hours=1))
+
+    assert first.plan.retained_shas == later.plan.retained_shas
+    assert first.plan.pruned_shas == later.plan.pruned_shas
+    assert log_retention_work_key(first) == log_retention_work_key(later)
 
 
 def test_log_retention_work_identity_rejects_non_logs_evidence() -> None:
