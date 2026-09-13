@@ -43,6 +43,7 @@ _ANALYSIS_DEFAULTS: dict[str, object] = {
     "orphan_entities": [],
     "orphan_devices": [],
     "integration_health": {},
+    "recovery": {},
 }
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{64}$")
