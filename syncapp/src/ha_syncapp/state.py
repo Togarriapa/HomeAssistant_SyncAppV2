@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -71,6 +71,19 @@ class RecoveryWorkEvidence:
     created_at: datetime
     updated_at: datetime
     next_attempt_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseRetentionIntent:
+    """Non-privileged durable evidence for crash-safe ref-update reconciliation."""
+
+    work_key: str
+    target: str
+    repository_id: int
+    expected_head_sha: str
+    replacement_head_sha: str
+    snapshot_id: str
+    recorded_at: datetime
 
 
 @dataclass(frozen=True)
@@ -293,6 +306,16 @@ class StateStore:
             "UNIQUE (repository_id, candidate_sha))"
         )
 
+    @staticmethod
+    def _create_database_retention_intent_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS database_retention_intent ("
+            "work_key TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "expected_head_sha TEXT NOT NULL, replacement_head_sha TEXT NOT NULL, "
+            "snapshot_id TEXT NOT NULL, recorded_at TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -334,6 +357,7 @@ class StateStore:
                 self._create_repository_binding_table(db)
                 self._create_synchronization_baseline_table(db)
                 self._create_prepared_deployment_table(db)
+                self._create_database_retention_intent_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -341,7 +365,7 @@ class StateStore:
             finally:
                 os.close(root_fd)
         else:
-            if version not in {1, 2, 3, 4, SCHEMA_VERSION}:
+            if version not in {1, 2, 3, 4, 5, SCHEMA_VERSION}:
                 raise StateError("Unsupported state schema")
             self._identity()
             if version == 1:
@@ -366,6 +390,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_prepared_deployment_table(db)
+                    db.execute("PRAGMA user_version = 5")
+                version = 5
+            if version == 5:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_database_retention_intent_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -529,6 +559,118 @@ class StateStore:
             commit_sha=commit_sha,
             synchronized_at=_parse_timestamp(synchronized_at),
         )
+
+    def database_retention_intent(self, work_key: str) -> DatabaseRetentionIntent | None:
+        """Read one immutable Recorder-retention publication intent."""
+
+        _validate_work_identity("database_retention", work_key)
+        try:
+            rows = self._connection.execute(
+                "SELECT work_key, target, repository_id, expected_head_sha, "
+                "replacement_head_sha, snapshot_id, recorded_at "
+                "FROM database_retention_intent WHERE work_key = ?",
+                (work_key,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read database retention intent") from None
+        if not rows:
+            return None
+        if len(rows) != 1 or len(rows[0]) != 7:
+            raise StateError("Invalid database retention intent")
+        (
+            persisted_key,
+            target,
+            repository_id,
+            expected_head_sha,
+            replacement_head_sha,
+            snapshot_id,
+            recorded_at,
+        ) = rows[0]
+        if not isinstance(persisted_key, str) or persisted_key != work_key:
+            raise StateError("Invalid database retention intent")
+        _validate_repository_binding(target, repository_id)
+        _validate_synchronization_identity(target, "database", snapshot_id, expected_head_sha)
+        _validate_synchronization_identity(target, "database", snapshot_id, replacement_head_sha)
+        if expected_head_sha == replacement_head_sha:
+            raise StateError("Invalid database retention intent")
+        return DatabaseRetentionIntent(
+            work_key=persisted_key,
+            target=target,
+            repository_id=repository_id,
+            expected_head_sha=expected_head_sha,
+            replacement_head_sha=replacement_head_sha,
+            snapshot_id=snapshot_id,
+            recorded_at=_parse_timestamp(recorded_at),
+        )
+
+    def record_database_retention_intent(
+        self,
+        item: WorkItem,
+        target: str,
+        repository_id: int,
+        expected_head_sha: str,
+        replacement_head_sha: str,
+        snapshot_id: str,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> DatabaseRetentionIntent:
+        """Persist one immutable, non-secret compare-and-swap outcome intent."""
+
+        if (
+            type(item) is not WorkItem
+            or item.work_kind != "database_retention"
+            or item.status != "running"
+            or item.attempts < 1
+        ):
+            raise StateError("Database retention intent requires claimed work")
+        _validate_repository_binding(target, repository_id)
+        _validate_synchronization_identity(target, "database", snapshot_id, expected_head_sha)
+        _validate_synchronization_identity(target, "database", snapshot_id, replacement_head_sha)
+        if expected_head_sha == replacement_head_sha:
+            raise StateError("Invalid database retention intent")
+        when = _timestamp(recorded_at)
+        expected = DatabaseRetentionIntent(
+            item.work_key,
+            target,
+            repository_id,
+            expected_head_sha,
+            replacement_head_sha,
+            snapshot_id,
+            when,
+        )
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                if self.repository_id(target) != repository_id:
+                    raise StateError("Database retention repository identity mismatch")
+                baseline = self.synchronization_baseline(target, "database")
+                if (
+                    baseline is None
+                    or baseline.snapshot_id != snapshot_id
+                    or baseline.commit_sha != expected_head_sha
+                ):
+                    raise StateError("Database retention baseline changed unexpectedly")
+                db.execute(
+                    "INSERT OR IGNORE INTO database_retention_intent "
+                    "(work_key, target, repository_id, expected_head_sha, "
+                    "replacement_head_sha, snapshot_id, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        item.work_key,
+                        target,
+                        repository_id,
+                        expected_head_sha,
+                        replacement_head_sha,
+                        snapshot_id,
+                        when.isoformat(),
+                    ),
+                )
+            persisted = self.database_retention_intent(item.work_key)
+            if persisted != expected:
+                raise StateError("Database retention intent cannot be rebound")
+            return persisted
+        except sqlite3.Error:
+            raise StateError("Unable to persist database retention intent") from None
 
     def prepared_deployment(self, deployment_id: str) -> PreparedDeployment | None:
         """Read exact immutable preparation evidence and recheck repository identity."""

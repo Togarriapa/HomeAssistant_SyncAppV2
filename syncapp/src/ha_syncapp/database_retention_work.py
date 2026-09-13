@@ -33,6 +33,7 @@ from .database_retention_staging import (
     DatabaseRetentionStagingError,
     prepare_database_history_staging,
 )
+from .github_repo import RepositoryVerificationError, fetch_trusted_branch_head
 from .state import StateError, StateStore, WorkItem
 
 DATABASE_RETENTION_WORK_KIND = "database_retention"
@@ -216,6 +217,40 @@ def _execute_claimed(
         repository_id = store.repository_id(target)
         if repository_id is None:
             return _fail(store, item, transient=False)
+        intent = store.database_retention_intent(item.work_key)
+        if intent is not None:
+            if (
+                intent.target.casefold() != target.casefold()
+                or intent.repository_id != repository_id
+            ):
+                return _fail(store, item, transient=False, now=reference_time)
+            current = fetch_trusted_branch_head(
+                target,
+                token,
+                expected_id=repository_id,
+                branch="database",
+            )
+            if current.commit_sha == intent.replacement_head_sha:
+                baseline = store.synchronization_baseline(target, "database")
+                if baseline is None or baseline.snapshot_id != intent.snapshot_id:
+                    return _fail(store, item, transient=False, now=reference_time)
+                if baseline.commit_sha == intent.expected_head_sha:
+                    store.record_synchronization_baseline(
+                        target,
+                        "database",
+                        intent.snapshot_id,
+                        intent.replacement_head_sha,
+                        synchronized_at=reference_time,
+                    )
+                elif baseline.commit_sha != intent.replacement_head_sha:
+                    return _fail(store, item, transient=False, now=reference_time)
+                completed = store.complete_work(item, now=reference_time)
+                return DatabaseRetentionWorkResult(
+                    completed, DatabaseRetentionWorkDisposition.REPLACED
+                )
+            if current.commit_sha != intent.expected_head_sha:
+                blocked = store.fail_work(item, transient=False, now=reference_time)
+                return DatabaseRetentionWorkResult(blocked, DatabaseRetentionWorkDisposition.STALE)
         evidence = fetch_trusted_database_history_evidence(
             target=target,
             token=token,
@@ -252,6 +287,17 @@ def _execute_claimed(
             authorization=authorization,
             repository=repository,
         )
+        persisted_intent = store.record_database_retention_intent(
+            item,
+            target,
+            repository_id,
+            authorization.expected_head_sha,
+            artifact.replacement_head_sha,
+            baseline.snapshot_id,
+            recorded_at=item.created_at,
+        )
+        if persisted_intent.replacement_head_sha != artifact.replacement_head_sha:
+            return _fail(store, item, transient=False, now=reference_time)
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -282,10 +328,22 @@ def _execute_claimed(
             transient="repository verification failed" in str(error),
             now=reference_time,
         )
-    except DatabaseRetentionStagingError:
-        return _fail(store, item, transient=True, now=reference_time)
+    except DatabaseRetentionStagingError as error:
+        return _fail(
+            store,
+            item,
+            transient=_staging_failure_is_transient(error),
+            now=reference_time,
+        )
     except DatabaseHistoryReplacementAuthorizationError:
         return _fail(store, item, transient=False, now=reference_time)
+    except RepositoryVerificationError as error:
+        return _fail(
+            store,
+            item,
+            transient=_repository_failure_is_transient(error),
+            now=reference_time,
+        )
     except StateError:
         raise DatabaseRetentionWorkError(
             "database retention outcome could not be recorded"
@@ -314,3 +372,17 @@ def _fail(
 def _validate_store(store: StateStore) -> None:
     if type(store) is not StateStore:
         raise DatabaseRetentionWorkError("database retention state store is invalid")
+
+
+def _repository_failure_is_transient(error: RepositoryVerificationError) -> bool:
+    message = str(error)
+    return (
+        "transport" in message
+        or "HTTP 429" in message
+        or any(f"HTTP {status}" in message for status in range(500, 600))
+    )
+
+
+def _staging_failure_is_transient(error: DatabaseRetentionStagingError) -> bool:
+    message = str(error)
+    return "transport" in message or "unavailable" in message

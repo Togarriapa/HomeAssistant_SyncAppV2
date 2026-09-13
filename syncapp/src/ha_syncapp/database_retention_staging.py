@@ -81,13 +81,14 @@ def prepare_database_history_staging(
 
 
 def _validate_evidence(evidence: TrustedDatabaseHistoryEvidence) -> None:
+    target_parts = evidence.target.split("/") if isinstance(evidence.target, str) else []
     if (
         type(evidence) is not TrustedDatabaseHistoryEvidence
         or evidence.branch != "database"
         or not evidence.records
         or evidence.records[0].sha != evidence.expected_head_sha
-        or not isinstance(evidence.target, str)
-        or len(evidence.target.split("/")) != 2
+        or len(target_parts) != 2
+        or not all(target_parts)
         or type(evidence.repository_id) is not int
         or evidence.repository_id <= 0
         or _COMMIT_SHA.fullmatch(evidence.expected_head_sha) is None

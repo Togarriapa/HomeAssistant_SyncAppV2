@@ -16,9 +16,12 @@ Execution reconstructs trusted history evidence, requires the current `database`
 
 The previously reviewed replacement transport then proves the rebuilt commit bytes and performs only an exact-head-leased update of `refs/heads/database`. After success, the synchronization baseline is advanced to the rebuilt head while preserving the latest snapshot identity. A no-op plan completes without staging credentials or ref mutation.
 
+Immediately before the leased update, StateStore durably records a non-privileged publication intent containing only the work key, pinned repository identity, expected and replacement head SHAs, latest snapshot identity, and timestamp. It never stores the token, staging path, authorization, replacement artifact, or exception text. If the process is interrupted after GitHub accepts the update but before local completion, the next retry verifies the live private-repository head: the exact replacement advances the local baseline and completes without another push, the unchanged expected head safely rebuilds the same deterministic replacement, and any third head is blocked as stale.
+
 ## Failure policy
 
-- Transient GitHub, network, local Git, timeout and staging failures enter bounded StateStore retry/backoff.
+- Transient GitHub, network, local Git, timeout and unavailable-staging failures enter bounded StateStore retry/backoff.
+- Invalid credentials, evidence, staging configuration and repository identity are deterministic and blocked.
 - Invalid history, forged evidence, missing generated-database baseline and authorization failures are blocked.
 - A moved head or work identity mismatch is stale and blocked; later discovery may create work only from newly verified evidence.
 - A rejected lease-protected update is blocked and never continuously retriggered.

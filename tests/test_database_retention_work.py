@@ -151,7 +151,7 @@ def test_success_updates_database_baseline_to_rebuilt_head(
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.reprove_database_history_prewrite", Mock()
     )
-    authorization = Mock(requires_replacement=True)
+    authorization = Mock(requires_replacement=True, expected_head_sha="1" * 40)
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.authorize_database_history_replacement",
         Mock(return_value=authorization),
@@ -242,7 +242,7 @@ def test_transport_failure_classification_controls_durable_transition(
         "ha_syncapp.database_retention_work.fetch_trusted_database_history_evidence",
         Mock(return_value=evidence),
     )
-    authorization = Mock(requires_replacement=True)
+    authorization = Mock(requires_replacement=True, expected_head_sha="1" * 40)
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.reprove_database_history_prewrite", Mock()
     )
@@ -257,7 +257,8 @@ def test_transport_failure_classification_controls_durable_transition(
         Mock(return_value=repository),
     )
     monkeypatch.setattr(
-        "ha_syncapp.database_retention_work.build_database_history_replacement", Mock()
+        "ha_syncapp.database_retention_work.build_database_history_replacement",
+        Mock(return_value=Mock(replacement_head_sha="2" * 40)),
     )
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.replace_database_history",
@@ -334,7 +335,7 @@ def test_restart_recovers_exact_already_published_replacement(
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.reprove_database_history_prewrite", Mock()
     )
-    authorization = Mock(requires_replacement=True)
+    authorization = Mock(requires_replacement=True, expected_head_sha="1" * 40)
     monkeypatch.setattr(
         "ha_syncapp.database_retention_work.authorize_database_history_replacement",
         Mock(return_value=authorization),

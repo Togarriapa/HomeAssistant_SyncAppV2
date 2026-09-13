@@ -65,7 +65,7 @@ def test_state_and_lock_permissions_are_private(tmp_path: Path) -> None:
             assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-@pytest.mark.parametrize("version", [0, 6, 999])
+@pytest.mark.parametrize("version", [0, 7, 999])
 def test_unrecognized_database_is_preserved(tmp_path: Path, version: int) -> None:
     root = tmp_path / "syncapp"
     root.mkdir()
@@ -217,4 +217,4 @@ def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Pat
         assert store.repository_id("Owner/Home") == 123
         assert store.claim_work() is not None
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
