@@ -27,6 +27,7 @@ TOKEN = "github-secret-sentinel"
 HEAD = "a" * 40
 MID = "b" * 40
 ROOT = "c" * 40
+SNAPSHOT = "f" * 64
 REFERENCE = datetime(2026, 9, 13, tzinfo=UTC)
 
 
@@ -36,6 +37,9 @@ def _store(tmp_path: Path) -> StateStore:
     store = StateStore(data)
     store.__enter__()
     store.bind_repository(TARGET, 123)
+    store.record_synchronization_baseline(
+        TARGET, "logs", SNAPSHOT, HEAD, synchronized_at=REFERENCE
+    )
     return store
 
 
