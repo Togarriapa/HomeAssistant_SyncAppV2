@@ -101,9 +101,7 @@ def discover_log_retention_work(
         raise LogRetentionWorkError("logs retention discovery failed closed") from None
 
 
-def claim_log_retention_work(
-    store: StateStore, *, now: datetime | None = None
-) -> WorkItem | None:
+def claim_log_retention_work(store: StateStore, *, now: datetime | None = None) -> WorkItem | None:
     """Atomically claim only the oldest eligible logs-retention item."""
 
     _validate_store(store)
