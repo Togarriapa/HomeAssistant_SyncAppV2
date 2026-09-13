@@ -13,6 +13,8 @@ from ha_syncapp.log_history_replace_transport import (
 )
 from ha_syncapp.log_history_replacement import LogHistoryReplacementAuthorization
 
+TOKEN = "github-secret-sentinel"
+
 
 def _git(repository: Path, *args: str) -> str:
     result = subprocess.run(  # nosec B603 B607
@@ -92,6 +94,7 @@ def test_transport_exception_is_transient_and_retryable(tmp_path: Path) -> None:
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
+            token=TOKEN,
             runner=_runner(failure=OSError("secret transport detail")),
         )
 
@@ -107,6 +110,7 @@ def test_remote_push_rejection_is_non_retryable_rejected(tmp_path: Path) -> None
         replace_logs_history(
             authorization=authorization,
             artifact=artifact,
+            token=TOKEN,
             runner=_runner(returncode=1),
         )
 
