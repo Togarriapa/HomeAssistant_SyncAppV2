@@ -135,6 +135,7 @@ def test_log_service_due_tick_collects_then_processes_once(
             due=True,
             collection=collection,
             processed=processed,
+            retention=LogRetentionPassResult(0, None),
         )
         assert calls[0][:4] == (
             "collect",
