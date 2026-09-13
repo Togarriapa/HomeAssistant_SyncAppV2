@@ -129,9 +129,7 @@ def build_database_history_replacement(
     retained_oldest_first = tuple(reversed(authorization.retained_shas))
     for index, original_sha in enumerate(retained_oldest_first):
         expected_original_parent = (
-            authorization.pruned_shas[0]
-            if index == 0
-            else retained_oldest_first[index - 1]
+            authorization.pruned_shas[0] if index == 0 else retained_oldest_first[index - 1]
         )
         raw_commit = _read_commit(
             executable=executable,
@@ -155,9 +153,7 @@ def build_database_history_replacement(
         )
 
     if rebuilt_parent is None or rebuilt_parent == authorization.expected_head_sha:
-        raise DatabaseHistoryReplacementTransportError(
-            "database rebuilt history is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database rebuilt history is invalid")
     return _database_history_replacement_artifact(
         repository=repository,
         authorization=authorization,
@@ -288,9 +284,7 @@ def _validate_artifact_history(
         original_tree, original_parents = _commit_tree_and_parents(original)
         rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
         expected_original_parent = (
-            retained[index + 1]
-            if index + 1 < len(retained)
-            else authorization.pruned_shas[0]
+            retained[index + 1] if index + 1 < len(retained) else authorization.pruned_shas[0]
         )
         if original_parents != (expected_original_parent,) or rebuilt_tree != original_tree:
             raise DatabaseHistoryReplacementTransportError(
@@ -347,9 +341,7 @@ def _read_commit(
 def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
     header, separator, _message = raw_commit.partition("\n\n")
     if not separator or not header:
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement artifact is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
     trees: list[str] = []
     parents: list[str] = []
     for line in header.split("\n"):
@@ -363,9 +355,7 @@ def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
         or any(_COMMIT_SHA.fullmatch(parent) is None for parent in parents)
         or len(parents) > 1
     ):
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement artifact is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
     return trees[0], tuple(parents)
 
 
@@ -377,9 +367,7 @@ def _rewrite_commit_parent(
 ) -> str:
     header, separator, message = raw_commit.partition("\n\n")
     if not separator or not header:
-        raise DatabaseHistoryReplacementTransportError(
-            "database retained commit is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database retained commit is invalid")
 
     groups: list[list[str]] = []
     for line in header.split("\n"):
@@ -468,9 +456,7 @@ def _write_commit_object(
         _COMMIT_SHA.fullmatch(replacement_sha) is None
         or len(replacement_sha) != expected_sha_length
     ):
-        raise DatabaseHistoryReplacementTransportError(
-            "database rebuilt history is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database rebuilt history is invalid")
     return replacement_sha
 
 
@@ -497,9 +483,7 @@ def _validate_artifact(
     artifact: DatabaseHistoryReplacementArtifact | None,
 ) -> None:
     if type(artifact) is not DatabaseHistoryReplacementArtifact:
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement artifact is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
     if (
         not isinstance(artifact.target, str)
         or artifact.target.casefold() != authorization.target.casefold()
@@ -514,14 +498,10 @@ def _validate_artifact(
         or artifact.replacement_head_sha == authorization.expected_head_sha
         or not isinstance(artifact.repository, Path)
     ):
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement artifact is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
     resolved = _validate_repository_path(artifact.repository)
     if resolved != artifact.repository:
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement artifact is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
 
 
 def _validate_authorization_boundary(
@@ -627,9 +607,7 @@ def _validate_timeout(timeout: float) -> float:
         or not math.isfinite(timeout)
         or not 0 < timeout <= _MAX_TIMEOUT_SECONDS
     ):
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement timeout is invalid"
-        )
+        raise DatabaseHistoryReplacementTransportError("database replacement timeout is invalid")
     return float(timeout)
 
 
