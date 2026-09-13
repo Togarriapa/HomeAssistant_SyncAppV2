@@ -6,11 +6,21 @@ from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateOb
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.log_collection import LogCollectionError
+from ha_syncapp.log_retention_work import LogRetentionPassResult
 from ha_syncapp.log_sync_retrigger import LogSyncRetriggerResult
 from ha_syncapp.runtime_sync_retrigger import RuntimeSyncRetriggerResult
 from ha_syncapp.state import StateStore
 
 TARGET = "Owner/Private-Home"
+
+
+@pytest.fixture(autouse=True)
+def _stub_log_retention(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_log_retention_work_pass",
+        lambda *args, **kwargs: LogRetentionPassResult(0, None),
+    )
 
 
 def _candidate_absent() -> CandidateDetectionResult:
