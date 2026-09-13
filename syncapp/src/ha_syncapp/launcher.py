@@ -73,6 +73,13 @@ def _service_command(arguments: list[str]) -> list[str]:
     return [sys.executable, "-m", "ha_syncapp", *arguments]
 
 
+def _normalize_child_return_code(return_code: int, requested_signal: int | None) -> int:
+    """Treat only the operator-requested child signal exit as clean shutdown."""
+    if requested_signal is not None and return_code == -requested_signal:
+        return 0
+    return return_code
+
+
 def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> int:
     """Run the service and periodically request bounded recovery through protected IPC."""
     forwarded = list(sys.argv[1:] if arguments is None else arguments)
@@ -88,11 +95,14 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
     # the executable or inject shell syntax.
     child = subprocess.Popen(_service_command([]))  # nosec B603
     stopping = False
+    requested_signal: int | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
-        nonlocal stopping
-        del signum, frame
+        nonlocal requested_signal, stopping
+        del frame
         stopping = True
+        if requested_signal is None:
+            requested_signal = signum
         if child.poll() is None:
             child.terminate()
 
@@ -150,7 +160,7 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
-    return return_code
+    return _normalize_child_return_code(return_code, requested_signal)
 
 
 def main() -> int:
