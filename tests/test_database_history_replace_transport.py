@@ -214,9 +214,7 @@ def test_replacement_rejects_non_database_authorization(branch: str) -> None:
     ("target", "repository_id"),
     [("invalid", 123), ("owner/repo", 0), ("owner/..", 123), ("owner/repo name", 123)],
 )
-def test_replacement_rejects_invalid_repository_identity(
-    target: str, repository_id: int
-) -> None:
+def test_replacement_rejects_invalid_repository_identity(target: str, repository_id: int) -> None:
     authorization = _forge_authorization(
         _authorization(), target=target, repository_id=repository_id
     )
