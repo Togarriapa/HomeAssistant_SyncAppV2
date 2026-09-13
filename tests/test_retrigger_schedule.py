@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from unittest.mock import Mock
 
 import pytest
@@ -77,6 +78,14 @@ def test_scheduler_rejects_backward_monotonic_time() -> None:
 
     with pytest.raises(RetriggerScheduleError, match="monotonic"):
         scheduler.tick(99.0)
+
+
+@pytest.mark.parametrize("now", [math.nan, math.inf, -math.inf])
+def test_scheduler_rejects_non_finite_monotonic_time(now: float) -> None:
+    scheduler = RetriggerSchedule(interval_seconds=60, run_cycle=lambda: "completed")
+
+    with pytest.raises(RetriggerScheduleError, match="monotonic"):
+        scheduler.start(now)
 
 
 def test_scheduler_requires_start_before_tick() -> None:
