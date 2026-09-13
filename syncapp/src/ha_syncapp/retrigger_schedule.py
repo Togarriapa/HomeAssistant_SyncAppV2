@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 _MIN_INTERVAL_SECONDS = 30
@@ -69,6 +70,6 @@ class RetriggerSchedule:
         if not isinstance(now, (int, float)) or isinstance(now, bool):
             raise RetriggerScheduleError("Retrigger monotonic time is invalid")
         now_value = float(now)
-        if now_value < 0:
+        if not math.isfinite(now_value) or now_value < 0:
             raise RetriggerScheduleError("Retrigger monotonic time is invalid")
         return now_value
