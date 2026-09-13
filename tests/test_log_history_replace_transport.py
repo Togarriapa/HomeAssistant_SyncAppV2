@@ -150,10 +150,7 @@ def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
                 "--no-verify",
                 "https://github.com/owner/private-repo.git",
                 f"{artifact.replacement_head_sha}:refs/heads/logs",
-                (
-                    "--force-with-lease=refs/heads/logs:"
-                    f"{authorization.expected_head_sha}"
-                ),
+                (f"--force-with-lease=refs/heads/logs:{authorization.expected_head_sha}"),
             ),
             repository,
             12.0,
@@ -266,10 +263,7 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
     )
     runner = _delegating_runner(
         push_returncode=1,
-        push_stderr=(
-            "stale info containing "
-            "https://secret-token@github.com/owner/repo"
-        ),
+        push_stderr=("stale info containing https://secret-token@github.com/owner/repo"),
     )
 
     with pytest.raises(
@@ -291,9 +285,7 @@ def test_transport_exception_is_sanitized(tmp_path: Path) -> None:
         authorization=authorization,
         repository=repository,
     )
-    runner = _delegating_runner(
-        push_error=OSError("https://secret-token@github.com/owner/repo")
-    )
+    runner = _delegating_runner(push_error=OSError("https://secret-token@github.com/owner/repo"))
 
     with pytest.raises(
         LogHistoryReplacementTransportError,
