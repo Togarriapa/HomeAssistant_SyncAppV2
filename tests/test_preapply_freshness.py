@@ -32,7 +32,9 @@ def test_exact_main_and_candidate_heads_produce_immutable_freshness_evidence():
 
     def fetcher(target, token, *, expected_id, branch="main"):
         calls.append((target, token, expected_id, branch))
-        sha = prepared.evidence.baseline_sha if branch == "main" else prepared.evidence.candidate_sha
+        sha = (
+            prepared.evidence.baseline_sha if branch == "main" else prepared.evidence.candidate_sha
+        )
         return BranchHead(target, expected_id, branch, sha)
 
     result = reprove_preapply_repo_heads(
@@ -56,7 +58,9 @@ def test_moved_trusted_head_fails_closed(moved_branch):
     prepared = _prepared()
 
     def fetcher(target, token, *, expected_id, branch="main"):
-        expected = prepared.evidence.baseline_sha if branch == "main" else prepared.evidence.candidate_sha
+        expected = (
+            prepared.evidence.baseline_sha if branch == "main" else prepared.evidence.candidate_sha
+        )
         sha = "e" * 40 if branch == moved_branch else expected
         return BranchHead(target, expected_id, branch, sha)
 
@@ -68,9 +72,7 @@ def test_moved_trusted_head_fails_closed(moved_branch):
 
 def test_backup_binding_mismatch_fails_before_github_io():
     prepared = _prepared()
-    other = CandidateBackupEvidence(
-        **{**prepared.evidence.__dict__, "backup_slug": "other"}
-    )
+    other = CandidateBackupEvidence(**{**prepared.evidence.__dict__, "backup_slug": "other"})
 
     with pytest.raises(PreApplyFreshnessError, match="backup"):
         reprove_preapply_repo_heads(
@@ -103,21 +105,23 @@ def test_prepared_evidence_drift_during_github_io_is_rejected():
 
     def fetcher(target, token, *, expected_id, branch="main"):
         if branch == "candidate":
-            object.__setattr__(prepared, "evidence", CandidateBackupEvidence(
-                target=original.target,
-                repository_id=original.repository_id,
-                baseline_sha=original.baseline_sha,
-                candidate_sha="f" * 40,
-                stage_manifest_sha256=original.stage_manifest_sha256,
-                runtime_sha256=original.runtime_sha256,
-                risk_level=original.risk_level,
-                core_version=original.core_version,
-                backup_slug=original.backup_slug,
-            ))
+            object.__setattr__(
+                prepared,
+                "evidence",
+                CandidateBackupEvidence(
+                    target=original.target,
+                    repository_id=original.repository_id,
+                    baseline_sha=original.baseline_sha,
+                    candidate_sha="f" * 40,
+                    stage_manifest_sha256=original.stage_manifest_sha256,
+                    runtime_sha256=original.runtime_sha256,
+                    risk_level=original.risk_level,
+                    core_version=original.core_version,
+                    backup_slug=original.backup_slug,
+                ),
+            )
         sha = original.baseline_sha if branch == "main" else original.candidate_sha
         return BranchHead(target, expected_id, branch, sha)
 
     with pytest.raises(PreApplyFreshnessError, match="changed"):
-        reprove_preapply_repo_heads(
-            prepared, original, token="secret-token", head_fetcher=fetcher
-        )
+        reprove_preapply_repo_heads(prepared, original, token="secret-token", head_fetcher=fetcher)
