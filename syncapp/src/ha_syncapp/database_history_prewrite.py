@@ -69,9 +69,7 @@ def _validate_evidence_boundary(evidence: TrustedDatabaseHistoryEvidence) -> Non
     ):
         raise DatabaseHistoryPrewriteError("trusted database repository identity is invalid")
     if not evidence.records or evidence.records[0].sha != evidence.expected_head_sha:
-        raise DatabaseHistoryPrewriteError(
-            "trusted database history evidence head is inconsistent"
-        )
+        raise DatabaseHistoryPrewriteError("trusted database history evidence head is inconsistent")
 
 
 def _require_unchanged_head(
@@ -84,6 +82,4 @@ def _require_unchanged_head(
         or current.branch != evidence.branch
         or current.commit_sha != evidence.expected_head_sha
     ):
-        raise DatabaseHistoryPrewriteError(
-            "trusted database history changed before replacement"
-        )
+        raise DatabaseHistoryPrewriteError("trusted database history changed before replacement")
