@@ -57,7 +57,7 @@ class DatabaseHistoryReplacementTransportError(RuntimeError):
 
 @dataclass(frozen=True, slots=True, init=False)
 class DatabaseHistoryReplacementArtifact:
-    """Sealed locally rebuilt history bound to one exact database authorization."""
+    """Locally rebuilt history bound to one exact database authorization."""
 
     repository: Path
     target: str
@@ -174,7 +174,7 @@ def replace_database_history(
     timeout: float = 30.0,
     runner: CommandRunner = _run_git,
 ) -> bool:
-    """Atomically replace only `database` after a fresh Repo B/head proof."""
+    """Atomically replace only `database` after local and remote re-validation."""
 
     _validate_authorization_boundary(authorization)
     if not authorization.requires_replacement:
@@ -189,6 +189,12 @@ def replace_database_history(
                 "database replacement artifact is invalid"
             )
     timeout_value = _validate_timeout(timeout)
+    _validate_artifact_history(
+        authorization=authorization,
+        artifact=artifact,
+        timeout=timeout_value,
+        runner=runner,
+    )
     if not isinstance(token, str) or not token:
         raise DatabaseHistoryReplacementTransportError(
             "database replacement repository verification failed"
@@ -252,6 +258,58 @@ def replace_database_history(
     return True
 
 
+def _validate_artifact_history(
+    *,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    artifact: DatabaseHistoryReplacementArtifact,
+    timeout: float,
+    runner: CommandRunner,
+) -> None:
+    """Prove a proposed replacement contains only the authorized snapshot trees."""
+
+    executable = _git_executable()
+    rebuilt_sha = artifact.replacement_head_sha
+    retained = authorization.retained_shas
+    for index, original_sha in enumerate(retained):
+        original = _read_commit(
+            executable=executable,
+            repository=artifact.repository,
+            commit_sha=original_sha,
+            timeout=timeout,
+            runner=runner,
+        )
+        rebuilt = _read_commit(
+            executable=executable,
+            repository=artifact.repository,
+            commit_sha=rebuilt_sha,
+            timeout=timeout,
+            runner=runner,
+        )
+        original_tree, original_parents = _commit_tree_and_parents(original)
+        rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
+        expected_original_parent = (
+            retained[index + 1]
+            if index + 1 < len(retained)
+            else authorization.pruned_shas[0]
+        )
+        if original_parents != (expected_original_parent,) or rebuilt_tree != original_tree:
+            raise DatabaseHistoryReplacementTransportError(
+                "database replacement artifact is invalid"
+            )
+        is_oldest_retained = index + 1 == len(retained)
+        if is_oldest_retained:
+            if rebuilt_parents:
+                raise DatabaseHistoryReplacementTransportError(
+                    "database replacement artifact is invalid"
+                )
+            continue
+        if len(rebuilt_parents) != 1:
+            raise DatabaseHistoryReplacementTransportError(
+                "database replacement artifact is invalid"
+            )
+        rebuilt_sha = rebuilt_parents[0]
+
+
 def _read_commit(
     *,
     executable: str,
@@ -284,6 +342,31 @@ def _read_commit(
             "database retained history could not be read"
         )
     return result.stdout
+
+
+def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
+    header, separator, _message = raw_commit.partition("\n\n")
+    if not separator or not header:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement artifact is invalid"
+        )
+    trees: list[str] = []
+    parents: list[str] = []
+    for line in header.split("\n"):
+        if line.startswith("tree "):
+            trees.append(line[5:])
+        elif line.startswith("parent "):
+            parents.append(line[7:])
+    if (
+        len(trees) != 1
+        or _COMMIT_SHA.fullmatch(trees[0]) is None
+        or any(_COMMIT_SHA.fullmatch(parent) is None for parent in parents)
+        or len(parents) > 1
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement artifact is invalid"
+        )
+    return trees[0], tuple(parents)
 
 
 def _rewrite_commit_parent(
