@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ha_syncapp.database_history_replace_transport import (
@@ -15,6 +15,7 @@ from ha_syncapp.state import StateError, StateStore, WorkItem
 
 _WORK_KIND = "database-retention"
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_WORK_KEY = re.compile(r"^(\d{4}-\d{2}-\d{2}):([0-9a-f]{64})$")
 
 
 class DatabaseRetentionWorkError(RuntimeError):
@@ -34,14 +35,17 @@ def database_retention_work_key(
     repository_id: int,
     expected_head_sha: str,
     retention_days: int,
+    *,
+    reference_time: datetime,
 ) -> str:
-    """Return a non-secret identity for one exact trusted retention decision context."""
+    """Return an exact-head/policy identity with a recoverable UTC decision day."""
     _validate_identity(target, repository_id, expected_head_sha, retention_days)
+    reference_day = _reference_day(reference_time)
     payload = (
         f"{target.casefold()}\0{repository_id}\0database\0"
-        f"{expected_head_sha}\0{retention_days}"
+        f"{expected_head_sha}\0{retention_days}\0{reference_day}"
     ).encode()
-    return hashlib.sha256(payload).hexdigest()
+    return f"{reference_day}:{hashlib.sha256(payload).hexdigest()}"
 
 
 def enqueue_database_retention_work(
@@ -50,8 +54,10 @@ def enqueue_database_retention_work(
     repository_id: int,
     expected_head_sha: str,
     retention_days: int,
+    *,
+    reference_time: datetime,
 ) -> WorkItem:
-    """Idempotently enqueue retention for one verified database head and policy."""
+    """Idempotently enqueue retention for one verified database head, policy and UTC day."""
     if type(store) is not StateStore:
         raise DatabaseRetentionWorkError("database retention work state store is invalid")
     try:
@@ -62,6 +68,7 @@ def enqueue_database_retention_work(
                 repository_id,
                 expected_head_sha,
                 retention_days,
+                reference_time=reference_time,
             ),
         )
     except StateError as exc:
@@ -93,6 +100,7 @@ def execute_claimed_database_retention_work(
     staging_root: Path,
 ) -> DatabaseRetentionWorkResult:
     """Execute one claimed retention item and persist retry/block/success state."""
+    reference_time = _reference_time_from_work(item)
     _validate_claim(
         store,
         item,
@@ -100,6 +108,7 @@ def execute_claimed_database_retention_work(
         repository_id,
         expected_head_sha,
         retention_days,
+        reference_time,
     )
     try:
         replaced = run_database_retention_cycle(
@@ -107,6 +116,7 @@ def execute_claimed_database_retention_work(
             repository_id=repository_id,
             expected_head_sha=expected_head_sha,
             retention_days=retention_days,
+            reference_time=reference_time,
             token=token,
             staging_root=staging_root,
         )
@@ -134,11 +144,20 @@ def run_database_retention_cycle(
     repository_id: int,
     expected_head_sha: str,
     retention_days: int,
+    reference_time: datetime,
     token: str,
     staging_root: Path,
 ) -> bool:
     """Fail closed until the isolated retention executor is supplied by the next TDD slice."""
-    del target, repository_id, expected_head_sha, retention_days, token, staging_root
+    del (
+        target,
+        repository_id,
+        expected_head_sha,
+        retention_days,
+        reference_time,
+        token,
+        staging_root,
+    )
     raise DatabaseHistoryReplacementTransportError("database retention execution is unavailable")
 
 
@@ -158,6 +177,28 @@ def _validate_identity(
         raise DatabaseRetentionWorkError("database retention policy identity is invalid")
 
 
+def _reference_day(reference_time: datetime) -> str:
+    if (
+        not isinstance(reference_time, datetime)
+        or reference_time.tzinfo is None
+        or reference_time.utcoffset() is None
+    ):
+        raise DatabaseRetentionWorkError("database retention reference time is invalid")
+    return reference_time.astimezone(UTC).date().isoformat()
+
+
+def _reference_time_from_work(item: WorkItem) -> datetime:
+    if type(item) is not WorkItem or not isinstance(item.work_key, str):
+        raise DatabaseRetentionWorkError("database retention work evidence is invalid")
+    match = _WORK_KEY.fullmatch(item.work_key)
+    if match is None:
+        raise DatabaseRetentionWorkError("database retention work identity is invalid")
+    try:
+        return datetime.fromisoformat(match.group(1)).replace(tzinfo=UTC)
+    except ValueError:
+        raise DatabaseRetentionWorkError("database retention work identity is invalid") from None
+
+
 def _validate_claim(
     store: StateStore,
     item: WorkItem,
@@ -165,6 +206,7 @@ def _validate_claim(
     repository_id: int,
     expected_head_sha: str,
     retention_days: int,
+    reference_time: datetime,
 ) -> None:
     if type(store) is not StateStore:
         raise DatabaseRetentionWorkError("database retention work state store is invalid")
@@ -177,6 +219,7 @@ def _validate_claim(
         repository_id,
         expected_head_sha,
         retention_days,
+        reference_time=reference_time,
     ):
         raise DatabaseRetentionWorkError(
             "database retention work identity does not match the trusted head"
