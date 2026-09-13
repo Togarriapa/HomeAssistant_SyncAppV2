@@ -126,3 +126,17 @@ def test_prepared_evidence_drift_during_github_io_is_rejected():
 
     with pytest.raises(PreApplyFreshnessError, match="changed"):
         reprove_preapply_repo_heads(prepared, original, token="secret-token", head_fetcher=fetcher)
+
+
+def test_in_place_prepared_evidence_drift_during_github_io_is_rejected():
+    prepared = _prepared()
+    evidence = prepared.evidence
+
+    def fetcher(target, token, *, expected_id, branch="main"):
+        if branch == "candidate":
+            object.__setattr__(evidence, "candidate_sha", "f" * 40)
+        sha = evidence.baseline_sha if branch == "main" else evidence.candidate_sha
+        return BranchHead(target, expected_id, branch, sha)
+
+    with pytest.raises(PreApplyFreshnessError, match="changed"):
+        reprove_preapply_repo_heads(prepared, evidence, token="secret-token", head_fetcher=fetcher)
