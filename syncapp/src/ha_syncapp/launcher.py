@@ -136,10 +136,7 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
             schedule.stop()
         if child.poll() is None:
             child.terminate()
-        if not setup_failed:
-            return_code = child.wait()
-        else:
-            return_code = _RETRIGGER_SETUP_FAILURE
+        return_code = child.wait() if not setup_failed else _RETRIGGER_SETUP_FAILURE
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
