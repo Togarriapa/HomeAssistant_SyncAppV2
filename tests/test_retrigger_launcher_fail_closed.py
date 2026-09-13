@@ -1,7 +1,8 @@
-"""The App must not run with configured Repo B but a disabled Retrigger schedule."""
+"""Fail-closed and shutdown contracts for the Retrigger launcher."""
 
 from __future__ import annotations
 
+import signal
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -33,3 +34,19 @@ def test_launcher_stops_child_when_required_schedule_setup_fails(
     assert launcher.run([], data_dir=tmp_path) == 14
     child.terminate.assert_called_once_with()
     child.wait.assert_called_once_with()
+
+
+def test_requested_sigterm_normalizes_only_matching_child_signal_exit() -> None:
+    from ha_syncapp.launcher import _normalize_child_return_code
+
+    assert _normalize_child_return_code(-signal.SIGTERM, signal.SIGTERM) == 0
+    assert _normalize_child_return_code(0, signal.SIGTERM) == 0
+    assert _normalize_child_return_code(7, signal.SIGTERM) == 7
+    assert _normalize_child_return_code(-signal.SIGINT, signal.SIGTERM) == -signal.SIGINT
+
+
+def test_child_exit_is_not_normalized_without_requested_shutdown() -> None:
+    from ha_syncapp.launcher import _normalize_child_return_code
+
+    assert _normalize_child_return_code(-signal.SIGTERM, None) == -signal.SIGTERM
+    assert _normalize_child_return_code(4, None) == 4
