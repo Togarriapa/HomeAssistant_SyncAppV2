@@ -195,12 +195,16 @@ def replace_logs_history(
         result = runner(command, cwd=artifact.repository, timeout=timeout_value)
     except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
         raise LogHistoryReplacementTransportError(
-            "logs history replacement transport failed"
+            "logs history replacement transport failed",
+            kind=LogHistoryReplacementFailureKind.TRANSIENT,
         ) from None
     if not isinstance(result, subprocess.CompletedProcess):
         raise LogHistoryReplacementTransportError("logs history replacement transport failed")
     if result.returncode != 0:
-        raise LogHistoryReplacementTransportError("logs history replacement was rejected")
+        raise LogHistoryReplacementTransportError(
+            "logs history replacement was rejected",
+            kind=LogHistoryReplacementFailureKind.REJECTED,
+        )
     return True
 
 
