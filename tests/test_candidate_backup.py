@@ -1,8 +1,11 @@
 from dataclasses import replace
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import ha_syncapp.candidate_backup as backup
 import ha_syncapp.candidate_semantics as semantic
 import pytest
+from ha_syncapp.prepared_deployment import PreparedDeployment
 from semantic_fixtures import candidate_inputs
 
 
@@ -166,8 +169,6 @@ def test_semantic_drift_after_backup_discards_success(tmp_path, monkeypatch):
 
 
 def test_verified_backup_evidence_is_exactly_retrievable_after_restart(tmp_path, monkeypatch):
-    from uuid import uuid4
-
     from ha_syncapp.state import StateStore
 
     inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
@@ -191,3 +192,106 @@ def test_verified_backup_evidence_is_exactly_retrievable_after_restart(tmp_path,
         assert restored == recorded
         assert restored.evidence == evidence
     assert b"secret-token" not in (data / "syncapp/state.sqlite3").read_bytes()
+
+
+def _prepared_backup(tmp_path, monkeypatch):
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+
+    def create_transport(method, *_args):
+        if method == "POST":
+            return _json_response({"slug": "abc123"})
+        return _json_response(
+            {
+                "slug": "abc123",
+                "type": "full",
+                "homeassistant": "2026.9.1",
+                "content": {"homeassistant": True},
+            }
+        )
+
+    evidence = backup.create_candidate_backup(
+        authorization, *inputs, token="secret-token", transport=create_transport
+    )
+    prepared = PreparedDeployment(str(uuid4()), evidence, datetime.now(UTC))
+    return inputs, authorization, prepared
+
+
+def test_preapply_reproof_reads_only_exact_prepared_backup(tmp_path, monkeypatch):
+    inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
+    calls = []
+
+    def transport(method, url, headers, body, timeout, limit):
+        calls.append((method, url, headers, body, timeout, limit))
+        return _json_response(
+            {
+                "slug": "abc123",
+                "type": "full",
+                "homeassistant": "2026.9.1",
+                "content": {"homeassistant": True},
+            }
+        )
+
+    result = backup.reprove_prepared_candidate_backup(
+        prepared,
+        authorization,
+        *inputs,
+        token="secret-token",
+        transport=transport,
+    )
+
+    assert result == prepared.evidence
+    assert [(call[0], call[1], call[3]) for call in calls] == [
+        ("GET", "http://supervisor/backups/abc123/info", None)
+    ]
+    assert calls[0][2]["Authorization"] == "Bearer secret-token"
+
+
+def test_preapply_reproof_rejects_prepared_candidate_binding_mismatch(tmp_path, monkeypatch):
+    inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
+    changed = PreparedDeployment(
+        prepared.deployment_id,
+        replace(prepared.evidence, candidate_sha="c" * 40),
+        prepared.prepared_at,
+    )
+
+    with pytest.raises(backup.CandidateBackupError, match="prepared"):
+        backup.reprove_prepared_candidate_backup(
+            changed,
+            authorization,
+            *inputs,
+            token="secret-token",
+            transport=lambda *_args: pytest.fail("must not call Supervisor"),
+        )
+
+
+def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatch):
+    inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
+
+    def transport(*_args):
+        return _json_response({"slug": "other", "type": "full", "homeassistant": "2026.9.1"})
+
+    with pytest.raises(backup.CandidateBackupError):
+        backup.reprove_prepared_candidate_backup(
+            prepared,
+            authorization,
+            *inputs,
+            token="secret-token",
+            transport=transport,
+        )
+
+
+def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(tmp_path, monkeypatch):
+    inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
+
+    def transport(*_args):
+        inputs[6].manifest["core_config"]["version"] = "2026.9.2"
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"})
+
+    with pytest.raises(backup.CandidateBackupError, match="semantic"):
+        backup.reprove_prepared_candidate_backup(
+            prepared,
+            authorization,
+            *inputs,
+            token="secret-token",
+            transport=transport,
+        )

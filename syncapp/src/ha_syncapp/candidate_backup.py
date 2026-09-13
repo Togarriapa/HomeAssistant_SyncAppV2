@@ -21,6 +21,7 @@ from .candidate_semantics import (
 from .candidate_stage import CandidateStage
 from .candidate_validation import CandidateStaticValidation
 from .core_version_evidence import CoreVersionEvidence
+from .prepared_deployment import PreparedDeployment, PreparedDeploymentError
 from .runtime_inventory import RuntimeInventoryInput
 
 _SUPERVISOR_ROOT: Final = "http://supervisor"
@@ -135,6 +136,75 @@ def create_candidate_backup(
         raise
     except Exception:
         raise CandidateBackupError("candidate backup evidence could not be established") from None
+
+
+def reprove_prepared_candidate_backup(
+    prepared: PreparedDeployment,
+    semantic: CandidateSemanticValidation,
+    static: CandidateStaticValidation,
+    integrity: CandidateIntegrity,
+    stage: CandidateStage,
+    dependencies: CandidateDependencyAnalysis,
+    impact: CandidateImpactAnalysis,
+    risk: CandidateRiskClassification,
+    runtime: RuntimeInventoryInput,
+    version: CoreVersionEvidence,
+    *,
+    token: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    transport: SupervisorBackupTransport | None = None,
+) -> CandidateBackupEvidence:
+    """Re-prove one prepared backup without creating a new backup or authorizing Apply."""
+    try:
+        if type(prepared) is not PreparedDeployment:
+            raise CandidateBackupError("prepared deployment evidence is invalid")
+        try:
+            prepared.validate()
+        except PreparedDeploymentError:
+            raise CandidateBackupError("prepared deployment evidence is invalid") from None
+
+        _verify_semantic(
+            semantic, static, integrity, stage, dependencies, impact, risk, runtime, version
+        )
+        evidence = prepared.evidence
+        expected = CandidateBackupEvidence(
+            target=semantic.target,
+            repository_id=semantic.repository_id,
+            baseline_sha=semantic.baseline_sha,
+            candidate_sha=semantic.candidate_sha,
+            stage_manifest_sha256=semantic.stage_manifest_sha256,
+            runtime_sha256=semantic.runtime_sha256,
+            risk_level=semantic.risk_level,
+            core_version=semantic.core_version,
+            backup_slug=evidence.backup_slug,
+        )
+        if evidence != expected:
+            raise CandidateBackupError("prepared deployment evidence does not match candidate")
+
+        bearer = _resolve_token(token)
+        _validate_limits(timeout_seconds, max_response_bytes)
+        sender = transport or _default_transport
+        info = _request_json(
+            "GET",
+            f"{_SUPERVISOR_ROOT}/backups/{evidence.backup_slug}/info",
+            bearer,
+            None,
+            timeout_seconds,
+            max_response_bytes,
+            sender,
+        )
+        _verify_backup_info(info, evidence.backup_slug, evidence.core_version)
+        _verify_semantic(
+            semantic, static, integrity, stage, dependencies, impact, risk, runtime, version
+        )
+        if prepared.evidence != expected:
+            raise CandidateBackupError("prepared deployment evidence changed during verification")
+        return evidence
+    except CandidateBackupError:
+        raise
+    except Exception:
+        raise CandidateBackupError("prepared candidate backup could not be re-proven") from None
 
 
 def _verify_semantic(
