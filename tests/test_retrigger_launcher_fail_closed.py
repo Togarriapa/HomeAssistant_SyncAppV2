@@ -8,7 +8,9 @@ from unittest.mock import Mock
 from ha_syncapp.config import Config
 
 
-def test_launcher_stops_child_when_required_schedule_setup_fails(monkeypatch, tmp_path: Path) -> None:
+def test_launcher_stops_child_when_required_schedule_setup_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
     from ha_syncapp import launcher
 
     child = Mock()
