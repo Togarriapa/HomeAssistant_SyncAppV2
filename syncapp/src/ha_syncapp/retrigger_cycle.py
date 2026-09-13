@@ -61,7 +61,7 @@ def run_retrigger_cycle(
     home_assistant_root: Path,
     snapshot_staging_root: Path,
     local_workspace_root: Path,
-    recorder_database: Path,
+    recorder_database: Path | None,
     database_staging_root: Path,
     database_snapshot_root: Path,
     database_workspace_root: Path,
@@ -94,15 +94,18 @@ def run_retrigger_cycle(
             target,
             github_token,
         )
-        database_sync = run_database_sync_retrigger_pass(
-            store,
-            recorder_database,
-            database_staging_root,
-            database_snapshot_root,
-            database_workspace_root,
-            target,
-            github_token,
-        )
+        if recorder_database is None:
+            database_sync = DatabaseSyncRetriggerResult(recovered_interrupted=0, processed=None)
+        else:
+            database_sync = run_database_sync_retrigger_pass(
+                store,
+                recorder_database,
+                database_staging_root,
+                database_snapshot_root,
+                database_workspace_root,
+                target,
+                github_token,
+            )
         runtime_sync = run_runtime_sync_retrigger_pass(
             store,
             runtime_staging_root,
