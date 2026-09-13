@@ -327,17 +327,16 @@ def test_mutation_time_repo_verification_failure_is_sanitized(tmp_path: Path) ->
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         side_effect=RepositoryVerificationError("secret-token"),
-    ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="repository verification failed",
-        ) as caught:
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="secret-token",
-                runner=runner,
-            )
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="repository verification failed",
+    ) as caught:
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="secret-token",
+            runner=runner,
+        )
     assert "secret-token" not in str(caught.value)
 
 
@@ -362,17 +361,16 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=current,
-    ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="replacement was rejected",
-        ) as caught:
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="test-token",
-                runner=runner,
-            )
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="replacement was rejected",
+    ) as caught:
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
     assert "secret-token" not in str(caught.value)
 
 
@@ -394,17 +392,16 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=current,
-    ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="transport failed",
-        ) as caught:
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="test-token",
-                runner=fail,
-            )
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="transport failed",
+    ) as caught:
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=fail,
+        )
     assert "secret-token" not in str(caught.value)
 
     def invalid_result(
@@ -417,14 +414,13 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=current,
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="transport failed",
     ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="transport failed",
-        ):
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="test-token",
-                runner=invalid_result,
-            )
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=invalid_result,
+        )
