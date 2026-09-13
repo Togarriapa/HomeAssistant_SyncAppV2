@@ -31,15 +31,9 @@ def _evidence() -> TrustedDatabaseHistoryEvidence:
             commit_sha=_sha(3),
         ),
         records=(
-            DatabaseHistoryRecord(
-                _sha(3), REFERENCE - timedelta(days=1), (_sha(2),)
-            ),
-            DatabaseHistoryRecord(
-                _sha(2), REFERENCE - timedelta(days=5), (_sha(1),)
-            ),
-            DatabaseHistoryRecord(
-                _sha(1), REFERENCE - timedelta(days=10), ()
-            ),
+            DatabaseHistoryRecord(_sha(3), REFERENCE - timedelta(days=1), (_sha(2),)),
+            DatabaseHistoryRecord(_sha(2), REFERENCE - timedelta(days=5), (_sha(1),)),
+            DatabaseHistoryRecord(_sha(1), REFERENCE - timedelta(days=10), ()),
         ),
         reference_time=REFERENCE,
         retention_days=7,
@@ -51,9 +45,7 @@ def test_prewrite_reproves_exact_repository_and_database_head(
 ) -> None:
     calls: list[tuple[str, str, int, str]] = []
 
-    def fake_fetch(
-        target: str, token: str, *, expected_id: int, branch: str
-    ) -> BranchHead:
+    def fake_fetch(target: str, token: str, *, expected_id: int, branch: str) -> BranchHead:
         calls.append((target, token, expected_id, branch))
         return BranchHead(
             target="owner/private-repo",
@@ -66,9 +58,7 @@ def test_prewrite_reproves_exact_repository_and_database_head(
         "ha_syncapp.database_history_prewrite.fetch_trusted_branch_head", fake_fetch
     )
 
-    proof = reprove_database_history_prewrite(
-        evidence=_evidence(), token="secret-token"
-    )
+    proof = reprove_database_history_prewrite(evidence=_evidence(), token="secret-token")
 
     assert calls == [("owner/private-repo", "secret-token", 123, "database")]
     assert proof.target == "owner/private-repo"
@@ -126,9 +116,7 @@ def test_prewrite_sanitizes_repository_verification_failure(
     def fail(*args: object, **kwargs: object) -> BranchHead:
         raise RepositoryVerificationError("secret-token should not escape")
 
-    monkeypatch.setattr(
-        "ha_syncapp.database_history_prewrite.fetch_trusted_branch_head", fail
-    )
+    monkeypatch.setattr("ha_syncapp.database_history_prewrite.fetch_trusted_branch_head", fail)
 
     with pytest.raises(DatabaseHistoryPrewriteError) as caught:
         reprove_database_history_prewrite(evidence=_evidence(), token="secret-token")
