@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 
 from .log_history_evidence import TrustedLogHistoryEvidence
 from .log_history_reader import LogHistoryReadError, fetch_trusted_log_history_evidence
@@ -50,7 +50,6 @@ def log_retention_work_key(evidence: TrustedLogHistoryEvidence) -> str:
             "branch": LOG_HISTORY_BRANCH,
             "head": evidence.expected_head_sha,
             "pruned": evidence.plan.pruned_shas,
-            "reference_time": evidence.plan.reference_time.astimezone(UTC).isoformat(),
             "repository_id": evidence.repository_id,
             "retained": evidence.plan.retained_shas,
             "retention_days": 30,
@@ -87,9 +86,7 @@ def discover_log_retention_work(
             evidence.target.casefold() != target.casefold()
             or evidence.repository_id != repository_id
         ):
-            raise LogRetentionWorkError(
-                "logs retention evidence describes another repository"
-            )
+            raise LogRetentionWorkError("logs retention evidence describes another repository")
         return store.enqueue_work(
             LOG_RETENTION_WORK_KIND,
             log_retention_work_key(evidence),

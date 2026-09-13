@@ -82,9 +82,7 @@ def test_discovery_of_same_exact_logs_plan_converges_on_one_item(
     store = _store(tmp_path)
     evidence = _evidence()
     fetch = Mock(return_value=evidence)
-    monkeypatch.setattr(
-        "ha_syncapp.log_retention_work.fetch_trusted_log_history_evidence", fetch
-    )
+    monkeypatch.setattr("ha_syncapp.log_retention_work.fetch_trusted_log_history_evidence", fetch)
     try:
         first = discover_log_retention_work(
             store,
