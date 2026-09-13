@@ -8,9 +8,11 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 from .config import Config, ConfigError, load_config
 from .retrigger_ipc import RetriggerIPCError, request_retrigger_once, retrigger_socket_path
@@ -89,7 +91,10 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
         if child.poll() is None:
             child.terminate()
 
-    previous_handlers: dict[signal.Signals, object] = {}
+    previous_handlers: dict[
+        signal.Signals,
+        signal.Handlers | int | Callable[[int, FrameType | None], Any] | None,
+    ] = {}
     for sig in (signal.SIGTERM, signal.SIGINT):
         previous_handlers[sig] = signal.getsignal(sig)
         signal.signal(sig, request_stop)
