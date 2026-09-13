@@ -121,11 +121,15 @@ def run(data_dir: Path, stop: app.Shutdown) -> None:
         if not stop.requested:
             app._run_startup_local_if_configured(store, config, data_dir)
             if not stop.requested:
-                local_change_service = app._local_change_service_if_configured(store, config, data_dir)
+                local_change_service = app._local_change_service_if_configured(
+                    store, config, data_dir
+                )
             if not stop.requested:
                 app._run_startup_database_if_configured(store, config, data_dir)
             if not stop.requested:
-                database_sync_service = app._database_sync_service_if_configured(store, config, data_dir)
+                database_sync_service = app._database_sync_service_if_configured(
+                    store, config, data_dir
+                )
             if not stop.requested:
                 app._run_startup_runtime_if_configured(store, config, data_dir)
             if not stop.requested:
@@ -133,7 +137,9 @@ def run(data_dir: Path, stop: app.Shutdown) -> None:
             if not stop.requested:
                 log_sync_service = app._log_sync_service_if_configured(store, config, data_dir)
             if not stop.requested:
-                candidate_detection_service = app._candidate_detection_service_if_configured(store, config)
+                candidate_detection_service = app._candidate_detection_service_if_configured(
+                    store, config
+                )
 
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
