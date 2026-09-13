@@ -29,6 +29,7 @@ SCHEMA_VERSION = 5
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+MAX_RECOVERY_WORK_EVIDENCE_ROWS = 4096
 
 
 class StateError(RuntimeError):
@@ -53,6 +54,18 @@ class WorkItem:
 
     work_kind: str
     work_key: str
+    status: str
+    attempts: int
+    created_at: datetime
+    updated_at: datetime
+    next_attempt_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryWorkEvidence:
+    """Bounded work lifecycle evidence that deliberately excludes the work key."""
+
+    work_kind: str
     status: str
     attempts: int
     created_at: datetime
@@ -609,6 +622,48 @@ class StateStore:
         if len(rows) != 1:
             raise StateError("Work record is missing")
         return self._work_from_row(rows[0])
+
+    def recovery_work_evidence(self) -> tuple[RecoveryWorkEvidence, ...]:
+        """Read bounded recovery status metadata without selecting sensitive work keys."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT work_kind, status, attempts, created_at, updated_at, next_attempt_at "
+                "FROM work ORDER BY work_kind, status, attempts, created_at, updated_at "
+                "LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read recovery work evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Recovery work evidence exceeds the limit")
+
+        evidence: list[RecoveryWorkEvidence] = []
+        for row in rows:
+            if len(row) != 6:
+                raise StateError("Invalid recovery work evidence")
+            work_kind, status, attempts, created_at, updated_at, next_attempt_at = row
+            if (
+                not isinstance(work_kind, str)
+                or status not in {"pending", "running", "retry", "blocked", "succeeded"}
+                or type(attempts) is not int
+                or attempts < 0
+            ):
+                raise StateError("Invalid recovery work evidence")
+            _validate_work_kind(work_kind)
+            evidence.append(
+                RecoveryWorkEvidence(
+                    work_kind=work_kind,
+                    status=status,
+                    attempts=attempts,
+                    created_at=_parse_timestamp(created_at),
+                    updated_at=_parse_timestamp(updated_at),
+                    next_attempt_at=(
+                        None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
+                    ),
+                )
+            )
+        return tuple(evidence)
 
     def enqueue_work(
         self,
