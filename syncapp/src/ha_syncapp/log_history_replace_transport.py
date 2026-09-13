@@ -8,7 +8,7 @@ import stat
 import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
@@ -22,7 +22,7 @@ _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
-class LogHistoryReplacementFailureKind(str, Enum):
+class LogHistoryReplacementFailureKind(StrEnum):
     """Stable failure classes used by durable logs-retention recovery."""
 
     INVALID = "invalid"
