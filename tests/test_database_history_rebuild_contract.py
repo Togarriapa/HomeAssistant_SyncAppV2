@@ -82,7 +82,9 @@ def _build_artifact(repository: Path) -> DatabaseHistoryReplacementArtifact:
     )
 
 
-def test_builder_severs_pruned_ancestry_and_binds_exact_retained_content(tmp_path: Path) -> None:
+def test_builder_severs_pruned_ancestry_and_binds_exact_retained_content(
+    tmp_path: Path,
+) -> None:
     repository = _make_repository(tmp_path)
     artifact = _build_artifact(repository)
 
@@ -148,7 +150,10 @@ def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> 
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=moved,
     ):
-        with pytest.raises(DatabaseHistoryReplacementTransportError, match="changed before replacement"):
+        with pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="changed before replacement",
+        ):
             replace_database_history(
                 authorization=authorization,
                 artifact=artifact,
@@ -163,7 +168,10 @@ def test_transport_rejects_artifact_bound_to_another_repository(tmp_path: Path) 
     authorization = _authorization()
     artifact = _build_artifact(repository)
 
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="artifact is invalid"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="artifact is invalid",
+    ):
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -199,5 +207,7 @@ def test_builder_does_not_touch_refs_or_push(tmp_path: Path) -> None:
     )
 
     assert seen
-    assert all("push" not in command and "update-ref" not in command for command in seen)
+    assert all(
+        "push" not in command and "update-ref" not in command for command in seen
+    )
     assert shutil.which("git") is not None
