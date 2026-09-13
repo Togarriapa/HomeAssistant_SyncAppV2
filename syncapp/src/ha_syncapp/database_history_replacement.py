@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ha_syncapp.database_history_evidence import TrustedDatabaseHistoryEvidence
+from ha_syncapp.database_history_prewrite import TrustedDatabaseHistoryPrewrite
 from ha_syncapp.database_retention import (
     DATABASE_BRANCH,
     DatabaseRetentionError,
@@ -13,16 +14,6 @@ from ha_syncapp.database_retention import (
 
 class DatabaseHistoryReplacementAuthorizationError(ValueError):
     """Raised when database history replacement cannot be authorized safely."""
-
-
-@dataclass(frozen=True, slots=True)
-class TrustedDatabaseHistoryPrewrite:
-    """Fresh identity/head proof for a future database-only replacement."""
-
-    target: str
-    repository_id: int
-    branch: str
-    expected_head_sha: str
 
 
 @dataclass(frozen=True, slots=True)
