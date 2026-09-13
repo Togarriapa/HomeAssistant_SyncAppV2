@@ -246,7 +246,9 @@ def test_preapply_reproof_reads_only_exact_prepared_backup(tmp_path, monkeypatch
     assert calls[0][2]["Authorization"] == "Bearer secret-token"
 
 
-def test_preapply_reproof_rejects_prepared_candidate_binding_mismatch(tmp_path, monkeypatch):
+def test_preapply_reproof_rejects_prepared_candidate_binding_mismatch(
+    tmp_path, monkeypatch
+):
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
     changed = PreparedDeployment(
         prepared.deployment_id,
@@ -282,7 +284,9 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
         )
 
 
-def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(tmp_path, monkeypatch):
+def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(
+    tmp_path, monkeypatch
+):
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
 
     def transport(*_args):
