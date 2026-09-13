@@ -324,13 +324,16 @@ def test_mutation_time_repo_verification_failure_is_sanitized(tmp_path: Path) ->
             return _history_read(command)
         raise AssertionError("push must not run after repository verification fails")
 
-    with patch(
-        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
-        side_effect=RepositoryVerificationError("secret-token"),
-    ), pytest.raises(
-        DatabaseHistoryReplacementTransportError,
-        match="repository verification failed",
-    ) as caught:
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            side_effect=RepositoryVerificationError("secret-token"),
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="repository verification failed",
+        ) as caught,
+    ):
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -358,13 +361,16 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
             "stale https://secret-token@github.com/owner/repo",
         )
 
-    with patch(
-        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
-        return_value=current,
-    ), pytest.raises(
-        DatabaseHistoryReplacementTransportError,
-        match="replacement was rejected",
-    ) as caught:
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            return_value=current,
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="replacement was rejected",
+        ) as caught,
+    ):
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -389,13 +395,16 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
             return _history_read(command)
         raise OSError("https://secret-token@github.com/owner/repo")
 
-    with patch(
-        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
-        return_value=current,
-    ), pytest.raises(
-        DatabaseHistoryReplacementTransportError,
-        match="transport failed",
-    ) as caught:
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            return_value=current,
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="transport failed",
+        ) as caught,
+    ):
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -411,12 +420,15 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
             return _history_read(command)
         return cast(subprocess.CompletedProcess[str], object())
 
-    with patch(
-        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
-        return_value=current,
-    ), pytest.raises(
-        DatabaseHistoryReplacementTransportError,
-        match="transport failed",
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            return_value=current,
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="transport failed",
+        ),
     ):
         replace_database_history(
             authorization=authorization,
