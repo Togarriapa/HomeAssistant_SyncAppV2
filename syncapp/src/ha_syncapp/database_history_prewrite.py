@@ -15,14 +15,20 @@ class DatabaseHistoryPrewriteError(RuntimeError):
     """Database history replacement cannot safely proceed from supplied evidence."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class TrustedDatabaseHistoryPrewrite:
-    """Fresh identity/head proof for a future database-only replacement."""
+    """Fresh identity/head proof produced only by the database prewrite verifier."""
 
     target: str
     repository_id: int
     branch: str
     expected_head_sha: str
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise TypeError(
+            "TrustedDatabaseHistoryPrewrite must be produced by "
+            "reprove_database_history_prewrite()"
+        )
 
 
 def reprove_database_history_prewrite(
@@ -46,12 +52,16 @@ def reprove_database_history_prewrite(
         ) from None
 
     _require_unchanged_head(evidence, current)
-    return TrustedDatabaseHistoryPrewrite(
-        target=current.target,
-        repository_id=current.repository_id,
-        branch=current.branch,
-        expected_head_sha=current.commit_sha,
-    )
+    return _trusted_database_history_prewrite(current)
+
+
+def _trusted_database_history_prewrite(current: BranchHead) -> TrustedDatabaseHistoryPrewrite:
+    proof = object.__new__(TrustedDatabaseHistoryPrewrite)
+    object.__setattr__(proof, "target", current.target)
+    object.__setattr__(proof, "repository_id", current.repository_id)
+    object.__setattr__(proof, "branch", current.branch)
+    object.__setattr__(proof, "expected_head_sha", current.commit_sha)
+    return proof
 
 
 def _validate_evidence_boundary(evidence: TrustedDatabaseHistoryEvidence) -> None:
