@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import os
 import signal
-import subprocess  # nosec B404 - only fixed sys.executable argv is launched, never a shell
+# Fixed interpreter/module argv only; no shell or user-selected executable.
+import subprocess  # nosec B404
 import sys
 import time
 from collections.abc import Callable
@@ -142,7 +143,7 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
     finally:
         if schedule is not None:
             schedule.stop()
-        if child.poll() is None:
+        if not setup_failed and child.poll() is None:
             child.terminate()
         return_code = child.wait() if not setup_failed else _RETRIGGER_SETUP_FAILURE
         for sig, handler in previous_handlers.items():
