@@ -118,7 +118,17 @@ def test_valid_claim_collects_combined_core_data_then_executes_once(
         supplied_inventory: RuntimeInventoryInput,
         *args: object,
     ) -> RuntimeSyncWorkResult:
-        assert supplied_inventory is inventory
+        assert supplied_inventory.manifest == inventory.manifest
+        recovery = supplied_inventory.analysis["recovery"]
+        assert isinstance(recovery, dict)
+        assert recovery["total"] == 1
+        assert recovery["statuses"] == {
+            "blocked": 0,
+            "pending": 0,
+            "retry": 0,
+            "running": 1,
+            "succeeded": 0,
+        }
         events.append("execute")
         completed = state.complete_work(item)
         return RuntimeSyncWorkResult(
@@ -136,6 +146,33 @@ def test_valid_claim_collects_combined_core_data_then_executes_once(
     assert events == ["collect", "execute"]
     assert result.processed is not None
     assert result.processed.work.status == "succeeded"
+
+
+def test_recovery_status_failure_moves_claim_to_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    runtime_sync_work.enqueue_runtime_sync_work(store, TARGET)
+    monkeypatch.setattr(
+        runtime_sync_process,
+        "collect_core_runtime_bundle",
+        lambda **kwargs: _inventory(),
+    )
+
+    def fail(*args: object, **kwargs: object) -> RuntimeInventoryInput:
+        raise runtime_sync_process.RetriggerRuntimeStatusError("private work-key")
+
+    monkeypatch.setattr(runtime_sync_process, "collect_retrigger_runtime_inventory", fail)
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.processed is not None
+    assert result.processed.work.status == "retry"
+    assert result.processed.synchronization is None
+    assert "private work-key" not in repr(result)
 
 
 def test_core_bundle_failure_moves_claim_to_retry_without_leaking_tokens(
