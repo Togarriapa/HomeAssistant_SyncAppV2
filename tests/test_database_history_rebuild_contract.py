@@ -166,12 +166,15 @@ def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> 
             return _history_read(command)
         raise AssertionError("push must not run after the database head moves")
 
-    with patch(
-        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
-        return_value=moved,
-    ), pytest.raises(
-        DatabaseHistoryReplacementTransportError,
-        match="changed before replacement",
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            return_value=moved,
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="changed before replacement",
+        ),
     ):
         replace_database_history(
             authorization=authorization,
