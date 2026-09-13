@@ -32,6 +32,11 @@ from ha_syncapp.log_collection import (
     LogCollectionResult,
     collect_and_enqueue_supervisor_logs,
 )
+from ha_syncapp.log_retention_work import (
+    LogRetentionPassResult,
+    LogRetentionWorkError,
+    run_log_retention_work_pass,
+)
 from ha_syncapp.log_sync_retrigger import (
     LogSyncRetriggerError,
     LogSyncRetriggerResult,
@@ -58,6 +63,7 @@ class RetriggerCycleResult:
     database_retention: DatabaseRetentionPassResult
     runtime_sync: RuntimeSyncRetriggerResult
     log_sync: LogSyncRetriggerResult
+    log_retention: LogRetentionPassResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -141,6 +147,7 @@ def run_retrigger_cycle(
         )
         if log_artifact_root is None:
             log_sync = LogSyncRetriggerResult(recovered_interrupted=0, processed=None)
+            log_retention = LogRetentionPassResult(recovered_interrupted=0, processed=None)
         else:
             if log_snapshot_root is None or log_workspace_root is None:
                 raise RetriggerCycleError("retrigger logs work roots became incomplete")
@@ -151,6 +158,14 @@ def run_retrigger_cycle(
                 log_workspace_root,
                 target,
                 github_token,
+            )
+            log_retention = run_log_retention_work_pass(
+                store,
+                log_workspace_root / "retention",
+                target,
+                github_token,
+                reference_time=datetime.now(UTC),
+                recover_interrupted=True,
             )
 
         candidate_detection = detect_and_enqueue_trusted_candidate(
@@ -174,6 +189,7 @@ def run_retrigger_cycle(
         DatabaseSyncRetriggerError,
         RuntimeSyncRetriggerError,
         LogSyncRetriggerError,
+        LogRetentionWorkError,
         CandidateDetectionError,
         RepositoryVerificationError,
         LogCollectionError,
@@ -187,6 +203,7 @@ def run_retrigger_cycle(
         database_retention=database_retention,
         runtime_sync=runtime_sync,
         log_sync=log_sync,
+        log_retention=log_retention,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

@@ -12,6 +12,11 @@ from .log_collection import (
     LogCollectionResult,
     collect_and_enqueue_supervisor_logs,
 )
+from .log_retention_work import (
+    LogRetentionPassResult,
+    LogRetentionWorkError,
+    run_log_retention_work_pass,
+)
 from .log_sync_process import (
     LogSyncProcessError,
     LogSyncProcessResult,
@@ -31,10 +36,11 @@ class LogSyncTickResult:
     due: bool
     collection: LogCollectionResult | None
     processed: LogSyncProcessResult | None
+    retention: LogRetentionPassResult | None = None
 
 
 class LogSyncService:
-    """Collect and process at most one routine logs generation when due."""
+    """Collect, publish and retain at most one routine logs generation when due."""
 
     def __init__(
         self,
@@ -77,23 +83,21 @@ class LogSyncService:
         self._next_due = current + self._interval_seconds
 
     def tick(self, now: float) -> LogSyncTickResult:
-        """Collect once and process at most one durable logs item when due."""
+        """Collect, publish and process at most one durable retention item when due."""
         current = self._advance_clock(now)
         if self._next_due is None or self._stopped:
             raise LogSyncServiceError("logs service is not started")
         if current < self._next_due:
             return LogSyncTickResult(due=False, collection=None, processed=None)
 
-        # Advance from the observed time rather than replaying elapsed periods. A
-        # delayed owner loop therefore produces one bounded collection, not a
-        # catch-up storm of historical intervals.
         self._next_due = current + self._interval_seconds
+        reference_time = datetime.now(UTC)
         try:
             collection = collect_and_enqueue_supervisor_logs(
                 self._store,
                 self._artifact_root,
                 self._target,
-                reference_time=datetime.now(UTC),
+                reference_time=reference_time,
                 token=self._core_token,
             )
             processed = run_log_sync_process(
@@ -104,9 +108,22 @@ class LogSyncService:
                 self._target,
                 self._github_token,
             )
-        except (LogCollectionError, LogSyncProcessError) as exc:
+            retention = run_log_retention_work_pass(
+                self._store,
+                self._workspace_root / "retention",
+                self._target,
+                self._github_token,
+                reference_time=reference_time,
+                recover_interrupted=False,
+            )
+        except (LogCollectionError, LogSyncProcessError, LogRetentionWorkError) as exc:
             raise LogSyncServiceError("logs service tick failed closed") from exc
-        return LogSyncTickResult(due=True, collection=collection, processed=processed)
+        return LogSyncTickResult(
+            due=True,
+            collection=collection,
+            processed=processed,
+            retention=retention,
+        )
 
     def stop(self) -> None:
         """Disarm future collection before the owner releases durable state."""

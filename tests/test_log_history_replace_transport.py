@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import replace
@@ -8,16 +9,65 @@ from pathlib import Path
 import pytest
 from ha_syncapp.log_history_replace_transport import (
     LogHistoryReplacementTransportError,
+    build_log_history_replacement,
     replace_logs_history,
 )
 from ha_syncapp.log_history_replacement import LogHistoryReplacementAuthorization
 
 EXPECTED = "1" * 40
-REPLACEMENT = "2" * 40
+TOKEN = "github-secret-sentinel"
+
+
+def _git(repository: Path, *args: str, input_text: str | None = None) -> str:
+    result = subprocess.run(  # nosec B603 B607
+        ("git", *args),
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+        input=input_text,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(repository),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_AUTHOR_NAME": "SyncApp Test",
+            "GIT_AUTHOR_EMAIL": "syncapp@example.invalid",
+            "GIT_COMMITTER_NAME": "SyncApp Test",
+            "GIT_COMMITTER_EMAIL": "syncapp@example.invalid",
+        },
+    )
+    return result.stdout.strip()
+
+
+def _repository(tmp_path: Path) -> tuple[Path, LogHistoryReplacementAuthorization]:
+    repository = tmp_path / "logs-staging"
+    repository.mkdir()
+    _git(repository, "init")
+    shas: list[str] = []
+    for index in range(3):
+        (repository / "logs.jsonl").write_text(
+            f"entry-{index}\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", "logs.jsonl")
+        _git(repository, "commit", "-m", f"logs-{index}")
+        shas.append(_git(repository, "rev-parse", "HEAD"))
+    newest, middle, oldest = shas[2], shas[1], shas[0]
+    authorization = LogHistoryReplacementAuthorization(
+        target="owner/private-repo",
+        repository_id=123,
+        branch="logs",
+        expected_head_sha=newest,
+        retained_shas=(newest, middle),
+        pruned_shas=(oldest,),
+    )
+    return repository, authorization
 
 
 def _authorization(
-    *, pruned: bool = True, branch: str = "logs"
+    *,
+    pruned: bool = True,
+    branch: str = "logs",
 ) -> LogHistoryReplacementAuthorization:
     return LogHistoryReplacementAuthorization(
         target="owner/private-repo",
@@ -29,52 +79,91 @@ def _authorization(
     )
 
 
-def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
-    calls: list[tuple[tuple[str, ...], Path, float]] = []
-
+def _delegating_runner(
+    *,
+    push_returncode: int = 0,
+    push_stderr: str = "",
+    push_error: OSError | None = None,
+    calls: list[tuple[tuple[str, ...], Path, float]] | None = None,
+):
     def runner(
-        command: tuple[str, ...], *, cwd: Path, timeout: float
+        command: tuple[str, ...],
+        *,
+        cwd: Path,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
-        calls.append((command, cwd, timeout))
-        return subprocess.CompletedProcess(command, 0, "", "")
+        if "push" in command:
+            if calls is not None:
+                calls.append((command, cwd, timeout))
+            if push_error is not None:
+                raise push_error
+            return subprocess.CompletedProcess(
+                command,
+                push_returncode,
+                "",
+                push_stderr,
+            )
+        return subprocess.run(  # nosec B603
+            command,
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            timeout=timeout,
+            env={
+                **os.environ,
+                "GIT_CONFIG_NOSYSTEM": "1",
+            },
+        )
+
+    return runner
+
+
+def test_replacement_uses_exact_logs_force_with_lease(tmp_path: Path) -> None:
+    repository, authorization = _repository(tmp_path)
+    artifact = build_log_history_replacement(
+        authorization=authorization,
+        repository=repository,
+    )
+    calls: list[tuple[tuple[str, ...], Path, float]] = []
 
     assert (
         replace_logs_history(
-            authorization=_authorization(),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
+            authorization=authorization,
+            artifact=artifact,
+            token=TOKEN,
             timeout=12,
-            runner=runner,
+            runner=_delegating_runner(calls=calls),
         )
         is True
     )
-    assert calls == [
-        (
-            (
-                shutil.which("git"),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "credential.helper=",
-                "push",
-                "--porcelain",
-                "--no-verify",
-                "https://github.com/owner/private-repo.git",
-                f"{REPLACEMENT}:refs/heads/logs",
-                f"--force-with-lease=refs/heads/logs:{EXPECTED}",
-            ),
-            tmp_path,
-            12.0,
-        )
-    ]
+    assert len(calls) == 1
+    command, cwd, timeout = calls[0]
+    assert cwd == repository
+    assert timeout == 12.0
+    assert command[0] == shutil.which("git")
+    assert TOKEN not in " ".join(command)
+    assert "credential.helper=" in command
+    assert any(value.startswith("core.askPass=") for value in command)
+    assert command[-3:] == (
+        "https://github.com/owner/private-repo.git",
+        f"{artifact.replacement_head_sha}:refs/heads/logs",
+        f"--force-with-lease=refs/heads/logs:{authorization.expected_head_sha}",
+    )
 
 
 @pytest.mark.parametrize(
     ("target", "repository_id"),
-    [("invalid", 123), ("owner/repo", 0), ("owner/..", 123), ("owner/repo name", 123)],
+    [
+        ("invalid", 123),
+        ("owner/repo", 0),
+        ("owner/..", 123),
+        ("owner/repo name", 123),
+    ],
 )
 def test_replacement_rejects_invalid_authorized_repository_identity(
-    tmp_path: Path,
     target: str,
     repository_id: int,
 ) -> None:
@@ -84,113 +173,125 @@ def test_replacement_rejects_invalid_authorized_repository_identity(
         repository_id=repository_id,
     )
 
-    with pytest.raises(LogHistoryReplacementTransportError, match="identity is invalid"):
-        replace_logs_history(
-            authorization=authorization,
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
-        )
+    with pytest.raises(
+        LogHistoryReplacementTransportError,
+        match="identity is invalid",
+    ):
+        replace_logs_history(authorization=authorization)
 
 
 def test_replacement_rejects_symlink_repository(tmp_path: Path) -> None:
-    repository = tmp_path / "repository"
-    repository.mkdir()
+    repository, authorization = _repository(tmp_path)
+    artifact = build_log_history_replacement(
+        authorization=authorization,
+        repository=repository,
+    )
     link = tmp_path / "link"
     link.symlink_to(repository, target_is_directory=True)
 
-    with pytest.raises(LogHistoryReplacementTransportError, match="path is invalid"):
+    with pytest.raises(
+        LogHistoryReplacementTransportError,
+        match="path is invalid",
+    ):
         replace_logs_history(
-            authorization=_authorization(),
+            authorization=authorization,
+            artifact=artifact,
             repository=link,
-            replacement_head_sha=REPLACEMENT,
         )
 
 
-def test_noop_authorization_runs_no_transport(tmp_path: Path) -> None:
+def test_noop_authorization_runs_no_transport() -> None:
     def runner(
-        command: tuple[str, ...], *, cwd: Path, timeout: float
+        command: tuple[str, ...],
+        *,
+        cwd: Path,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         raise AssertionError("transport must not run")
 
     assert (
         replace_logs_history(
             authorization=_authorization(pruned=False),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
             runner=runner,
         )
         is False
     )
 
 
-def test_replacement_rejects_non_logs_authorization(tmp_path: Path) -> None:
-    with pytest.raises(LogHistoryReplacementTransportError, match="restricted to logs"):
-        replace_logs_history(
-            authorization=_authorization(branch="main"),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
-        )
+def test_replacement_rejects_non_logs_authorization() -> None:
+    with pytest.raises(
+        LogHistoryReplacementTransportError,
+        match="restricted to logs",
+    ):
+        replace_logs_history(authorization=_authorization(branch="main"))
 
 
-@pytest.mark.parametrize("replacement", ["bad", EXPECTED, "A" * 40, "2" * 64])
-def test_replacement_rejects_invalid_replacement_head(tmp_path: Path, replacement: str) -> None:
-    with pytest.raises(LogHistoryReplacementTransportError, match="head is invalid"):
+@pytest.mark.parametrize(
+    "timeout",
+    [0, -1, float("nan"), float("inf"), 301, True],
+)
+def test_replacement_rejects_invalid_or_unbounded_timeout(
+    tmp_path: Path,
+    timeout: float,
+) -> None:
+    repository, authorization = _repository(tmp_path)
+    artifact = build_log_history_replacement(
+        authorization=authorization,
+        repository=repository,
+    )
+
+    with pytest.raises(
+        LogHistoryReplacementTransportError,
+        match="timeout is invalid",
+    ):
         replace_logs_history(
-            authorization=_authorization(),
-            repository=tmp_path,
-            replacement_head_sha=replacement,
+            authorization=authorization,
+            artifact=artifact,
+            timeout=timeout,
         )
 
 
 def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
-    def runner(
-        command: tuple[str, ...], *, cwd: Path, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            command,
-            1,
-            "",
-            "stale info containing https://secret-token@github.com/owner/repo",
-        )
+    repository, authorization = _repository(tmp_path)
+    artifact = build_log_history_replacement(
+        authorization=authorization,
+        repository=repository,
+    )
+    runner = _delegating_runner(
+        push_returncode=1,
+        push_stderr=("stale info containing https://secret-token@github.com/owner/repo"),
+    )
 
     with pytest.raises(
-        LogHistoryReplacementTransportError, match="history replacement was rejected"
+        LogHistoryReplacementTransportError,
+        match="history replacement was rejected",
     ) as caught:
         replace_logs_history(
-            authorization=_authorization(),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
+            authorization=authorization,
+            artifact=artifact,
+            token=TOKEN,
             runner=runner,
         )
 
     assert "secret-token" not in str(caught.value)
 
 
-@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), 301, True])
-def test_replacement_rejects_invalid_or_unbounded_timeout(
-    tmp_path: Path,
-    timeout: float,
-) -> None:
-    with pytest.raises(LogHistoryReplacementTransportError, match="timeout is invalid"):
-        replace_logs_history(
-            authorization=_authorization(),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
-            timeout=timeout,
-        )
-
-
 def test_transport_exception_is_sanitized(tmp_path: Path) -> None:
-    def runner(
-        command: tuple[str, ...], *, cwd: Path, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        raise OSError("https://secret-token@github.com/owner/repo")
+    repository, authorization = _repository(tmp_path)
+    artifact = build_log_history_replacement(
+        authorization=authorization,
+        repository=repository,
+    )
+    runner = _delegating_runner(push_error=OSError("https://secret-token@github.com/owner/repo"))
 
-    with pytest.raises(LogHistoryReplacementTransportError, match="transport failed") as caught:
+    with pytest.raises(
+        LogHistoryReplacementTransportError,
+        match="transport failed",
+    ) as caught:
         replace_logs_history(
-            authorization=_authorization(),
-            repository=tmp_path,
-            replacement_head_sha=REPLACEMENT,
+            authorization=authorization,
+            artifact=artifact,
+            token=TOKEN,
             runner=runner,
         )
 

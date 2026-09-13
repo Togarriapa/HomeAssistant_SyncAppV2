@@ -9,6 +9,7 @@ from ha_syncapp.log_collection import (
     LogCollectionResult,
     collect_and_enqueue_supervisor_logs,
 )
+from ha_syncapp.log_retention_work import LogRetentionPassResult
 from ha_syncapp.log_sync import LogSyncError
 from ha_syncapp.log_sync_process import LogSyncProcessResult
 from ha_syncapp.state import StateStore
@@ -17,6 +18,15 @@ from ha_syncapp.supervisor_logs import SupervisorLogResponse
 TARGET = "Owner/Home"
 GITHUB_TOKEN = "github-secret-sentinel"
 CORE_TOKEN = "supervisor-secret-sentinel"
+
+
+@pytest.fixture(autouse=True)
+def _stub_log_retention(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        log_service,
+        "run_log_retention_work_pass",
+        lambda *args, **kwargs: LogRetentionPassResult(0, None),
+    )
 
 
 def _opened_store(tmp_path: Path) -> StateStore:
@@ -125,6 +135,7 @@ def test_log_service_due_tick_collects_then_processes_once(
             due=True,
             collection=collection,
             processed=processed,
+            retention=LogRetentionPassResult(0, None),
         )
         assert calls[0][:4] == (
             "collect",
