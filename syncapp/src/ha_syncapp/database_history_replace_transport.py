@@ -6,21 +6,73 @@ import re
 import shutil
 import stat
 import subprocess  # nosec B404
+import tempfile
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
 
 from ha_syncapp.database_history_replacement import DatabaseHistoryReplacementAuthorization
 from ha_syncapp.database_retention import DATABASE_BRANCH
+from ha_syncapp.github_repo import (
+    RepositoryVerificationError,
+    fetch_trusted_branch_head,
+)
 
-_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_HTTP_STATUS = re.compile(r"HTTP ([0-9]{3})(?:$|\D)")
+_TOKEN = re.compile(r"^[!-~]{1,512}$")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
+class DatabaseHistoryReplacementFailureKind(StrEnum):
+    """Stable retry-policy classification for a replacement failure."""
+
+    INVALID = "invalid"
+    STALE = "stale"
+    TRANSIENT = "transient"
+    REJECTED = "rejected"
+
+
 class DatabaseHistoryReplacementTransportError(RuntimeError):
-    """Raised when authorized Recorder history replacement cannot complete safely."""
+    """Sanitized Recorder-history failure with deterministic retry classification."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: DatabaseHistoryReplacementFailureKind = (
+            DatabaseHistoryReplacementFailureKind.INVALID
+        ),
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+    @property
+    def retryable(self) -> bool:
+        return self.kind is DatabaseHistoryReplacementFailureKind.TRANSIENT
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class DatabaseHistoryReplacementArtifact:
+    """Locally rebuilt history bound to one exact database authorization."""
+
+    repository: Path
+    target: str
+    repository_id: int
+    branch: str
+    expected_head_sha: str
+    retained_shas: tuple[str, ...]
+    replacement_head_sha: str
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise TypeError(
+            "DatabaseHistoryReplacementArtifact must be produced by "
+            "build_database_history_replacement()"
+        )
 
 
 class CommandRunner(Protocol):
@@ -45,20 +97,421 @@ def _run_git(
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         timeout=timeout,
+    )
+
+
+def build_database_history_replacement(
+    *,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    repository: Path,
+    timeout: float = 30.0,
+    runner: CommandRunner = _run_git,
+) -> DatabaseHistoryReplacementArtifact:
+    """Rebuild authorized retained commits without mutating a branch or remote ref.
+
+    The supplied repository is a SyncApp staging Git repository, never the live Home
+    Assistant configuration. Only new commit objects are written under its `.git`
+    object database; no local or remote ref is changed by this function.
+    """
+
+    _validate_authorization_boundary(authorization)
+    if not authorization.requires_replacement:
+        raise DatabaseHistoryReplacementTransportError(
+            "database history replacement is not required"
+        )
+    repository = _validate_repository_path(repository)
+    timeout_value = _validate_timeout(timeout)
+    executable = _git_executable()
+
+    rebuilt_parent: str | None = None
+    retained_oldest_first = tuple(reversed(authorization.retained_shas))
+    for index, original_sha in enumerate(retained_oldest_first):
+        expected_original_parent = (
+            authorization.pruned_shas[0] if index == 0 else retained_oldest_first[index - 1]
+        )
+        raw_commit = _read_commit(
+            executable=executable,
+            repository=repository,
+            commit_sha=original_sha,
+            timeout=timeout_value,
+            runner=runner,
+        )
+        rebuilt_payload = _rewrite_commit_parent(
+            raw_commit,
+            expected_original_parent=expected_original_parent,
+            rebuilt_parent=rebuilt_parent,
+        )
+        rebuilt_parent = _write_commit_object(
+            executable=executable,
+            repository=repository,
+            payload=rebuilt_payload,
+            expected_sha_length=len(authorization.expected_head_sha),
+            timeout=timeout_value,
+            runner=runner,
+        )
+
+    if rebuilt_parent is None or rebuilt_parent == authorization.expected_head_sha:
+        raise DatabaseHistoryReplacementTransportError("database rebuilt history is invalid")
+    return _database_history_replacement_artifact(
+        repository=repository,
+        authorization=authorization,
+        replacement_head_sha=rebuilt_parent,
     )
 
 
 def replace_database_history(
     *,
     authorization: DatabaseHistoryReplacementAuthorization,
-    repository: Path,
-    replacement_head_sha: str | None = None,
+    artifact: DatabaseHistoryReplacementArtifact | None = None,
+    token: str | None = None,
+    repository: Path | None = None,
     timeout: float = 30.0,
     runner: CommandRunner = _run_git,
 ) -> bool:
-    """Atomically replace only `database` while its remote head matches the lease."""
+    """Atomically replace only `database` after local and remote re-validation."""
 
+    _validate_authorization_boundary(authorization)
+    if not authorization.requires_replacement:
+        return False
+
+    _validate_artifact(authorization=authorization, artifact=artifact)
+    if artifact is None:
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+    if repository is not None:
+        supplied_repository = _validate_repository_path(repository)
+        if supplied_repository != artifact.repository:
+            raise DatabaseHistoryReplacementTransportError(
+                "database replacement artifact is invalid"
+            )
+    timeout_value = _validate_timeout(timeout)
+    token_value = _validate_token(token)
+    _validate_artifact_history(
+        authorization=authorization,
+        artifact=artifact,
+        timeout=timeout_value,
+        runner=runner,
+    )
+    try:
+        current = fetch_trusted_branch_head(
+            authorization.target,
+            token_value,
+            expected_id=authorization.repository_id,
+            branch=DATABASE_BRANCH,
+        )
+    except RepositoryVerificationError as error:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement repository verification failed",
+            kind=_repository_verification_failure_kind(error),
+        ) from None
+    if (
+        current.target.casefold() != authorization.target.casefold()
+        or current.repository_id != authorization.repository_id
+        or current.branch != DATABASE_BRANCH
+        or current.commit_sha != authorization.expected_head_sha
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database history changed before replacement",
+            kind=DatabaseHistoryReplacementFailureKind.STALE,
+        )
+
+    executable = _git_executable()
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="syncapp-db-push-",
+            dir=artifact.repository / ".git",
+        ) as temporary:
+            authentication_root = Path(temporary)
+            askpass = _create_askpass(authentication_root, token_value)
+            command = _push_command(
+                executable=executable,
+                authentication_root=authentication_root,
+                askpass=askpass,
+                authorization=authorization,
+                artifact=artifact,
+            )
+            result = runner(command, cwd=artifact.repository, timeout=timeout_value)
+    except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
+        raise DatabaseHistoryReplacementTransportError(
+            "database history replacement transport failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        ) from None
+
+    if not isinstance(result, subprocess.CompletedProcess):
+        raise DatabaseHistoryReplacementTransportError(
+            "database history replacement transport failed"
+        )
+    if result.returncode != 0:
+        raise DatabaseHistoryReplacementTransportError(
+            "database history replacement was rejected",
+            kind=DatabaseHistoryReplacementFailureKind.REJECTED,
+        )
+    return True
+
+
+def _validate_artifact_history(
+    *,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    artifact: DatabaseHistoryReplacementArtifact,
+    timeout: float,
+    runner: CommandRunner,
+) -> None:
+    """Prove a proposed replacement contains only the authorized snapshot trees."""
+
+    executable = _git_executable()
+    rebuilt_sha = artifact.replacement_head_sha
+    retained = authorization.retained_shas
+    for index, original_sha in enumerate(retained):
+        original = _read_commit(
+            executable=executable,
+            repository=artifact.repository,
+            commit_sha=original_sha,
+            timeout=timeout,
+            runner=runner,
+        )
+        rebuilt = _read_commit(
+            executable=executable,
+            repository=artifact.repository,
+            commit_sha=rebuilt_sha,
+            timeout=timeout,
+            runner=runner,
+        )
+        original_tree, original_parents = _commit_tree_and_parents(original)
+        rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
+        expected_original_parent = (
+            retained[index + 1] if index + 1 < len(retained) else authorization.pruned_shas[0]
+        )
+        is_oldest_retained = index + 1 == len(retained)
+        if (is_oldest_retained and rebuilt_parents) or (
+            not is_oldest_retained and len(rebuilt_parents) != 1
+        ):
+            raise DatabaseHistoryReplacementTransportError(
+                "database replacement artifact is invalid"
+            )
+        rebuilt_parent = None if is_oldest_retained else rebuilt_parents[0]
+        expected_rebuilt = _rewrite_commit_parent(
+            original,
+            expected_original_parent=expected_original_parent,
+            rebuilt_parent=rebuilt_parent,
+        )
+        if (
+            original_parents != (expected_original_parent,)
+            or rebuilt_tree != original_tree
+            or rebuilt != expected_rebuilt
+        ):
+            raise DatabaseHistoryReplacementTransportError(
+                "database replacement artifact is invalid"
+            )
+        if is_oldest_retained:
+            continue
+        rebuilt_sha = rebuilt_parents[0]
+
+
+def _read_commit(
+    *,
+    executable: str,
+    repository: Path,
+    commit_sha: str,
+    timeout: float,
+    runner: CommandRunner,
+) -> str:
+    command = (
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "cat-file",
+        "commit",
+        commit_sha,
+    )
+    try:
+        result = runner(command, cwd=repository, timeout=timeout)
+    except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained history could not be read",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        ) from None
+    if (
+        not isinstance(result, subprocess.CompletedProcess)
+        or result.returncode != 0
+        or not isinstance(result.stdout, str)
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained history could not be read"
+        )
+    return result.stdout
+
+
+def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
+    header, separator, _message = raw_commit.partition("\n\n")
+    if not separator or not header:
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+    trees: list[str] = []
+    parents: list[str] = []
+    for line in header.split("\n"):
+        if line.startswith("tree "):
+            trees.append(line[5:])
+        elif line.startswith("parent "):
+            parents.append(line[7:])
+    if (
+        len(trees) != 1
+        or _COMMIT_SHA.fullmatch(trees[0]) is None
+        or any(_COMMIT_SHA.fullmatch(parent) is None for parent in parents)
+        or len(parents) > 1
+    ):
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+    return trees[0], tuple(parents)
+
+
+def _rewrite_commit_parent(
+    raw_commit: str,
+    *,
+    expected_original_parent: str,
+    rebuilt_parent: str | None,
+) -> str:
+    header, separator, message = raw_commit.partition("\n\n")
+    if not separator or not header:
+        raise DatabaseHistoryReplacementTransportError("database retained commit is invalid")
+
+    groups: list[list[str]] = []
+    for line in header.split("\n"):
+        if line.startswith(" "):
+            if not groups:
+                raise DatabaseHistoryReplacementTransportError(
+                    "database retained commit is invalid"
+                )
+            groups[-1].append(line)
+        else:
+            groups.append([line])
+
+    tree_groups = [group for group in groups if group[0].startswith("tree ")]
+    parent_groups = [group for group in groups if group[0].startswith("parent ")]
+    if len(tree_groups) != 1 or len(parent_groups) != 1:
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained commit ancestry is invalid"
+        )
+    tree_sha = tree_groups[0][0][5:]
+    parent_sha = parent_groups[0][0][7:]
+    if (
+        _COMMIT_SHA.fullmatch(tree_sha) is None
+        or _COMMIT_SHA.fullmatch(parent_sha) is None
+        or parent_sha != expected_original_parent
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained commit ancestry is invalid"
+        )
+
+    rebuilt_groups: list[list[str]] = []
+    for group in groups:
+        key = group[0].split(" ", 1)[0]
+        if key in {"parent", "gpgsig", "mergetag"}:
+            continue
+        rebuilt_groups.append(group)
+        if key == "tree" and rebuilt_parent is not None:
+            rebuilt_groups.append([f"parent {rebuilt_parent}"])
+
+    rebuilt_header = "\n".join(line for group in rebuilt_groups for line in group)
+    return f"{rebuilt_header}\n\n{message}"
+
+
+def _write_commit_object(
+    *,
+    executable: str,
+    repository: Path,
+    payload: str,
+    expected_sha_length: int,
+    timeout: float,
+    runner: CommandRunner,
+) -> str:
+    git_dir = repository / ".git"
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="syncapp-db-history-",
+            dir=git_dir,
+        ) as temporary:
+            commit_file = Path(temporary) / "commit"
+            commit_file.write_text(payload, encoding="utf-8", newline="\n")
+            command = (
+                executable,
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "hash-object",
+                "-t",
+                "commit",
+                "-w",
+                str(commit_file),
+            )
+            result = runner(command, cwd=repository, timeout=timeout)
+    except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained history could not be rebuilt",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        ) from None
+    if (
+        not isinstance(result, subprocess.CompletedProcess)
+        or result.returncode != 0
+        or not isinstance(result.stdout, str)
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database retained history could not be rebuilt"
+        )
+    replacement_sha = result.stdout.strip()
+    if (
+        _COMMIT_SHA.fullmatch(replacement_sha) is None
+        or len(replacement_sha) != expected_sha_length
+    ):
+        raise DatabaseHistoryReplacementTransportError("database rebuilt history is invalid")
+    return replacement_sha
+
+
+def _database_history_replacement_artifact(
+    *,
+    repository: Path,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    replacement_head_sha: str,
+) -> DatabaseHistoryReplacementArtifact:
+    artifact = object.__new__(DatabaseHistoryReplacementArtifact)
+    object.__setattr__(artifact, "repository", repository)
+    object.__setattr__(artifact, "target", authorization.target)
+    object.__setattr__(artifact, "repository_id", authorization.repository_id)
+    object.__setattr__(artifact, "branch", DATABASE_BRANCH)
+    object.__setattr__(artifact, "expected_head_sha", authorization.expected_head_sha)
+    object.__setattr__(artifact, "retained_shas", authorization.retained_shas)
+    object.__setattr__(artifact, "replacement_head_sha", replacement_head_sha)
+    return artifact
+
+
+def _validate_artifact(
+    *,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    artifact: DatabaseHistoryReplacementArtifact | None,
+) -> None:
+    if type(artifact) is not DatabaseHistoryReplacementArtifact:
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+    if (
+        not isinstance(artifact.target, str)
+        or artifact.target.casefold() != authorization.target.casefold()
+        or type(artifact.repository_id) is not int
+        or artifact.repository_id != authorization.repository_id
+        or artifact.branch != DATABASE_BRANCH
+        or artifact.expected_head_sha != authorization.expected_head_sha
+        or artifact.retained_shas != authorization.retained_shas
+        or not isinstance(artifact.replacement_head_sha, str)
+        or _COMMIT_SHA.fullmatch(artifact.replacement_head_sha) is None
+        or len(artifact.replacement_head_sha) != len(authorization.expected_head_sha)
+        or artifact.replacement_head_sha == authorization.expected_head_sha
+        or not isinstance(artifact.repository, Path)
+    ):
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+    resolved = _validate_repository_path(artifact.repository)
+    if resolved != artifact.repository:
+        raise DatabaseHistoryReplacementTransportError("database replacement artifact is invalid")
+
+
+def _validate_authorization_boundary(
+    authorization: DatabaseHistoryReplacementAuthorization,
+) -> None:
     if type(authorization) is not DatabaseHistoryReplacementAuthorization:
         raise DatabaseHistoryReplacementTransportError(
             "database replacement authorization is invalid"
@@ -69,53 +522,6 @@ def replace_database_history(
         )
     _validate_repository_identity(authorization)
     _validate_authorization(authorization)
-    if not authorization.requires_replacement:
-        return False
-
-    if (
-        not isinstance(replacement_head_sha, str)
-        or _COMMIT_SHA.fullmatch(replacement_head_sha) is None
-        or replacement_head_sha == authorization.expected_head_sha
-    ):
-        raise DatabaseHistoryReplacementTransportError("database replacement head is invalid")
-    repository = _validate_repository_path(repository)
-    if (
-        not isinstance(timeout, (int, float))
-        or isinstance(timeout, bool)
-        or not math.isfinite(timeout)
-        or not 0 < timeout <= _MAX_TIMEOUT_SECONDS
-    ):
-        raise DatabaseHistoryReplacementTransportError("database replacement timeout is invalid")
-
-    executable = _git_executable()
-    ref = f"refs/heads/{DATABASE_BRANCH}"
-    command = (
-        executable,
-        "-c",
-        f"core.hooksPath={os.devnull}",
-        "-c",
-        "credential.helper=",
-        "push",
-        "--porcelain",
-        "--no-verify",
-        _repository_url(authorization.target),
-        f"{replacement_head_sha}:{ref}",
-        f"--force-with-lease={ref}:{authorization.expected_head_sha}",
-    )
-    try:
-        result = runner(command, cwd=repository, timeout=float(timeout))
-    except (OSError, subprocess.SubprocessError, TimeoutError):
-        raise DatabaseHistoryReplacementTransportError(
-            "database history replacement transport failed"
-        ) from None
-
-    if not isinstance(result, subprocess.CompletedProcess):
-        raise DatabaseHistoryReplacementTransportError(
-            "database history replacement transport failed"
-        )
-    if result.returncode != 0:
-        raise DatabaseHistoryReplacementTransportError("database history replacement was rejected")
-    return True
 
 
 def _validate_repository_identity(
@@ -140,15 +546,26 @@ def _validate_authorization(
 ) -> None:
     retained = authorization.retained_shas
     pruned = authorization.pruned_shas
+    expected = authorization.expected_head_sha
     if (
-        not isinstance(authorization.expected_head_sha, str)
-        or _COMMIT_SHA.fullmatch(authorization.expected_head_sha) is None
+        not isinstance(expected, str)
+        or _COMMIT_SHA.fullmatch(expected) is None
         or not isinstance(retained, tuple)
         or not retained
-        or retained[0] != authorization.expected_head_sha
+        or retained[0] != expected
         or not isinstance(pruned, tuple)
-        or any(not isinstance(sha, str) or _COMMIT_SHA.fullmatch(sha) is None for sha in retained)
-        or any(not isinstance(sha, str) or _COMMIT_SHA.fullmatch(sha) is None for sha in pruned)
+        or any(
+            not isinstance(sha, str)
+            or _COMMIT_SHA.fullmatch(sha) is None
+            or len(sha) != len(expected)
+            for sha in retained
+        )
+        or any(
+            not isinstance(sha, str)
+            or _COMMIT_SHA.fullmatch(sha) is None
+            or len(sha) != len(expected)
+            for sha in pruned
+        )
         or len(set(retained)) != len(retained)
         or len(set(pruned)) != len(pruned)
         or bool(set(retained).intersection(pruned))
@@ -186,6 +603,123 @@ def _validate_repository_path(repository: Path) -> Path:
             "database replacement repository path is invalid"
         )
     return resolved
+
+
+def _validate_timeout(timeout: float) -> float:
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not math.isfinite(timeout)
+        or not 0 < timeout <= _MAX_TIMEOUT_SECONDS
+    ):
+        raise DatabaseHistoryReplacementTransportError("database replacement timeout is invalid")
+    return float(timeout)
+
+
+def _validate_token(token: str | None) -> str:
+    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication is invalid"
+        )
+    return token
+
+
+def _create_askpass(root: Path, token: str) -> Path:
+    helper = root / "askpass"
+    token_file = helper.with_suffix(".token")
+    script = """#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\\n' 'x-access-token' ;;
+  *) IFS= read -r token < "${0}.token"; printf '%s\\n' "$token" ;;
+esac
+"""
+    try:
+        descriptor = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(script)
+        token_descriptor = os.open(
+            token_file,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(token_descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"{token}\n")
+        helper.chmod(0o700)
+        token_file.chmod(0o600)
+        helper_metadata = helper.lstat()
+        token_metadata = token_file.lstat()
+    except OSError:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication setup failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        ) from None
+    if (
+        not stat.S_ISREG(helper_metadata.st_mode)
+        or helper.is_symlink()
+        or stat.S_IMODE(helper_metadata.st_mode) != 0o700
+        or not stat.S_ISREG(token_metadata.st_mode)
+        or token_file.is_symlink()
+        or stat.S_IMODE(token_metadata.st_mode) != 0o600
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication setup failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        )
+    return helper
+
+
+def _push_command(
+    *,
+    executable: str,
+    authentication_root: Path,
+    askpass: Path,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    artifact: DatabaseHistoryReplacementArtifact,
+) -> tuple[str, ...]:
+    environment_executable = shutil.which("env")
+    if environment_executable is None or not os.path.isabs(environment_executable):
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement environment is unavailable"
+        )
+    ref = f"refs/heads/{DATABASE_BRANCH}"
+    return (
+        environment_executable,
+        "-i",
+        f"HOME={authentication_root}",
+        f"PATH={os.path.dirname(executable)}",
+        "GIT_CONFIG_NOSYSTEM=1",
+        f"GIT_CONFIG_GLOBAL={os.devnull}",
+        "GIT_TERMINAL_PROMPT=0",
+        "GCM_INTERACTIVE=Never",
+        "LC_ALL=C",
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        f"core.askPass={askpass}",
+        "push",
+        "--porcelain",
+        "--no-verify",
+        _repository_url(authorization.target),
+        f"{artifact.replacement_head_sha}:{ref}",
+        f"--force-with-lease={ref}:{authorization.expected_head_sha}",
+    )
+
+
+def _repository_verification_failure_kind(
+    error: RepositoryVerificationError,
+) -> DatabaseHistoryReplacementFailureKind:
+    message = str(error)
+    if "transport failed" in message:
+        return DatabaseHistoryReplacementFailureKind.TRANSIENT
+    match = _HTTP_STATUS.search(message)
+    if match is not None:
+        status = int(match.group(1))
+        if status in {408, 425, 429} or status >= 500:
+            return DatabaseHistoryReplacementFailureKind.TRANSIENT
+    return DatabaseHistoryReplacementFailureKind.INVALID
 
 
 def _repository_url(target: str) -> str:
