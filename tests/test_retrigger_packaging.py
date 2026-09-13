@@ -13,10 +13,7 @@ def test_packaging_enables_bounded_non_optional_retrigger_cadence() -> None:
 
 def test_container_enters_scheduler_aware_state_owner_service() -> None:
     dockerfile = (ROOT / "syncapp/Dockerfile").read_text()
-    assert (
-        'ENTRYPOINT ["/opt/syncapp/bin/python", "-m", "ha_syncapp.service_entry"]'
-        in dockerfile
-    )
+    assert 'ENTRYPOINT ["/opt/syncapp/bin/python", "-m", "ha_syncapp.service_entry"]' in dockerfile
 
 
 def test_operator_translation_states_retrigger_schedule_cannot_be_disabled() -> None:
