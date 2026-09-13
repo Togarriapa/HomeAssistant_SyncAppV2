@@ -50,7 +50,10 @@ def _authorization(
         return_value=head,
     ):
         prewrite = reprove_database_history_prewrite(evidence=evidence, token="test-token")
-    authorization = authorize_database_history_replacement(evidence=evidence, prewrite=prewrite)
+    authorization = authorize_database_history_replacement(
+        evidence=evidence,
+        prewrite=prewrite,
+    )
     if branch != "database":
         return _forge_authorization(authorization, branch=branch)
     return authorization
@@ -124,7 +127,9 @@ def _artifact(
     )
 
 
-def test_replacement_uses_exact_database_force_with_lease_after_reproof(tmp_path: Path) -> None:
+def test_replacement_uses_exact_database_force_with_lease_after_reproof(
+    tmp_path: Path,
+) -> None:
     repository = _make_repository(tmp_path / "repository")
     authorization = _authorization()
     artifact = _artifact(repository, authorization)
@@ -171,7 +176,10 @@ def test_noop_runs_no_git_and_requires_no_token_repository_or_artifact() -> None
 
 
 def test_replacement_requires_exact_authorization_type() -> None:
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="authorization is invalid"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="authorization is invalid",
+    ):
         replace_database_history(
             authorization=cast(DatabaseHistoryReplacementAuthorization, object()),
         )
@@ -179,7 +187,10 @@ def test_replacement_requires_exact_authorization_type() -> None:
 
 @pytest.mark.parametrize("branch", ["main", "candidate", "runtime", "logs", "Database", ""])
 def test_replacement_rejects_non_database_authorization(branch: str) -> None:
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="restricted to database"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="restricted to database",
+    ):
         replace_database_history(authorization=_authorization(branch=branch))
 
 
@@ -193,7 +204,10 @@ def test_replacement_rejects_invalid_repository_identity(
     authorization = _forge_authorization(
         _authorization(), target=target, repository_id=repository_id
     )
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="identity is invalid"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="identity is invalid",
+    ):
         replace_database_history(authorization=authorization)
 
 
@@ -213,7 +227,10 @@ def test_replacement_rejects_invalid_repository_identity(
 def test_replacement_rejects_malformed_or_forged_authorization(
     authorization: DatabaseHistoryReplacementAuthorization,
 ) -> None:
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="authorization is invalid"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="authorization is invalid",
+    ):
         replace_database_history(authorization=authorization)
 
 
@@ -231,7 +248,10 @@ def test_replacement_rejects_forged_artifact(tmp_path: Path) -> None:
         _forge_artifact(artifact, replacement_head_sha="bad"),
         _forge_artifact(artifact, replacement_head_sha=EXPECTED),
     ):
-        with pytest.raises(DatabaseHistoryReplacementTransportError, match="artifact is invalid"):
+        with pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="artifact is invalid",
+        ):
             replace_database_history(
                 authorization=authorization,
                 artifact=forged,
@@ -239,7 +259,9 @@ def test_replacement_rejects_forged_artifact(tmp_path: Path) -> None:
             )
 
 
-def test_replacement_rejects_relative_missing_and_symlink_artifact_paths(tmp_path: Path) -> None:
+def test_replacement_rejects_relative_missing_and_symlink_artifact_paths(
+    tmp_path: Path,
+) -> None:
     repository = _make_repository(tmp_path / "repository")
     authorization = _authorization()
     artifact = _artifact(repository, authorization)
@@ -248,7 +270,10 @@ def test_replacement_rejects_relative_missing_and_symlink_artifact_paths(tmp_pat
 
     for invalid in (Path("relative"), tmp_path / "missing", link):
         forged = _forge_artifact(artifact, repository=invalid)
-        with pytest.raises(DatabaseHistoryReplacementTransportError, match="path is invalid"):
+        with pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="path is invalid",
+        ):
             replace_database_history(
                 authorization=authorization,
                 artifact=forged,
@@ -261,7 +286,10 @@ def test_replacement_rejects_invalid_timeout(tmp_path: Path, timeout: float) -> 
     repository = _make_repository(tmp_path / "repository")
     authorization = _authorization()
     artifact = _artifact(repository, authorization)
-    with pytest.raises(DatabaseHistoryReplacementTransportError, match="timeout is invalid"):
+    with pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="timeout is invalid",
+    ):
         replace_database_history(
             authorization=authorization,
             artifact=artifact,
@@ -301,7 +329,10 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
-            command, 1, "", "stale https://secret-token@github.com/owner/repo"
+            command,
+            1,
+            "",
+            "stale https://secret-token@github.com/owner/repo",
         )
 
     with patch(
@@ -309,7 +340,8 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
         return_value=current,
     ):
         with pytest.raises(
-            DatabaseHistoryReplacementTransportError, match="replacement was rejected"
+            DatabaseHistoryReplacementTransportError,
+            match="replacement was rejected",
         ) as caught:
             replace_database_history(
                 authorization=authorization,
@@ -320,7 +352,9 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
     assert "secret-token" not in str(caught.value)
 
 
-def test_transport_exception_and_invalid_runner_result_are_sanitized(tmp_path: Path) -> None:
+def test_transport_exception_and_invalid_runner_result_are_sanitized(
+    tmp_path: Path,
+) -> None:
     repository = _make_repository(tmp_path / "repository")
     authorization = _authorization()
     artifact = _artifact(repository, authorization)
@@ -334,7 +368,8 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(tmp_path: P
         return_value=current,
     ):
         with pytest.raises(
-            DatabaseHistoryReplacementTransportError, match="transport failed"
+            DatabaseHistoryReplacementTransportError,
+            match="transport failed",
         ) as caught:
             replace_database_history(
                 authorization=authorization,
@@ -353,7 +388,10 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(tmp_path: P
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=current,
     ):
-        with pytest.raises(DatabaseHistoryReplacementTransportError, match="transport failed"):
+        with pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="transport failed",
+        ):
             replace_database_history(
                 authorization=authorization,
                 artifact=artifact,
