@@ -26,8 +26,7 @@ class TrustedDatabaseHistoryPrewrite:
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError(
-            "TrustedDatabaseHistoryPrewrite must be produced by "
-            "reprove_database_history_prewrite()"
+            "TrustedDatabaseHistoryPrewrite must be produced by reprove_database_history_prewrite()"
         )
 
 
