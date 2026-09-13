@@ -42,6 +42,20 @@ def test_scheduler_never_rearms_a_cycle_from_its_outcome() -> None:
     assert run_cycle.call_count == 2
 
 
+def test_scheduler_advances_deadline_after_dispatch_exception() -> None:
+    run_cycle = Mock(side_effect=RuntimeError("transport unavailable"))
+    scheduler = RetriggerSchedule(interval_seconds=60, run_cycle=run_cycle)
+    scheduler.start(10.0)
+
+    with pytest.raises(RuntimeError, match="transport unavailable"):
+        scheduler.tick(70.0)
+
+    assert scheduler.tick(129.999) is None
+    with pytest.raises(RuntimeError, match="transport unavailable"):
+        scheduler.tick(130.0)
+    assert run_cycle.call_count == 2
+
+
 def test_scheduler_stops_cleanly() -> None:
     run_cycle = Mock(return_value="completed")
     scheduler = RetriggerSchedule(interval_seconds=60, run_cycle=run_cycle)
