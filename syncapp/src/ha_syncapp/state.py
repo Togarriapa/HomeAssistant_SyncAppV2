@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -76,6 +76,19 @@ class RecoveryWorkEvidence:
 @dataclass(frozen=True, slots=True)
 class DatabaseRetentionIntent:
     """Non-privileged durable evidence for crash-safe ref-update reconciliation."""
+
+    work_key: str
+    target: str
+    repository_id: int
+    expected_head_sha: str
+    replacement_head_sha: str
+    snapshot_id: str
+    recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class LogsRetentionIntent:
+    """Non-privileged durable evidence for crash-safe logs ref reconciliation."""
 
     work_key: str
     target: str
@@ -316,6 +329,16 @@ class StateStore:
             "snapshot_id TEXT NOT NULL, recorded_at TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_log_retention_intent_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS log_retention_intent ("
+            "work_key TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "expected_head_sha TEXT NOT NULL, replacement_head_sha TEXT NOT NULL, "
+            "snapshot_id TEXT NOT NULL, recorded_at TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -358,6 +381,7 @@ class StateStore:
                 self._create_synchronization_baseline_table(db)
                 self._create_prepared_deployment_table(db)
                 self._create_database_retention_intent_table(db)
+                self._create_log_retention_intent_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -365,7 +389,7 @@ class StateStore:
             finally:
                 os.close(root_fd)
         else:
-            if version not in {1, 2, 3, 4, 5, SCHEMA_VERSION}:
+            if version not in {1, 2, 3, 4, 5, 6, SCHEMA_VERSION}:
                 raise StateError("Unsupported state schema")
             self._identity()
             if version == 1:
@@ -396,6 +420,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_database_retention_intent_table(db)
+                    db.execute("PRAGMA user_version = 6")
+                version = 6
+            if version == 6:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_log_retention_intent_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -671,6 +701,118 @@ class StateStore:
             return persisted
         except sqlite3.Error:
             raise StateError("Unable to persist database retention intent") from None
+
+    def log_retention_intent(self, work_key: str) -> LogsRetentionIntent | None:
+        """Read one immutable logs-retention publication intent."""
+
+        _validate_work_identity("logs_retention", work_key)
+        try:
+            rows = self._connection.execute(
+                "SELECT work_key, target, repository_id, expected_head_sha, "
+                "replacement_head_sha, snapshot_id, recorded_at "
+                "FROM log_retention_intent WHERE work_key = ?",
+                (work_key,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read logs retention intent") from None
+        if not rows:
+            return None
+        if len(rows) != 1 or len(rows[0]) != 7:
+            raise StateError("Invalid logs retention intent")
+        (
+            persisted_key,
+            target,
+            repository_id,
+            expected_head_sha,
+            replacement_head_sha,
+            snapshot_id,
+            recorded_at,
+        ) = rows[0]
+        if not isinstance(persisted_key, str) or persisted_key != work_key:
+            raise StateError("Invalid logs retention intent")
+        _validate_repository_binding(target, repository_id)
+        _validate_synchronization_identity(target, "logs", snapshot_id, expected_head_sha)
+        _validate_synchronization_identity(target, "logs", snapshot_id, replacement_head_sha)
+        if expected_head_sha == replacement_head_sha:
+            raise StateError("Invalid logs retention intent")
+        return LogsRetentionIntent(
+            work_key=persisted_key,
+            target=target,
+            repository_id=repository_id,
+            expected_head_sha=expected_head_sha,
+            replacement_head_sha=replacement_head_sha,
+            snapshot_id=snapshot_id,
+            recorded_at=_parse_timestamp(recorded_at),
+        )
+
+    def record_log_retention_intent(
+        self,
+        item: WorkItem,
+        target: str,
+        repository_id: int,
+        expected_head_sha: str,
+        replacement_head_sha: str,
+        snapshot_id: str,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> LogsRetentionIntent:
+        """Persist one immutable, non-secret compare-and-swap outcome intent."""
+
+        if (
+            type(item) is not WorkItem
+            or item.work_kind != "logs_retention"
+            or item.status != "running"
+            or item.attempts < 1
+        ):
+            raise StateError("Logs retention intent requires claimed work")
+        _validate_repository_binding(target, repository_id)
+        _validate_synchronization_identity(target, "logs", snapshot_id, expected_head_sha)
+        _validate_synchronization_identity(target, "logs", snapshot_id, replacement_head_sha)
+        if expected_head_sha == replacement_head_sha:
+            raise StateError("Invalid logs retention intent")
+        when = _timestamp(recorded_at)
+        expected = LogsRetentionIntent(
+            item.work_key,
+            target,
+            repository_id,
+            expected_head_sha,
+            replacement_head_sha,
+            snapshot_id,
+            when,
+        )
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                if self.repository_id(target) != repository_id:
+                    raise StateError("Logs retention repository identity mismatch")
+                baseline = self.synchronization_baseline(target, "logs")
+                if (
+                    baseline is None
+                    or baseline.snapshot_id != snapshot_id
+                    or baseline.commit_sha != expected_head_sha
+                ):
+                    raise StateError("Logs retention baseline changed unexpectedly")
+                db.execute(
+                    "INSERT OR IGNORE INTO log_retention_intent "
+                    "(work_key, target, repository_id, expected_head_sha, "
+                    "replacement_head_sha, snapshot_id, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        item.work_key,
+                        target,
+                        repository_id,
+                        expected_head_sha,
+                        replacement_head_sha,
+                        snapshot_id,
+                        when.isoformat(),
+                    ),
+                )
+            persisted = self.log_retention_intent(item.work_key)
+            if persisted != expected:
+                raise StateError("Logs retention intent cannot be rebound")
+            return persisted
+        except sqlite3.Error:
+            raise StateError("Unable to persist logs retention intent") from None
 
     def prepared_deployment(self, deployment_id: str) -> PreparedDeployment | None:
         """Read exact immutable preparation evidence and recheck repository identity."""
