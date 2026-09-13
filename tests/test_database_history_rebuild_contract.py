@@ -52,6 +52,27 @@ def _make_repository(path: Path) -> Path:
     return path
 
 
+def _history_read(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    if command[-1] == EXPECTED:
+        payload = (
+            f"tree {TREE}\n"
+            f"parent {PRUNED}\n"
+            "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "\nRecorder snapshot\n"
+        )
+    elif command[-1] == REPLACEMENT:
+        payload = (
+            f"tree {TREE}\n"
+            "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "\nRecorder snapshot\n"
+        )
+    else:
+        raise AssertionError(command)
+    return subprocess.CompletedProcess(command, 0, payload, "")
+
+
 def _build_artifact(repository: Path) -> DatabaseHistoryReplacementArtifact:
     authorization = _authorization()
 
@@ -59,14 +80,7 @@ def _build_artifact(repository: Path) -> DatabaseHistoryReplacementArtifact:
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         if "cat-file" in command:
-            payload = (
-                f"tree {TREE}\n"
-                f"parent {PRUNED}\n"
-                "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
-                "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
-                "\nRecorder snapshot\n"
-            )
-            return subprocess.CompletedProcess(command, 0, payload, "")
+            return _history_read(command)
         assert "hash-object" in command
         commit_file = Path(command[-1])
         rebuilt = commit_file.read_text(encoding="utf-8")
@@ -107,12 +121,14 @@ def test_transport_reproves_private_repo_identity_and_exact_head_before_push(
     authorization = _authorization()
     artifact = _build_artifact(repository)
     current = BranchHead("owner/private-repo", 123, "database", EXPECTED)
-    calls: list[tuple[str, ...]] = []
+    pushes: list[tuple[str, ...]] = []
 
     def runner(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
+        if "cat-file" in command:
+            return _history_read(command)
+        pushes.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
     with patch(
@@ -132,9 +148,9 @@ def test_transport_reproves_private_repo_identity_and_exact_head_before_push(
         expected_id=123,
         branch="database",
     )
-    assert len(calls) == 1
-    assert calls[0][-1] == f"--force-with-lease=refs/heads/database:{EXPECTED}"
-    assert f"{REPLACEMENT}:refs/heads/database" in calls[0]
+    assert len(pushes) == 1
+    assert pushes[0][-1] == f"--force-with-lease=refs/heads/database:{EXPECTED}"
+    assert f"{REPLACEMENT}:refs/heads/database" in pushes[0]
 
 
 def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> None:
@@ -143,7 +159,11 @@ def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> 
     artifact = _build_artifact(repository)
     moved = BranchHead("owner/private-repo", 123, "database", "3" * 40)
 
-    def runner(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def runner(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
         raise AssertionError("push must not run after the database head moves")
 
     with patch(
