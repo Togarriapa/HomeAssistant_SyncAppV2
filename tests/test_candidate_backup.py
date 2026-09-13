@@ -246,9 +246,7 @@ def test_preapply_reproof_reads_only_exact_prepared_backup(tmp_path, monkeypatch
     assert calls[0][2]["Authorization"] == "Bearer secret-token"
 
 
-def test_preapply_reproof_rejects_prepared_candidate_binding_mismatch(
-    tmp_path, monkeypatch
-):
+def test_preapply_reproof_rejects_prepared_candidate_binding_mismatch(tmp_path, monkeypatch):
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
     changed = PreparedDeployment(
         prepared.deployment_id,
@@ -270,9 +268,7 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
 
     def transport(*_args):
-        return _json_response(
-            {"slug": "other", "type": "full", "homeassistant": "2026.9.1"}
-        )
+        return _json_response({"slug": "other", "type": "full", "homeassistant": "2026.9.1"})
 
     with pytest.raises(backup.CandidateBackupError):
         backup.reprove_prepared_candidate_backup(
@@ -284,16 +280,12 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
         )
 
 
-def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(
-    tmp_path, monkeypatch
-):
+def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(tmp_path, monkeypatch):
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
 
     def transport(*_args):
         inputs[6].manifest["core_config"]["version"] = "2026.9.2"
-        return _json_response(
-            {"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"}
-        )
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.1"})
 
     with pytest.raises(backup.CandidateBackupError, match="semantic"):
         backup.reprove_prepared_candidate_backup(
