@@ -8,6 +8,7 @@ import stat
 import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
@@ -22,11 +23,36 @@ from ha_syncapp.github_repo import (
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_HTTP_STATUS = re.compile(r"HTTP ([0-9]{3})(?:$|\D)")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
+class DatabaseHistoryReplacementFailureKind(StrEnum):
+    """Stable retry-policy classification for a replacement failure."""
+
+    INVALID = "invalid"
+    STALE = "stale"
+    TRANSIENT = "transient"
+    REJECTED = "rejected"
+
+
 class DatabaseHistoryReplacementTransportError(RuntimeError):
-    """Raised when authorized Recorder history replacement cannot complete safely."""
+    """Sanitized Recorder-history failure with deterministic retry classification."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: DatabaseHistoryReplacementFailureKind = (
+            DatabaseHistoryReplacementFailureKind.INVALID
+        ),
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+    @property
+    def retryable(self) -> bool:
+        return self.kind is DatabaseHistoryReplacementFailureKind.TRANSIENT
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -175,9 +201,10 @@ def replace_database_history(
             expected_id=authorization.repository_id,
             branch=DATABASE_BRANCH,
         )
-    except RepositoryVerificationError:
+    except RepositoryVerificationError as error:
         raise DatabaseHistoryReplacementTransportError(
-            "database replacement repository verification failed"
+            "database replacement repository verification failed",
+            kind=_repository_verification_failure_kind(error),
         ) from None
     if (
         current.target.casefold() != authorization.target.casefold()
@@ -186,7 +213,8 @@ def replace_database_history(
         or current.commit_sha != authorization.expected_head_sha
     ):
         raise DatabaseHistoryReplacementTransportError(
-            "database history changed before replacement"
+            "database history changed before replacement",
+            kind=DatabaseHistoryReplacementFailureKind.STALE,
         )
 
     executable = _git_executable()
@@ -208,7 +236,8 @@ def replace_database_history(
         result = runner(command, cwd=artifact.repository, timeout=timeout_value)
     except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
         raise DatabaseHistoryReplacementTransportError(
-            "database history replacement transport failed"
+            "database history replacement transport failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
         ) from None
 
     if not isinstance(result, subprocess.CompletedProcess):
@@ -217,7 +246,8 @@ def replace_database_history(
         )
     if result.returncode != 0:
         raise DatabaseHistoryReplacementTransportError(
-            "database history replacement was rejected"
+            "database history replacement was rejected",
+            kind=DatabaseHistoryReplacementFailureKind.REJECTED,
         )
     return True
 
@@ -242,7 +272,8 @@ def _read_commit(
         result = runner(command, cwd=repository, timeout=timeout)
     except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
         raise DatabaseHistoryReplacementTransportError(
-            "database retained history could not be read"
+            "database retained history could not be read",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
         ) from None
     if (
         not isinstance(result, subprocess.CompletedProcess)
@@ -262,7 +293,7 @@ def _rewrite_commit_parent(
     rebuilt_parent: str | None,
 ) -> str:
     header, separator, message = raw_commit.partition("\n\n")
-    if not separator or not header or not isinstance(message, str):
+    if not separator or not header:
         raise DatabaseHistoryReplacementTransportError(
             "database retained commit is invalid"
         )
@@ -320,7 +351,8 @@ def _write_commit_object(
     git_dir = repository / ".git"
     try:
         with tempfile.TemporaryDirectory(
-            prefix="syncapp-db-history-", dir=git_dir
+            prefix="syncapp-db-history-",
+            dir=git_dir,
         ) as temporary:
             commit_file = Path(temporary) / "commit"
             commit_file.write_text(payload, encoding="utf-8", newline="\n")
@@ -337,7 +369,8 @@ def _write_commit_object(
             result = runner(command, cwd=repository, timeout=timeout)
     except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
         raise DatabaseHistoryReplacementTransportError(
-            "database retained history could not be rebuilt"
+            "database retained history could not be rebuilt",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
         ) from None
     if (
         not isinstance(result, subprocess.CompletedProcess)
@@ -380,13 +413,19 @@ def _validate_artifact(
     authorization: DatabaseHistoryReplacementAuthorization,
     artifact: DatabaseHistoryReplacementArtifact | None,
 ) -> None:
+    if type(artifact) is not DatabaseHistoryReplacementArtifact:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement artifact is invalid"
+        )
     if (
-        type(artifact) is not DatabaseHistoryReplacementArtifact
+        not isinstance(artifact.target, str)
         or artifact.target.casefold() != authorization.target.casefold()
+        or type(artifact.repository_id) is not int
         or artifact.repository_id != authorization.repository_id
         or artifact.branch != DATABASE_BRANCH
         or artifact.expected_head_sha != authorization.expected_head_sha
         or artifact.retained_shas != authorization.retained_shas
+        or not isinstance(artifact.replacement_head_sha, str)
         or _COMMIT_SHA.fullmatch(artifact.replacement_head_sha) is None
         or len(artifact.replacement_head_sha) != len(authorization.expected_head_sha)
         or artifact.replacement_head_sha == authorization.expected_head_sha
@@ -509,6 +548,20 @@ def _validate_timeout(timeout: float) -> float:
             "database replacement timeout is invalid"
         )
     return float(timeout)
+
+
+def _repository_verification_failure_kind(
+    error: RepositoryVerificationError,
+) -> DatabaseHistoryReplacementFailureKind:
+    message = str(error)
+    if "transport failed" in message:
+        return DatabaseHistoryReplacementFailureKind.TRANSIENT
+    match = _HTTP_STATUS.search(message)
+    if match is not None:
+        status = int(match.group(1))
+        if status in {408, 425, 429} or status >= 500:
+            return DatabaseHistoryReplacementFailureKind.TRANSIENT
+    return DatabaseHistoryReplacementFailureKind.INVALID
 
 
 def _repository_url(target: str) -> str:
