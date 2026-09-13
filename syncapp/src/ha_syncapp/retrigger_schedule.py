@@ -27,6 +27,8 @@ class RetriggerSchedule:
         self._run_cycle = run_cycle
         self._next_due: float | None = None
         self._last_now: float | None = None
+        self._started = False
+        self._stopped = False
 
     def start(self, now: float) -> None:
         """Arm the first cycle one full interval after service activation."""
@@ -37,10 +39,14 @@ class RetriggerSchedule:
             raise RetriggerScheduleError("Retrigger monotonic time is invalid")
         self._last_now = now_value
         self._next_due = now_value + self._interval_seconds
+        self._started = True
+        self._stopped = False
 
     def tick(self, now: float) -> str | None:
         """Execute one due cycle and coalesce any missed intervals."""
-        if self._next_due is None or self._last_now is None:
+        if self._stopped:
+            return None
+        if not self._started or self._next_due is None or self._last_now is None:
             raise RetriggerScheduleError("Retrigger schedule has not been started")
         if not isinstance(now, (int, float)) or isinstance(now, bool):
             raise RetriggerScheduleError("Retrigger monotonic time is invalid")
@@ -59,3 +65,4 @@ class RetriggerSchedule:
         """Disarm automatic recovery without changing durable work state."""
         self._next_due = None
         self._last_now = None
+        self._stopped = True
