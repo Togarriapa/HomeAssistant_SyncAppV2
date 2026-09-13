@@ -45,4 +45,6 @@ def test_repository_verification_failures_have_deterministic_retry_classificatio
 def test_only_transient_database_replacement_failures_are_retryable() -> None:
     for kind in DatabaseHistoryReplacementFailureKind:
         error = DatabaseHistoryReplacementTransportError("sanitized", kind=kind)
-        assert error.retryable is (kind is DatabaseHistoryReplacementFailureKind.TRANSIENT)
+        assert error.retryable is (
+            kind is DatabaseHistoryReplacementFailureKind.TRANSIENT
+        )
