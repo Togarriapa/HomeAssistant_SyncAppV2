@@ -14,14 +14,14 @@ from pathlib import Path
 from .log_history_evidence import TrustedLogHistoryEvidence
 from .log_history_prewrite import LogHistoryPrewriteError, reprove_log_history_prewrite
 from .log_history_reader import LogHistoryReadError, fetch_trusted_log_history_evidence
-from .log_history_replacement import (
-    LogHistoryReplacementAuthorizationError,
-    authorize_log_history_replacement,
-)
 from .log_history_replace_transport import (
     LogHistoryReplacementTransportError,
     build_log_history_replacement,
     replace_logs_history,
+)
+from .log_history_replacement import (
+    LogHistoryReplacementAuthorizationError,
+    authorize_log_history_replacement,
 )
 from .log_history_retention import LOG_HISTORY_BRANCH
 from .log_retention_staging import LogRetentionStagingError, prepare_log_history_staging
