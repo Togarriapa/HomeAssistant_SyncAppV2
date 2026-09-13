@@ -39,8 +39,7 @@ class LogHistoryReplacementArtifact:
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError(
-            "LogHistoryReplacementArtifact must be produced by "
-            "build_log_history_replacement()"
+            "LogHistoryReplacementArtifact must be produced by build_log_history_replacement()"
         )
 
 
@@ -83,9 +82,7 @@ def build_log_history_replacement(
 
     _validate_authorization_boundary(authorization)
     if not authorization.requires_replacement:
-        raise LogHistoryReplacementTransportError(
-            "logs history replacement is not required"
-        )
+        raise LogHistoryReplacementTransportError("logs history replacement is not required")
     repository = _validate_repository_path(repository)
     timeout_value = _validate_timeout(timeout)
     executable = _git_executable()
@@ -94,9 +91,7 @@ def build_log_history_replacement(
     retained_oldest_first = tuple(reversed(authorization.retained_shas))
     for index, original_sha in enumerate(retained_oldest_first):
         expected_original_parent = (
-            authorization.pruned_shas[0]
-            if index == 0
-            else retained_oldest_first[index - 1]
+            authorization.pruned_shas[0] if index == 0 else retained_oldest_first[index - 1]
         )
         raw_commit = _read_commit(
             executable=executable,
@@ -143,15 +138,11 @@ def replace_logs_history(
         return False
     _validate_artifact(authorization=authorization, artifact=artifact)
     if artifact is None:
-        raise LogHistoryReplacementTransportError(
-            "logs replacement artifact is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
     if repository is not None:
         supplied = _validate_repository_path(repository)
         if supplied != artifact.repository:
-            raise LogHistoryReplacementTransportError(
-                "logs replacement artifact is invalid"
-            )
+            raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
     timeout_value = _validate_timeout(timeout)
     _validate_artifact_history(
         authorization=authorization,
@@ -182,13 +173,9 @@ def replace_logs_history(
             "logs history replacement transport failed"
         ) from None
     if not isinstance(result, subprocess.CompletedProcess):
-        raise LogHistoryReplacementTransportError(
-            "logs history replacement transport failed"
-        )
+        raise LogHistoryReplacementTransportError("logs history replacement transport failed")
     if result.returncode != 0:
-        raise LogHistoryReplacementTransportError(
-            "logs history replacement was rejected"
-        )
+        raise LogHistoryReplacementTransportError("logs history replacement was rejected")
     return True
 
 
@@ -196,13 +183,9 @@ def _validate_authorization_boundary(
     authorization: LogHistoryReplacementAuthorization,
 ) -> None:
     if type(authorization) is not LogHistoryReplacementAuthorization:
-        raise LogHistoryReplacementTransportError(
-            "logs replacement authorization is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement authorization is invalid")
     if authorization.branch != LOG_HISTORY_BRANCH:
-        raise LogHistoryReplacementTransportError(
-            "history replacement is restricted to logs"
-        )
+        raise LogHistoryReplacementTransportError("history replacement is restricted to logs")
     _validate_repository_identity(authorization)
     all_shas = (*authorization.retained_shas, *authorization.pruned_shas)
     if (
@@ -213,9 +196,7 @@ def _validate_authorization_boundary(
         or any(_COMMIT_SHA.fullmatch(sha) is None for sha in all_shas)
         or any(len(sha) != len(authorization.expected_head_sha) for sha in all_shas)
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement authorization is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement authorization is invalid")
 
 
 def _validate_artifact(
@@ -235,9 +216,7 @@ def _validate_artifact(
         or len(artifact.replacement_head_sha) != len(authorization.expected_head_sha)
         or artifact.replacement_head_sha == authorization.expected_head_sha
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement artifact is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
 
 
 def _validate_artifact_history(
@@ -268,30 +247,19 @@ def _validate_artifact_history(
         _original_tree, original_parents = _commit_tree_and_parents(original)
         _rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
         expected_original_parent = (
-            retained[index + 1]
-            if index + 1 < len(retained)
-            else authorization.pruned_shas[0]
+            retained[index + 1] if index + 1 < len(retained) else authorization.pruned_shas[0]
         )
         oldest = index + 1 == len(retained)
-        if (oldest and rebuilt_parents) or (
-            not oldest and len(rebuilt_parents) != 1
-        ):
-            raise LogHistoryReplacementTransportError(
-                "logs replacement artifact is invalid"
-            )
+        if (oldest and rebuilt_parents) or (not oldest and len(rebuilt_parents) != 1):
+            raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
         rebuilt_parent = None if oldest else rebuilt_parents[0]
         expected_rebuilt = _rewrite_commit_parent(
             original,
             expected_original_parent=expected_original_parent,
             rebuilt_parent=rebuilt_parent,
         )
-        if (
-            original_parents != (expected_original_parent,)
-            or rebuilt != expected_rebuilt
-        ):
-            raise LogHistoryReplacementTransportError(
-                "logs replacement artifact is invalid"
-            )
+        if original_parents != (expected_original_parent,) or rebuilt != expected_rebuilt:
+            raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
         if not oldest:
             rebuilt_sha = rebuilt_parents[0]
 
@@ -323,18 +291,14 @@ def _read_commit(
         or result.returncode != 0
         or not isinstance(result.stdout, str)
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs retained history could not be read"
-        )
+        raise LogHistoryReplacementTransportError("logs retained history could not be read")
     return result.stdout
 
 
 def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
     header, separator, _message = raw_commit.partition("\n\n")
     if not separator or not header:
-        raise LogHistoryReplacementTransportError(
-            "logs replacement artifact is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
     trees: list[str] = []
     parents: list[str] = []
     for line in header.split("\n"):
@@ -348,9 +312,7 @@ def _commit_tree_and_parents(raw_commit: str) -> tuple[str, tuple[str, ...]]:
         or any(_COMMIT_SHA.fullmatch(parent) is None for parent in parents)
         or len(parents) > 1
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement artifact is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
     return trees[0], tuple(parents)
 
 
@@ -362,17 +324,13 @@ def _rewrite_commit_parent(
 ) -> str:
     header, separator, message = raw_commit.partition("\n\n")
     if not separator or not header:
-        raise LogHistoryReplacementTransportError(
-            "logs retained commit is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs retained commit is invalid")
 
     groups: list[list[str]] = []
     for line in header.split("\n"):
         if line.startswith(" "):
             if not groups:
-                raise LogHistoryReplacementTransportError(
-                    "logs retained commit is invalid"
-                )
+                raise LogHistoryReplacementTransportError("logs retained commit is invalid")
             groups[-1].append(line)
         else:
             groups.append([line])
@@ -380,9 +338,7 @@ def _rewrite_commit_parent(
     tree_groups = [group for group in groups if group[0].startswith("tree ")]
     parent_groups = [group for group in groups if group[0].startswith("parent ")]
     if len(tree_groups) != 1 or len(parent_groups) != 1:
-        raise LogHistoryReplacementTransportError(
-            "logs retained commit ancestry is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs retained commit ancestry is invalid")
     tree_sha = tree_groups[0][0][5:]
     parent_sha = parent_groups[0][0][7:]
     if (
@@ -390,9 +346,7 @@ def _rewrite_commit_parent(
         or _COMMIT_SHA.fullmatch(parent_sha) is None
         or parent_sha != expected_original_parent
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs retained commit ancestry is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs retained commit ancestry is invalid")
 
     rebuilt_groups: list[list[str]] = []
     for group in groups:
@@ -443,9 +397,7 @@ def _write_commit_object(
         or result.returncode != 0
         or not isinstance(result.stdout, str)
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs retained history could not be rebuilt"
-        )
+        raise LogHistoryReplacementTransportError("logs retained history could not be rebuilt")
     replacement_sha = result.stdout.strip()
     if (
         _COMMIT_SHA.fullmatch(replacement_sha) is None
@@ -475,11 +427,7 @@ def _replacement_artifact(
 def _validate_repository_identity(
     authorization: LogHistoryReplacementAuthorization,
 ) -> None:
-    parts = (
-        authorization.target.split("/")
-        if isinstance(authorization.target, str)
-        else []
-    )
+    parts = authorization.target.split("/") if isinstance(authorization.target, str) else []
     if (
         len(parts) != 2
         or _REPO_OWNER.fullmatch(parts[0]) is None
@@ -488,16 +436,12 @@ def _validate_repository_identity(
         or type(authorization.repository_id) is not int
         or authorization.repository_id <= 0
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement repository identity is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement repository identity is invalid")
 
 
 def _validate_repository_path(repository: Path) -> Path:
     if not isinstance(repository, Path) or not repository.is_absolute():
-        raise LogHistoryReplacementTransportError(
-            "logs replacement repository path is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement repository path is invalid")
     try:
         metadata = repository.lstat()
         resolved = repository.resolve(strict=True)
@@ -510,9 +454,7 @@ def _validate_repository_path(repository: Path) -> Path:
         or repository.is_symlink()
         or not (resolved / ".git").is_dir()
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement repository path is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement repository path is invalid")
     return resolved
 
 
@@ -523,18 +465,13 @@ def _validate_timeout(timeout: float) -> float:
         or not math.isfinite(timeout)
         or not 0 < timeout <= _MAX_TIMEOUT_SECONDS
     ):
-        raise LogHistoryReplacementTransportError(
-            "logs replacement timeout is invalid"
-        )
+        raise LogHistoryReplacementTransportError("logs replacement timeout is invalid")
     return float(timeout)
 
 
 def _repository_url(target: str) -> str:
     owner, repository = target.split("/", 1)
-    return (
-        f"https://github.com/{quote(owner, safe='')}/"
-        f"{quote(repository, safe='')}.git"
-    )
+    return f"https://github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
 
 
 def _git_executable() -> str:
