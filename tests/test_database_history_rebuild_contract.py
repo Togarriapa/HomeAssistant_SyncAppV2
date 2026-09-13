@@ -48,6 +48,7 @@ def _authorization():
 
 
 def _make_repository(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
     (path / ".git").mkdir()
     return path
 
