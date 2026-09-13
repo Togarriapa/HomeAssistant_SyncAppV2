@@ -98,6 +98,27 @@ def _make_repository(path: Path) -> Path:
     return path
 
 
+def _history_read(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    if command[-1] == EXPECTED:
+        payload = (
+            f"tree {TREE}\n"
+            f"parent {PRUNED}\n"
+            "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "\nRecorder snapshot\n"
+        )
+    elif command[-1] == REPLACEMENT:
+        payload = (
+            f"tree {TREE}\n"
+            "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
+            "\nRecorder snapshot\n"
+        )
+    else:
+        raise AssertionError(command)
+    return subprocess.CompletedProcess(command, 0, payload, "")
+
+
 def _artifact(
     repository: Path,
     authorization: DatabaseHistoryReplacementAuthorization | None = None,
@@ -108,14 +129,7 @@ def _artifact(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         if "cat-file" in command:
-            payload = (
-                f"tree {TREE}\n"
-                f"parent {PRUNED}\n"
-                "author SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
-                "committer SyncApp <syncapp@example.invalid> 1789250000 +0000\n"
-                "\nRecorder snapshot\n"
-            )
-            return subprocess.CompletedProcess(command, 0, payload, "")
+            return _history_read(command)
         if "hash-object" in command:
             return subprocess.CompletedProcess(command, 0, f"{REPLACEMENT}\n", "")
         raise AssertionError(command)
@@ -138,6 +152,8 @@ def test_replacement_uses_exact_database_force_with_lease_after_reproof(
     def runner(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
         calls.append((command, cwd, timeout))
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -303,6 +319,13 @@ def test_mutation_time_repo_verification_failure_is_sanitized(tmp_path: Path) ->
     authorization = _authorization()
     artifact = _artifact(repository, authorization)
 
+    def runner(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
+        raise AssertionError("push must not run after repository verification fails")
+
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         side_effect=RepositoryVerificationError("secret-token"),
@@ -315,6 +338,7 @@ def test_mutation_time_repo_verification_failure_is_sanitized(tmp_path: Path) ->
                 authorization=authorization,
                 artifact=artifact,
                 token="secret-token",
+                runner=runner,
             )
     assert "secret-token" not in str(caught.value)
 
@@ -328,6 +352,8 @@ def test_stale_lease_failure_is_sanitized(tmp_path: Path) -> None:
     def runner(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
         return subprocess.CompletedProcess(
             command,
             1,
@@ -360,7 +386,11 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
     artifact = _artifact(repository, authorization)
     current = BranchHead("owner/private-repo", 123, "database", EXPECTED)
 
-    def fail(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fail(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
         raise OSError("https://secret-token@github.com/owner/repo")
 
     with patch(
@@ -382,6 +412,8 @@ def test_transport_exception_and_invalid_runner_result_are_sanitized(
     def invalid_result(
         command: tuple[str, ...], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
+        if "cat-file" in command:
+            return _history_read(command)
         return cast(subprocess.CompletedProcess[str], object())
 
     with patch(
