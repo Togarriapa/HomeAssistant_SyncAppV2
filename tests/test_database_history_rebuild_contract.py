@@ -169,17 +169,16 @@ def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> 
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=moved,
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="changed before replacement",
     ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="changed before replacement",
-        ):
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="test-token",
-                runner=runner,
-            )
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
 
 
 def test_transport_rejects_artifact_bound_to_another_repository(tmp_path: Path) -> None:
@@ -210,12 +209,14 @@ def test_builder_does_not_touch_refs_or_push(tmp_path: Path) -> None:
     ) -> subprocess.CompletedProcess[str]:
         seen.append(command)
         if "cat-file" in command:
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                f"tree {TREE}\nparent {PRUNED}\nauthor A <a@b> 1 +0000\ncommitter A <a@b> 1 +0000\n\nmessage\n",
-                "",
+            payload = (
+                f"tree {TREE}\n"
+                f"parent {PRUNED}\n"
+                "author A <a@b> 1 +0000\n"
+                "committer A <a@b> 1 +0000\n"
+                "\nmessage\n"
             )
+            return subprocess.CompletedProcess(command, 0, payload, "")
         if "hash-object" in command:
             return subprocess.CompletedProcess(command, 0, f"{REPLACEMENT}\n", "")
         raise AssertionError(command)
