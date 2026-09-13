@@ -19,6 +19,7 @@ from .retrigger_schedule import RetriggerSchedule, RetriggerScheduleError
 _DATA_DIR = Path("/data")
 _HOME_ASSISTANT_ROOT = Path("/homeassistant")
 _POLL_SECONDS = 0.25
+_RETRIGGER_SETUP_FAILURE = 14
 
 
 def _emit(event: str, *, level: str = "info", **fields: object) -> None:
@@ -94,16 +95,25 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
         signal.signal(sig, request_stop)
 
     schedule: RetriggerSchedule | None = None
+    setup_failed = False
     try:
         try:
             schedule = _build_schedule(config, data_dir)
         except (OSError, RetriggerIPCError, RetriggerScheduleError):
-            # Service startup remains authoritative; a scheduler setup failure is visible
-            # but cannot be allowed to mutate or bypass service trust/state ownership.
             _emit("retrigger_schedule_failed", level="error", reason="setup_failed")
-        if schedule is not None:
+            setup_failed = True
+            if child.poll() is None:
+                child.terminate()
+        if setup_failed:
+            child.wait()
+            return _RETRIGGER_SETUP_FAILURE
+
+        if schedule is not None and config is not None:
             schedule.start(time.monotonic())
-            _emit("retrigger_schedule_started", interval_seconds=config.retrigger_interval_seconds)
+            _emit(
+                "retrigger_schedule_started",
+                interval_seconds=config.retrigger_interval_seconds,
+            )
 
         while child.poll() is None:
             if stopping:
@@ -126,7 +136,10 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
             schedule.stop()
         if child.poll() is None:
             child.terminate()
-        return_code = child.wait()
+        if not setup_failed:
+            return_code = child.wait()
+        else:
+            return_code = _RETRIGGER_SETUP_FAILURE
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
