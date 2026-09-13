@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.retrigger_cycle import run_retrigger_cycle
