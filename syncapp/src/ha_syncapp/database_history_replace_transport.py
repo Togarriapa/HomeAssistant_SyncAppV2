@@ -293,6 +293,7 @@ def _validate_artifact_history(
             )
 
         is_oldest_retained = index + 1 == len(retained)
+        expected_rebuilt_parent: str | None
         if is_oldest_retained:
             expected_rebuilt_parent = None
             if rebuilt_parents:
@@ -316,7 +317,7 @@ def _validate_artifact_history(
                 "database replacement artifact is invalid"
             )
 
-        if not is_oldest_retained:
+        if expected_rebuilt_parent is not None:
             rebuilt_sha = expected_rebuilt_parent
 
 
