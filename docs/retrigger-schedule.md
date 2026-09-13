@@ -6,16 +6,19 @@ The Retrigger Work Cron Job is a recovery mechanism, not the normal producer for
 
 ## Scheduling contract
 
-- The recovery scheduler is armed whenever trusted Repo B synchronization is active; there is no disable option.
+- The recovery dispatcher is active whenever Repo B is configured; the state-owning service still re-proves private Repo B identity before every recovery cycle. There is no disable option.
 - `retrigger_interval_seconds` is configurable from 30 through 3600 seconds and defaults to 300 seconds.
-- The first automatic recovery cycle waits one full configured interval after service activation. Startup bootstrap remains responsible for normal immediate work.
-- Elapsed intervals coalesce into at most one bounded recovery cycle per owner-loop tick; missed intervals never create a catch-up queue.
-- The scheduler runs on the StateStore-owning service thread and delegates to the existing bounded Retrigger cycle, preserving exclusive state ownership and preventing concurrent recovery cycles.
-- A cycle result does not bypass or reset durable work state. Transient backoff and attempt limits remain owned by the existing work state machine; blocked deterministic failures remain blocked until a changed work identity or explicit administrative retry makes them eligible.
-- Shutdown disarms the schedule before StateStore ownership is released.
+- The first automatic recovery request waits one full configured interval after App activation. Startup bootstrap remains responsible for normal immediate work.
+- Elapsed intervals coalesce into at most one bounded request; missed intervals never create a catch-up queue.
+- The launcher owns only cadence. It never opens the StateStore. Every due recovery request crosses the existing private same-owner Unix socket to the sole StateStore-owning service process, which executes the bounded Retrigger cycle synchronously. This preserves exclusive state ownership and prevents overlapping recovery cycles.
+- IPC dispatch failure advances the next deadline rather than creating a tight retry loop. Once a request reaches the service, durable work retry/backoff and blocked-state semantics remain authoritative.
+- Recorder configuration is optional. Without an explicit Recorder source, the database lane is skipped while Local, runtime, logs and candidate recovery continue.
+- A cycle never invokes administrative retry. Blocked deterministic failures remain blocked until a changed work identity or explicit administrative retry makes them eligible.
+- Container shutdown is forwarded to the service and disarms the cadence as the service exits.
+- Home Assistant App `boot: auto` returns the recovery mechanism after a host reboot.
 
 ## Deployment safety
 
-The schedule adds no candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging or rollback authority. Candidate recovery may only enqueue/advance work through the already-guarded durable workflow. The scheduler must never turn a deterministic candidate failure into an automatic retry.
+The schedule adds no candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging or rollback authority. Candidate recovery may only proceed through the already-guarded durable workflow. The scheduler must never turn a deterministic candidate failure into an automatic retry.
 
-This slice does not claim that a Linux `cron` daemon is required inside the Home Assistant App container. The README's named Retrigger Work Cron Job is implemented as the app-owned recurring recovery schedule so it can retain the single StateStore/process lock and supported Home Assistant App lifecycle rather than creating a second state-owning process.
+The initial README names this mechanism the Retrigger Work Cron Job. Inside the Home Assistant App it is implemented as a dedicated recurring dispatcher supervised beside the state-owning service, rather than a second state-mutating `cron` process. This preserves the supported App lifecycle and the single durable-state/process-lock boundary while retaining a distinct recovery cadence.
