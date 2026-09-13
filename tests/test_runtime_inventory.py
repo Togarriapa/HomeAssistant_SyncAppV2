@@ -46,6 +46,7 @@ def test_build_emits_complete_readme_runtime_layout(tmp_path: Path) -> None:
     assert "supervisor/system.json" in relative
     assert "hardware/network.json" in relative
     assert "analysis/integration_health.json" in relative
+    assert "analysis/recovery.json" in relative
     assert len(artifact.artifact_id) == 64
     verify_runtime_inventory(artifact)
 
@@ -73,6 +74,7 @@ def test_empty_sections_get_explicit_defaults(tmp_path: Path) -> None:
     assert json.loads((artifact.root / "homeassistant/entities.json").read_text()) == []
     assert json.loads((artifact.root / "supervisor/system.json").read_text()) == {}
     assert json.loads((artifact.root / "analysis/topology.json").read_text()) == {}
+    assert json.loads((artifact.root / "analysis/recovery.json").read_text()) == {}
 
 
 def test_deployment_records_require_full_lowercase_commit_sha(tmp_path: Path) -> None:
