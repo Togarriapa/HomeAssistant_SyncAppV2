@@ -53,7 +53,7 @@ def reprove_preapply_repo_heads(
         # Keep a detached immutable value snapshot. ``CandidateBackupEvidence`` is
         # frozen for normal callers, but Python reflection can still mutate an
         # aliased instance via ``object.__setattr__`` while external I/O is in
-        # progress.  Comparing against an alias would make that drift invisible.
+        # progress. Comparing against an alias would make that drift invisible.
         expected = replace(_validate_binding(prepared, backup))
         credential = _validate_token(token)
 
@@ -64,6 +64,7 @@ def reprove_preapply_repo_heads(
             expected.repository_id,
             "main",
         )
+        _require_binding_unchanged(prepared, backup, expected)
         if main.commit_sha != expected.baseline_sha:
             raise PreApplyFreshnessError("trusted main head is stale")
 
@@ -74,14 +75,12 @@ def reprove_preapply_repo_heads(
             expected.repository_id,
             "candidate",
         )
+        _require_binding_unchanged(prepared, backup, expected)
         if candidate.commit_sha != expected.candidate_sha:
             raise PreApplyFreshnessError("trusted candidate head is stale")
 
-        # Re-prove the in-memory preparation binding after all external I/O. A
-        # caller must not be able to swap or mutate candidate evidence while GitHub
-        # is read.
-        if prepared.evidence != expected or backup != expected:
-            raise PreApplyFreshnessError("prepared deployment evidence changed during verification")
+        # Re-prove the complete semantic binding after all external I/O as a final
+        # defense before freshness evidence is returned.
         _validate_binding(prepared, backup)
 
         return PreApplyFreshnessEvidence(
@@ -118,6 +117,15 @@ def _validate_binding(
     if prepared.evidence != backup:
         raise PreApplyFreshnessError("prepared backup binding does not match")
     return backup
+
+
+def _require_binding_unchanged(
+    prepared: PreparedDeployment,
+    backup: CandidateBackupEvidence,
+    expected: CandidateBackupEvidence,
+) -> None:
+    if prepared.evidence != expected or backup != expected:
+        raise PreApplyFreshnessError("prepared deployment evidence changed during verification")
 
 
 def _validate_token(token: str | None) -> str:
