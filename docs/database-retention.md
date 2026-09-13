@@ -50,7 +50,7 @@ History collection re-verifies the configured private repository ID and exact `d
 
 The freshly verified repository target, repository ID, branch and head SHA must still exactly match the immutable trusted history evidence. The evidence itself must remain internally consistent: both evidence and plan are `database` scoped, history is non-empty, and its first record equals the expected head. A moved head, changed repository identity, wrong branch, malformed evidence, or repository-verification failure fails closed. Verification failures are translated to sanitized domain errors so token or transport exception text is not exposed.
 
-`TrustedDatabaseHistoryPrewrite` is therefore evidence produced by this explicit re-verification step; callers must not treat manual construction of matching fields as freshness evidence.
+`TrustedDatabaseHistoryPrewrite` cannot be constructed through its public initializer. The verifier creates it only after the fresh identity/head check succeeds, so matching caller-supplied fields cannot masquerade as freshness evidence.
 
 ## Replacement authorization boundary
 
