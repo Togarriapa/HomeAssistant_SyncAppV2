@@ -15,6 +15,7 @@ from ha_syncapp.database_history_prewrite import (
     reprove_database_history_prewrite,
 )
 from ha_syncapp.database_history_replacement import (
+    DatabaseHistoryReplacementAuthorization,
     DatabaseHistoryReplacementAuthorizationError,
     authorize_database_history_replacement,
 )
@@ -80,6 +81,18 @@ def test_authorization_binds_exact_database_plan_and_fresh_proof() -> None:
     assert authorization.retained_shas == (_sha(3), _sha(2))
     assert authorization.pruned_shas == (_sha(1),)
     assert authorization.requires_replacement is True
+
+
+def test_authorization_cannot_be_constructed_directly() -> None:
+    with pytest.raises(TypeError, match="authorize_database_history_replacement"):
+        DatabaseHistoryReplacementAuthorization(
+            target="owner/private-repo",
+            repository_id=123,
+            branch="database",
+            expected_head_sha=_sha(3),
+            retained_shas=(_sha(3), _sha(2)),
+            pruned_shas=(_sha(1),),
+        )
 
 
 def test_authorization_represents_noop_without_replacement_authority() -> None:
