@@ -118,7 +118,10 @@ def discover_log_retention_work(
             expected_id=repository_id,
             reference_time=reference_time,
         )
-        if evidence.target.casefold() != target.casefold() or evidence.repository_id != repository_id:
+        if (
+            evidence.target.casefold() != target.casefold()
+            or evidence.repository_id != repository_id
+        ):
             raise LogRetentionWorkError("logs retention evidence describes another repository")
         return store.enqueue_work(
             LOG_RETENTION_WORK_KIND,
@@ -200,7 +203,10 @@ def _execute_claimed(
 
         intent = store.log_retention_intent(item.work_key)
         if intent is not None:
-            if intent.target.casefold() != target.casefold() or intent.repository_id != repository_id:
+            if (
+                intent.target.casefold() != target.casefold()
+                or intent.repository_id != repository_id
+            ):
                 return _fail(store, item, transient=False, now=reference_time)
             current = fetch_trusted_branch_head(
                 target,
@@ -299,11 +305,15 @@ def _execute_claimed(
             now=reference_time,
         )
     except LogRetentionStagingError as error:
-        return _fail(store, item, transient=_staging_failure_is_transient(error), now=reference_time)
+        return _fail(
+            store, item, transient=_staging_failure_is_transient(error), now=reference_time
+        )
     except LogHistoryReplacementAuthorizationError:
         return _fail(store, item, transient=False, now=reference_time)
     except RepositoryVerificationError as error:
-        return _fail(store, item, transient=_repository_failure_is_transient(error), now=reference_time)
+        return _fail(
+            store, item, transient=_repository_failure_is_transient(error), now=reference_time
+        )
     except StateError:
         raise LogRetentionWorkError("logs retention outcome could not be recorded") from None
     finally:

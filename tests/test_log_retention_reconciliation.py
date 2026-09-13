@@ -42,9 +42,7 @@ def _store_with_interrupted_intent(tmp_path: Path) -> StateStore:
     store = StateStore(data)
     store.__enter__()
     store.bind_repository(TARGET, 123)
-    store.record_synchronization_baseline(
-        TARGET, "logs", SNAPSHOT, HEAD, synchronized_at=REFERENCE
-    )
+    store.record_synchronization_baseline(TARGET, "logs", SNAPSHOT, HEAD, synchronized_at=REFERENCE)
     work_key = log_retention_work_key(_evidence())
     store.enqueue_work(LOG_RETENTION_WORK_KIND, work_key, now=REFERENCE)
     item = store.claim_work_kind(LOG_RETENTION_WORK_KIND, now=REFERENCE)
