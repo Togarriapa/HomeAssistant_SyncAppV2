@@ -262,7 +262,7 @@ def _validate_artifact_history(
     timeout: float,
     runner: CommandRunner,
 ) -> None:
-    """Prove a proposed replacement contains only the authorized snapshot trees."""
+    """Prove every replacement commit is the canonical authorized rewrite."""
 
     executable = _git_executable()
     rebuilt_sha = artifact.replacement_head_sha
@@ -282,27 +282,42 @@ def _validate_artifact_history(
             timeout=timeout,
             runner=runner,
         )
-        original_tree, original_parents = _commit_tree_and_parents(original)
-        rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
+        _original_tree, original_parents = _commit_tree_and_parents(original)
+        _rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
         expected_original_parent = (
             retained[index + 1] if index + 1 < len(retained) else authorization.pruned_shas[0]
         )
-        if original_parents != (expected_original_parent,) or rebuilt_tree != original_tree:
+        if original_parents != (expected_original_parent,):
             raise DatabaseHistoryReplacementTransportError(
                 "database replacement artifact is invalid"
             )
+
         is_oldest_retained = index + 1 == len(retained)
         if is_oldest_retained:
+            expected_rebuilt_parent = None
             if rebuilt_parents:
                 raise DatabaseHistoryReplacementTransportError(
                     "database replacement artifact is invalid"
                 )
-            continue
-        if len(rebuilt_parents) != 1:
+        else:
+            if len(rebuilt_parents) != 1:
+                raise DatabaseHistoryReplacementTransportError(
+                    "database replacement artifact is invalid"
+                )
+            expected_rebuilt_parent = rebuilt_parents[0]
+
+        expected_rebuilt = _rewrite_commit_parent(
+            original,
+            expected_original_parent=expected_original_parent,
+            rebuilt_parent=expected_rebuilt_parent,
+        )
+        if rebuilt != expected_rebuilt:
             raise DatabaseHistoryReplacementTransportError(
                 "database replacement artifact is invalid"
             )
-        rebuilt_sha = rebuilt_parents[0]
+
+        if not is_oldest_retained:
+            rebuilt_sha = expected_rebuilt_parent
 
 
 def _read_commit(
