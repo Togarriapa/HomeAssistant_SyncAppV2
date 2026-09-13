@@ -5,6 +5,9 @@ configuration:
   status_interval_seconds:
     name: Status interval (seconds)
     description: How often the passive service reports that it is idle, from 30 to 3600 seconds.
+  retrigger_interval_seconds:
+    name: Retrigger recovery interval (seconds)
+    description: How often trusted durable recovery work is retried, from 30 to 3600 seconds. This recovery schedule cannot be disabled.
   recorder_database_path:
     name: Recorder database path
     description: Optional absolute path to the Recorder database below /homeassistant.
