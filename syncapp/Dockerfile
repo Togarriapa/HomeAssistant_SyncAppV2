@@ -26,5 +26,5 @@ RUN apk add --no-cache git openssh-client libseccomp \
 COPY src/ /app/
 
 STOPSIGNAL SIGTERM
-ENTRYPOINT ["/opt/syncapp/bin/python", "-m", "ha_syncapp"]
+ENTRYPOINT ["/opt/syncapp/bin/python", "-m", "ha_syncapp.service_entry"]
 CMD []
