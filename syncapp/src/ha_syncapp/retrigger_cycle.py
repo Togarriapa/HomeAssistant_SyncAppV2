@@ -11,6 +11,11 @@ from ha_syncapp.candidate_detection import (
     CandidateDetectionResult,
     detect_and_enqueue_trusted_candidate,
 )
+from ha_syncapp.database_retention_work import (
+    DatabaseRetentionPassResult,
+    DatabaseRetentionWorkError,
+    run_database_retention_work_pass,
+)
 from ha_syncapp.database_sync_retrigger import (
     DatabaseSyncRetriggerError,
     DatabaseSyncRetriggerResult,
@@ -50,6 +55,7 @@ class RetriggerCycleResult:
 
     local_sync: LocalSyncRetriggerResult
     database_sync: DatabaseSyncRetriggerResult
+    database_retention: DatabaseRetentionPassResult
     runtime_sync: RuntimeSyncRetriggerResult
     log_sync: LogSyncRetriggerResult
     candidate_detection: CandidateDetectionResult
@@ -75,6 +81,8 @@ def run_retrigger_cycle(
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
     log_workspace_root: Path | None = None,
+    recorder_retention_days: int | None = None,
+    retention_reference_time: datetime | None = None,
 ) -> RetriggerCycleResult:
     """Recover bounded work, detect candidate, then enqueue one fresh log artifact."""
     if type(store) is not StateStore:
@@ -96,6 +104,9 @@ def run_retrigger_cycle(
         )
         if recorder_database is None:
             database_sync = DatabaseSyncRetriggerResult(recovered_interrupted=0, processed=None)
+            database_retention = DatabaseRetentionPassResult(
+                recovered_interrupted=0, processed=None
+            )
         else:
             database_sync = run_database_sync_retrigger_pass(
                 store,
@@ -106,6 +117,19 @@ def run_retrigger_cycle(
                 target,
                 github_token,
             )
+            if recorder_retention_days is None:
+                database_retention = DatabaseRetentionPassResult(
+                    recovered_interrupted=0, processed=None
+                )
+            else:
+                database_retention = run_database_retention_work_pass(
+                    store,
+                    database_workspace_root / "retention",
+                    target,
+                    github_token,
+                    retention_days=recorder_retention_days,
+                    reference_time=retention_reference_time or datetime.now(UTC),
+                )
         runtime_sync = run_runtime_sync_retrigger_pass(
             store,
             runtime_staging_root,
@@ -153,12 +177,14 @@ def run_retrigger_cycle(
         CandidateDetectionError,
         RepositoryVerificationError,
         LogCollectionError,
+        DatabaseRetentionWorkError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
     return RetriggerCycleResult(
         local_sync=local_sync,
         database_sync=database_sync,
+        database_retention=database_retention,
         runtime_sync=runtime_sync,
         log_sync=log_sync,
         candidate_detection=candidate_detection,

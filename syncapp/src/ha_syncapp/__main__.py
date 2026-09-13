@@ -315,6 +315,7 @@ def _database_sync_service_if_configured(
         config.repo_b,
         config.github_token,
         interval_seconds=_DATABASE_SYNC_INTERVAL_SECONDS,
+        retention_days=config.recorder_retention_days,
     )
 
 
@@ -459,6 +460,7 @@ def _handle_retrigger_request(
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
             log_workspace_root=log_workspace_root,
+            recorder_retention_days=config.recorder_retention_days,
         )
     except RepositoryVerificationError:
         return "repo_b_untrusted"
