@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -72,7 +73,7 @@ def test_moved_trusted_head_fails_closed(moved_branch):
 
 def test_backup_binding_mismatch_fails_before_github_io():
     prepared = _prepared()
-    other = CandidateBackupEvidence(**{**prepared.evidence.__dict__, "backup_slug": "other"})
+    other = replace(prepared.evidence, backup_slug="other")
 
     with pytest.raises(PreApplyFreshnessError, match="backup"):
         reprove_preapply_repo_heads(
