@@ -37,9 +37,7 @@ def _store(tmp_path: Path) -> StateStore:
     store = StateStore(data)
     store.__enter__()
     store.bind_repository(TARGET, 123)
-    store.record_synchronization_baseline(
-        TARGET, "logs", SNAPSHOT, HEAD, synchronized_at=REFERENCE
-    )
+    store.record_synchronization_baseline(TARGET, "logs", SNAPSHOT, HEAD, synchronized_at=REFERENCE)
     return store
 
 
