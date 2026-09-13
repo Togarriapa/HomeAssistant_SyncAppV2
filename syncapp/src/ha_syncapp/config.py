@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from .retrigger_scheduler import (
+    DEFAULT_RETRIGGER_INTERVAL_SECONDS,
+    MAX_RETRIGGER_INTERVAL_SECONDS,
+    MIN_RETRIGGER_INTERVAL_SECONDS,
+)
+
 MAX_OPTIONS_BYTES = 65536
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -22,6 +28,7 @@ class ConfigError(ValueError):
 class Config:
     log_level: str = "info"
     status_interval_seconds: int = 300
+    retrigger_interval_seconds: int = DEFAULT_RETRIGGER_INTERVAL_SECONDS
     repo_b: str | None = None
     github_token: str | None = field(default=None, repr=False)
     recorder_database_path: str | None = None
@@ -90,6 +97,7 @@ def load_config(path: Path) -> Config:
     supported = {
         "log_level",
         "status_interval_seconds",
+        "retrigger_interval_seconds",
         "repo_b",
         "github_token",
         "recorder_database_path",
@@ -103,6 +111,15 @@ def load_config(path: Path) -> Config:
     interval = options.get("status_interval_seconds", 300)
     if type(interval) is not int or not 30 <= interval <= 3600:
         raise ConfigError("Status interval must be an integer from 30 to 3600 seconds")
+    retrigger_interval = options.get(
+        "retrigger_interval_seconds", DEFAULT_RETRIGGER_INTERVAL_SECONDS
+    )
+    if (
+        type(retrigger_interval) is not int
+        or retrigger_interval < MIN_RETRIGGER_INTERVAL_SECONDS
+        or retrigger_interval > MAX_RETRIGGER_INTERVAL_SECONDS
+    ):
+        raise ConfigError("Retrigger interval must be an integer from 30 to 3600 seconds")
 
     repo_b = options.get("repo_b")
     github_token = options.get("github_token")
@@ -126,6 +143,7 @@ def load_config(path: Path) -> Config:
     return Config(
         log_level=level,
         status_interval_seconds=interval,
+        retrigger_interval_seconds=retrigger_interval,
         repo_b=cast(str | None, repo_b),
         github_token=cast(str | None, github_token),
         recorder_database_path=cast(str | None, recorder_database_path),
