@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.log_history_replace_transport import (
     LogHistoryReplacementArtifact,
     LogHistoryReplacementTransportError,
