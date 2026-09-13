@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from ha_syncapp.database_history_evidence import (
@@ -9,7 +10,10 @@ from ha_syncapp.database_history_evidence import (
     TrustedDatabaseHistoryEvidence,
     validate_trusted_database_history_evidence,
 )
-from ha_syncapp.database_history_prewrite import TrustedDatabaseHistoryPrewrite
+from ha_syncapp.database_history_prewrite import (
+    TrustedDatabaseHistoryPrewrite,
+    reprove_database_history_prewrite,
+)
 from ha_syncapp.database_history_replacement import (
     DatabaseHistoryReplacementAuthorizationError,
     authorize_database_history_replacement,
@@ -23,19 +27,31 @@ def _sha(value: int) -> str:
     return f"{value:040x}"
 
 
-def _evidence(*, expired_root: bool = True) -> TrustedDatabaseHistoryEvidence:
+def _evidence(
+    *,
+    expired_root: bool = True,
+    target: str = "owner/private-repo",
+    repository_id: int = 123,
+    head_value: int = 3,
+) -> TrustedDatabaseHistoryEvidence:
     root_age = 10 if expired_root else 6
+    middle = head_value - 1
+    root = head_value - 2
     return validate_trusted_database_history_evidence(
         branch_head=BranchHead(
-            target="owner/private-repo",
-            repository_id=123,
+            target=target,
+            repository_id=repository_id,
             branch="database",
-            commit_sha=_sha(3),
+            commit_sha=_sha(head_value),
         ),
         records=(
-            DatabaseHistoryRecord(_sha(3), REFERENCE - timedelta(days=1), (_sha(2),)),
-            DatabaseHistoryRecord(_sha(2), REFERENCE - timedelta(days=5), (_sha(1),)),
-            DatabaseHistoryRecord(_sha(1), REFERENCE - timedelta(days=root_age), ()),
+            DatabaseHistoryRecord(
+                _sha(head_value), REFERENCE - timedelta(days=1), (_sha(middle),)
+            ),
+            DatabaseHistoryRecord(
+                _sha(middle), REFERENCE - timedelta(days=5), (_sha(root),)
+            ),
+            DatabaseHistoryRecord(_sha(root), REFERENCE - timedelta(days=root_age), ()),
         ),
         reference_time=REFERENCE,
         retention_days=7,
@@ -43,12 +59,17 @@ def _evidence(*, expired_root: bool = True) -> TrustedDatabaseHistoryEvidence:
 
 
 def _prewrite(evidence: TrustedDatabaseHistoryEvidence) -> TrustedDatabaseHistoryPrewrite:
-    return TrustedDatabaseHistoryPrewrite(
+    verified = BranchHead(
         target=evidence.target,
         repository_id=evidence.repository_id,
         branch=evidence.branch,
-        expected_head_sha=evidence.expected_head_sha,
+        commit_sha=evidence.expected_head_sha,
     )
+    with patch(
+        "ha_syncapp.database_history_prewrite.fetch_trusted_branch_head",
+        return_value=verified,
+    ):
+        return reprove_database_history_prewrite(evidence=evidence, token="test-token")
 
 
 def test_authorization_binds_exact_database_plan_and_fresh_proof() -> None:
@@ -75,19 +96,22 @@ def test_authorization_represents_noop_without_replacement_authority() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "other_evidence",
     [
-        ("target", "other/private-repo"),
-        ("repository_id", 999),
-        ("branch", "main"),
-        ("expected_head_sha", _sha(9)),
+        _evidence(target="other/private-repo"),
+        _evidence(repository_id=999),
+        _evidence(head_value=6),
     ],
 )
-def test_authorization_rejects_forged_prewrite(field: str, value: object) -> None:
+def test_authorization_rejects_mismatched_verified_prewrite(
+    other_evidence: TrustedDatabaseHistoryEvidence,
+) -> None:
     evidence = _evidence()
-    forged = replace(_prewrite(evidence), **{field: value})
     with pytest.raises(DatabaseHistoryReplacementAuthorizationError):
-        authorize_database_history_replacement(evidence=evidence, prewrite=forged)
+        authorize_database_history_replacement(
+            evidence=evidence,
+            prewrite=_prewrite(other_evidence),
+        )
 
 
 def test_authorization_rejects_plan_overlap() -> None:
@@ -126,6 +150,7 @@ def test_authorization_rejects_forged_plan_metadata() -> None:
 
 
 def test_authorization_rejects_non_database_evidence() -> None:
-    evidence = replace(_evidence(), branch="logs")
+    evidence = _evidence()
+    forged = replace(evidence, branch="logs")
     with pytest.raises(DatabaseHistoryReplacementAuthorizationError, match="database branch"):
-        authorize_database_history_replacement(evidence=evidence, prewrite=_prewrite(evidence))
+        authorize_database_history_replacement(evidence=forged, prewrite=_prewrite(evidence))
