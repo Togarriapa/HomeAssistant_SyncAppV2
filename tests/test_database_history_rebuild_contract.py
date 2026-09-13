@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import stat
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from ha_syncapp.database_history_evidence import (
 from ha_syncapp.database_history_prewrite import reprove_database_history_prewrite
 from ha_syncapp.database_history_replace_transport import (
     DatabaseHistoryReplacementArtifact,
+    DatabaseHistoryReplacementFailureKind,
     DatabaseHistoryReplacementTransportError,
     build_database_history_replacement,
     replace_database_history,
@@ -48,8 +50,7 @@ def _authorization():
 
 
 def _make_repository(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / ".git").mkdir()
+    (path / ".git").mkdir(parents=True)
     return path
 
 
@@ -152,6 +153,120 @@ def test_transport_reproves_private_repo_identity_and_exact_head_before_push(
     assert len(pushes) == 1
     assert pushes[0][-1] == f"--force-with-lease=refs/heads/database:{EXPECTED}"
     assert f"{REPLACEMENT}:refs/heads/database" in pushes[0]
+
+
+def test_private_push_uses_ephemeral_isolated_askpass_without_token_in_argv(
+    tmp_path: Path,
+) -> None:
+    repository = _make_repository(tmp_path)
+    authorization = _authorization()
+    artifact = _build_artifact(repository)
+    current = BranchHead("owner/private-repo", 123, "database", EXPECTED)
+    helper: Path | None = None
+    token_file: Path | None = None
+
+    def runner(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal helper, token_file
+        if "cat-file" in command:
+            return _history_read(command)
+        assert Path(command[0]).name == "env"
+        assert command[1] == "-i"
+        assert "GIT_CONFIG_NOSYSTEM=1" in command
+        assert "GIT_TERMINAL_PROMPT=0" in command
+        assert "GCM_INTERACTIVE=Never" in command
+        assert "credential.helper=" in command
+        helper_argument = next(value for value in command if value.startswith("core.askPass="))
+        helper = Path(helper_argument.split("=", 1)[1])
+        token_file = helper.with_suffix(".token")
+        assert stat.S_IMODE(helper.stat().st_mode) == 0o700
+        assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
+        assert token_file.read_text(encoding="utf-8") == "test-token\n"
+        assert "test-token" not in repr(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    with patch(
+        "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+        return_value=current,
+    ):
+        assert replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
+
+    assert helper is not None and not helper.exists()
+    assert token_file is not None and not token_file.exists()
+
+
+def test_private_push_removes_authentication_files_after_transport_failure(
+    tmp_path: Path,
+) -> None:
+    repository = _make_repository(tmp_path)
+    authorization = _authorization()
+    artifact = _build_artifact(repository)
+    current = BranchHead("owner/private-repo", 123, "database", EXPECTED)
+    authentication_files: tuple[Path, Path] | None = None
+
+    def runner(
+        command: tuple[str, ...], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal authentication_files
+        if "cat-file" in command:
+            return _history_read(command)
+        helper_argument = next(value for value in command if value.startswith("core.askPass="))
+        helper = Path(helper_argument.split("=", 1)[1])
+        authentication_files = (helper, helper.with_suffix(".token"))
+        assert all(path.exists() for path in authentication_files)
+        raise OSError("secret transport diagnostic")
+
+    with (
+        patch(
+            "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
+            return_value=current,
+        ),
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="transport failed",
+        ) as caught,
+    ):
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
+
+    assert caught.value.kind is DatabaseHistoryReplacementFailureKind.TRANSIENT
+    assert caught.value.retryable
+    assert authentication_files is not None
+    assert all(not path.exists() for path in authentication_files)
+
+
+@pytest.mark.parametrize("token", ["", "line\nbreak", "space token", "x" * 513])
+def test_private_push_rejects_invalid_tokens_before_remote_or_git(
+    tmp_path: Path,
+    token: str,
+) -> None:
+    repository = _make_repository(tmp_path)
+    authorization = _authorization()
+    artifact = _build_artifact(repository)
+
+    with (
+        patch("ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head") as fetch,
+        pytest.raises(
+            DatabaseHistoryReplacementTransportError,
+            match="authentication is invalid",
+        ),
+    ):
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token=token,
+        )
+    fetch.assert_not_called()
 
 
 def test_transport_blocks_moved_head_without_attempting_push(tmp_path: Path) -> None:
