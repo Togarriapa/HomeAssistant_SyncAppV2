@@ -227,7 +227,5 @@ def test_builder_does_not_touch_refs_or_push(tmp_path: Path) -> None:
     )
 
     assert seen
-    assert all(
-        "push" not in command and "update-ref" not in command for command in seen
-    )
+    assert all("push" not in command and "update-ref" not in command for command in seen)
     assert shutil.which("git") is not None
