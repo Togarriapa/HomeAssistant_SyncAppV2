@@ -36,7 +36,7 @@ class RetriggerRequest:
     """Explicit live-source paths supplied by a cron-invoked client."""
 
     home_assistant_root: Path
-    recorder_database: Path
+    recorder_database: Path | None
 
 
 def retrigger_socket_path(data_dir: Path) -> Path:
@@ -140,7 +140,7 @@ class RetriggerServer:
 def request_retrigger_once(
     socket_path: Path,
     home_assistant_root: Path,
-    recorder_database: Path,
+    recorder_database: Path | None,
     *,
     timeout_seconds: float = 300.0,
 ) -> None:
@@ -181,7 +181,11 @@ def _request_payload(request: RetriggerRequest) -> dict[str, object]:
     if type(request) is not RetriggerRequest:
         raise RetriggerIPCError("Retrigger request is invalid")
     home = _validate_request_path(request.home_assistant_root)
-    database = _validate_request_path(request.recorder_database)
+    database = (
+        None
+        if request.recorder_database is None
+        else _validate_request_path(request.recorder_database)
+    )
     return {
         "version": _PROTOCOL_VERSION,
         "command": "retrigger_once",
@@ -203,11 +207,11 @@ def _receive_request(connection: socket.socket, timeout_seconds: float) -> Retri
         raise RetriggerIPCError("Retrigger request is invalid")
     home = value.get("home_assistant_root")
     database = value.get("recorder_database")
-    if not isinstance(home, str) or not isinstance(database, str):
+    if not isinstance(home, str) or (database is not None and not isinstance(database, str)):
         raise RetriggerIPCError("Retrigger request is invalid")
     return RetriggerRequest(
         Path(_validate_path_text(home)),
-        Path(_validate_path_text(database)),
+        None if database is None else Path(_validate_path_text(database)),
     )
 
 
