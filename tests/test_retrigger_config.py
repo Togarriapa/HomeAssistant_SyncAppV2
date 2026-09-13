@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from ha_syncapp.config import ConfigError, load_config
 
 
