@@ -180,7 +180,9 @@ def reprove_prepared_candidate_backup(
             backup_slug=evidence.backup_slug,
         )
         if evidence != expected:
-            raise CandidateBackupError("prepared deployment evidence does not match candidate")
+            raise CandidateBackupError(
+                "prepared deployment evidence does not match candidate"
+            )
 
         bearer = _resolve_token(token)
         _validate_limits(timeout_seconds, max_response_bytes)
@@ -199,7 +201,9 @@ def reprove_prepared_candidate_backup(
             semantic, static, integrity, stage, dependencies, impact, risk, runtime, version
         )
         if prepared.evidence != expected:
-            raise CandidateBackupError("prepared deployment evidence changed during verification")
+            raise CandidateBackupError(
+                "prepared deployment evidence changed during verification"
+            )
         return evidence
     except CandidateBackupError:
         raise
