@@ -9,9 +9,9 @@ from ha_syncapp.log_collection import (
     LogCollectionResult,
     collect_and_enqueue_supervisor_logs,
 )
+from ha_syncapp.log_retention_work import LogRetentionPassResult
 from ha_syncapp.log_sync import LogSyncError
 from ha_syncapp.log_sync_process import LogSyncProcessResult
-from ha_syncapp.log_retention_work import LogRetentionPassResult
 from ha_syncapp.state import StateStore
 from ha_syncapp.supervisor_logs import SupervisorLogResponse
 
