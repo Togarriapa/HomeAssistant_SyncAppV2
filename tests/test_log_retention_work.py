@@ -197,7 +197,8 @@ def test_transient_publication_failure_enters_bounded_retry(
         "ha_syncapp.log_retention_work.prepare_log_history_staging", Mock(return_value=repository)
     )
     monkeypatch.setattr(
-        "ha_syncapp.log_retention_work.build_log_history_replacement", Mock(return_value=Mock())
+        "ha_syncapp.log_retention_work.build_log_history_replacement",
+        Mock(return_value=Mock(replacement_head_sha="d" * 40)),
     )
     monkeypatch.setattr(
         "ha_syncapp.log_retention_work.replace_logs_history",
@@ -243,7 +244,8 @@ def test_rejected_publication_is_blocked_not_retried(
         "ha_syncapp.log_retention_work.prepare_log_history_staging", Mock(return_value=repository)
     )
     monkeypatch.setattr(
-        "ha_syncapp.log_retention_work.build_log_history_replacement", Mock(return_value=Mock())
+        "ha_syncapp.log_retention_work.build_log_history_replacement",
+        Mock(return_value=Mock(replacement_head_sha="d" * 40)),
     )
     monkeypatch.setattr(
         "ha_syncapp.log_retention_work.replace_logs_history",
