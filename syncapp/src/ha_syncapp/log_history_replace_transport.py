@@ -8,6 +8,7 @@ import stat
 import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
@@ -21,8 +22,32 @@ _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
+class LogHistoryReplacementFailureKind(str, Enum):
+    """Stable failure classes used by durable logs-retention recovery."""
+
+    INVALID = "invalid"
+    STALE = "stale"
+    TRANSIENT = "transient"
+    REJECTED = "rejected"
+
+
 class LogHistoryReplacementTransportError(RuntimeError):
     """Raised when logs history cannot be rebuilt or published safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: LogHistoryReplacementFailureKind = LogHistoryReplacementFailureKind.INVALID,
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+    @property
+    def retryable(self) -> bool:
+        """Return whether durable recovery may retry this failure automatically."""
+
+        return self.kind is LogHistoryReplacementFailureKind.TRANSIENT
 
 
 @dataclass(frozen=True, slots=True, init=False)
