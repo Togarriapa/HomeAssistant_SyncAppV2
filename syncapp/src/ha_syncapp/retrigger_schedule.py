@@ -1,4 +1,4 @@
-"""Owner-thread cadence for the Retrigger recovery mechanism."""
+"""Cadence for the recurring Retrigger recovery mechanism."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ class RetriggerScheduleError(RuntimeError):
 
 
 class RetriggerSchedule:
-    """Run at most one bounded recovery cycle when a monotonic deadline is due."""
+    """Run at most one bounded recovery dispatch when a monotonic deadline is due."""
 
     def __init__(self, *, interval_seconds: int, run_cycle: Callable[[], str]) -> None:
         if (
@@ -31,38 +31,44 @@ class RetriggerSchedule:
         self._stopped = False
 
     def start(self, now: float) -> None:
-        """Arm the first cycle one full interval after service activation."""
-        if not isinstance(now, (int, float)) or isinstance(now, bool):
-            raise RetriggerScheduleError("Retrigger monotonic time is invalid")
-        now_value = float(now)
-        if now_value < 0:
-            raise RetriggerScheduleError("Retrigger monotonic time is invalid")
+        """Arm the first dispatch one full interval after scheduler activation."""
+        now_value = self._validate_now(now)
         self._last_now = now_value
         self._next_due = now_value + self._interval_seconds
         self._started = True
         self._stopped = False
 
     def tick(self, now: float) -> str | None:
-        """Execute one due cycle and coalesce any missed intervals."""
+        """Execute one due dispatch and coalesce any missed intervals."""
         if self._stopped:
             return None
         if not self._started or self._next_due is None or self._last_now is None:
             raise RetriggerScheduleError("Retrigger schedule has not been started")
-        if not isinstance(now, (int, float)) or isinstance(now, bool):
-            raise RetriggerScheduleError("Retrigger monotonic time is invalid")
-        now_value = float(now)
+        now_value = self._validate_now(now)
         if now_value < self._last_now:
             raise RetriggerScheduleError("Retrigger monotonic time moved backwards")
         self._last_now = now_value
         if now_value < self._next_due:
             return None
 
-        result = self._run_cycle()
-        self._next_due = now_value + self._interval_seconds
-        return result
+        try:
+            return self._run_cycle()
+        finally:
+            # A transport failure must not create a tight retry loop. Durable work owns
+            # its own retry/backoff semantics once a request reaches the service.
+            self._next_due = now_value + self._interval_seconds
 
     def stop(self) -> None:
         """Disarm automatic recovery without changing durable work state."""
         self._next_due = None
         self._last_now = None
         self._stopped = True
+
+    @staticmethod
+    def _validate_now(now: float) -> float:
+        if not isinstance(now, (int, float)) or isinstance(now, bool):
+            raise RetriggerScheduleError("Retrigger monotonic time is invalid")
+        now_value = float(now)
+        if now_value < 0:
+            raise RetriggerScheduleError("Retrigger monotonic time is invalid")
+        return now_value
