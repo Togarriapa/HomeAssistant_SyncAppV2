@@ -95,7 +95,9 @@ def reprove_preapply_repo_heads(
     except RepositoryVerificationError:
         raise PreApplyFreshnessError("trusted repository freshness could not be verified") from None
     except Exception:
-        raise PreApplyFreshnessError("pre-Apply repository freshness could not be established") from None
+        raise PreApplyFreshnessError(
+            "pre-Apply repository freshness could not be established"
+        ) from None
 
 
 def _validate_binding(
