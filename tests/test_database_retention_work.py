@@ -319,3 +319,78 @@ def test_interrupted_item_is_recovered_and_claimed_once(
     assert result.processed is not None
     assert result.processed.work.status == "succeeded"
     assert result.processed.work.attempts == 2
+
+
+def test_restart_recovers_exact_already_published_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    evidence = _evidence()
+    fetch_evidence = Mock(return_value=evidence)
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.fetch_trusted_database_history_evidence",
+        fetch_evidence,
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.reprove_database_history_prewrite", Mock()
+    )
+    authorization = Mock(requires_replacement=True)
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.authorize_database_history_replacement",
+        Mock(return_value=authorization),
+    )
+    repository = tmp_path / "retention-staging" / "isolated"
+    repository.mkdir(parents=True)
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.prepare_database_history_staging",
+        Mock(return_value=repository),
+    )
+    artifact = Mock(replacement_head_sha="2" * 40)
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.build_database_history_replacement",
+        Mock(return_value=artifact),
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.replace_database_history",
+        Mock(
+            side_effect=DatabaseHistoryReplacementTransportError(
+                "ambiguous transport", kind=DatabaseHistoryReplacementFailureKind.TRANSIENT
+            )
+        ),
+    )
+    first = run_database_retention_work_pass(
+        store,
+        tmp_path / "retention-staging",
+        TARGET,
+        TOKEN,
+        retention_days=7,
+        reference_time=NOW,
+    )
+    assert first.processed is not None and first.processed.work.status == "retry"
+    intent = store.database_retention_intent(first.processed.work.work_key)
+    assert intent is not None and intent.replacement_head_sha == "2" * 40
+
+    monkeypatch.setattr(
+        "ha_syncapp.database_retention_work.fetch_trusted_branch_head",
+        Mock(return_value=BranchHead(TARGET, 123, "database", "2" * 40)),
+    )
+    fetch_evidence.reset_mock()
+    try:
+        recovered = run_database_retention_work_pass(
+            store,
+            tmp_path / "retention-staging",
+            TARGET,
+            TOKEN,
+            retention_days=7,
+            reference_time=NOW + timedelta(seconds=60),
+        )
+        baseline = store.synchronization_baseline(TARGET, "database")
+    finally:
+        store.__exit__(None, None, None)
+
+    assert recovered.processed is not None
+    assert recovered.processed.work.status == "succeeded"
+    assert recovered.processed.work.attempts == 2
+    assert recovered.processed.disposition is DatabaseRetentionWorkDisposition.REPLACED
+    assert baseline is not None and baseline.commit_sha == "2" * 40
+    fetch_evidence.assert_not_called()
