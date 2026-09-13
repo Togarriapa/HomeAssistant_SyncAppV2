@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from .database_retention_work import (
+    DatabaseRetentionPassResult,
+    DatabaseRetentionWorkError,
+    run_database_retention_work_pass,
+)
 from .database_sync_process import (
     DatabaseSyncProcessError,
     DatabaseSyncProcessResult,
@@ -25,6 +31,7 @@ class DatabaseSyncTickResult:
 
     due: bool
     processed: DatabaseSyncProcessResult | None
+    retention: DatabaseRetentionPassResult | None = None
 
 
 class DatabaseSyncService:
@@ -41,6 +48,7 @@ class DatabaseSyncService:
         github_token: str,
         *,
         interval_seconds: float,
+        retention_days: int | None = None,
     ) -> None:
         if type(store) is not StateStore:
             raise DatabaseSyncServiceError("database service state store is invalid")
@@ -59,6 +67,11 @@ class DatabaseSyncService:
         self._target = target
         self._github_token = github_token
         self._interval_seconds = float(interval_seconds)
+        if retention_days is not None and (
+            type(retention_days) is not int or not 1 <= retention_days <= 365
+        ):
+            raise DatabaseSyncServiceError("database retention policy is invalid")
+        self._retention_days = retention_days
         self._next_due: float | None = None
         self._last_now: float | None = None
         self._stopped = False
@@ -97,9 +110,25 @@ class DatabaseSyncService:
                 self._target,
                 self._github_token,
             )
-        except (DatabaseSyncScheduleError, DatabaseSyncProcessError) as exc:
+            retention = (
+                None
+                if self._retention_days is None
+                else run_database_retention_work_pass(
+                    self._store,
+                    self._workspace_root / "retention",
+                    self._target,
+                    self._github_token,
+                    retention_days=self._retention_days,
+                    reference_time=datetime.now(UTC),
+                )
+            )
+        except (
+            DatabaseSyncScheduleError,
+            DatabaseSyncProcessError,
+            DatabaseRetentionWorkError,
+        ) as exc:
             raise DatabaseSyncServiceError("database service tick failed closed") from exc
-        return DatabaseSyncTickResult(due=True, processed=processed)
+        return DatabaseSyncTickResult(due=True, processed=processed, retention=retention)
 
     def stop(self) -> None:
         """Disarm future scheduling before the owner releases durable state."""

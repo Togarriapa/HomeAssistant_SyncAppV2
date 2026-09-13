@@ -39,14 +39,12 @@ def test_periodic_database_flow_discovers_and_processes_retention(
     monkeypatch.setattr(
         database_sync_service,
         "run_database_sync_process",
-        lambda *args, **kwargs: calls.append("snapshot_process")
-        or DatabaseSyncProcessResult(None),
+        lambda *args, **kwargs: calls.append("snapshot_process") or DatabaseSyncProcessResult(None),
     )
     monkeypatch.setattr(
         database_sync_service,
         "run_database_retention_work_pass",
-        lambda *args, **kwargs: calls.append("retention")
-        or DatabaseRetentionPassResult(0, None),
+        lambda *args, **kwargs: calls.append("retention") or DatabaseRetentionPassResult(0, None),
     )
     service = database_sync_service.DatabaseSyncService(
         store,
@@ -74,9 +72,7 @@ def test_retrigger_runs_retention_after_snapshot_recovery(
 ) -> None:
     store = _store(tmp_path)
     calls: list[str] = []
-    candidate = CandidateDetectionResult(
-        CandidateObservation(TARGET, 123, "candidate", None), None
-    )
+    candidate = CandidateDetectionResult(CandidateObservation(TARGET, 123, "candidate", None), None)
     monkeypatch.setattr(
         retrigger_cycle,
         "run_local_sync_retrigger_pass",
@@ -85,14 +81,12 @@ def test_retrigger_runs_retention_after_snapshot_recovery(
     monkeypatch.setattr(
         retrigger_cycle,
         "run_database_sync_retrigger_pass",
-        lambda *args, **kwargs: calls.append("snapshot")
-        or DatabaseSyncRetriggerResult(0, None),
+        lambda *args, **kwargs: calls.append("snapshot") or DatabaseSyncRetriggerResult(0, None),
     )
     monkeypatch.setattr(
         retrigger_cycle,
         "run_database_retention_work_pass",
-        lambda *args, **kwargs: calls.append("retention")
-        or DatabaseRetentionPassResult(0, None),
+        lambda *args, **kwargs: calls.append("retention") or DatabaseRetentionPassResult(0, None),
     )
     monkeypatch.setattr(
         retrigger_cycle,
@@ -129,4 +123,3 @@ def test_retrigger_runs_retention_after_snapshot_recovery(
 
     assert calls == ["snapshot", "retention"]
     assert result.database_retention == DatabaseRetentionPassResult(0, None)
-
