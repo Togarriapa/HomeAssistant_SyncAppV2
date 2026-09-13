@@ -24,6 +24,7 @@ _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _HTTP_STATUS = re.compile(r"HTTP ([0-9]{3})(?:$|\D)")
+_TOKEN = re.compile(r"^[!-~]{1,512}$")
 _MAX_TIMEOUT_SECONDS = 300.0
 
 
@@ -186,21 +187,17 @@ def replace_database_history(
                 "database replacement artifact is invalid"
             )
     timeout_value = _validate_timeout(timeout)
+    token_value = _validate_token(token)
     _validate_artifact_history(
         authorization=authorization,
         artifact=artifact,
         timeout=timeout_value,
         runner=runner,
     )
-    if not isinstance(token, str) or not token:
-        raise DatabaseHistoryReplacementTransportError(
-            "database replacement repository verification failed"
-        )
-
     try:
         current = fetch_trusted_branch_head(
             authorization.target,
-            token,
+            token_value,
             expected_id=authorization.repository_id,
             branch=DATABASE_BRANCH,
         )
@@ -221,22 +218,21 @@ def replace_database_history(
         )
 
     executable = _git_executable()
-    ref = f"refs/heads/{DATABASE_BRANCH}"
-    command = (
-        executable,
-        "-c",
-        f"core.hooksPath={os.devnull}",
-        "-c",
-        "credential.helper=",
-        "push",
-        "--porcelain",
-        "--no-verify",
-        _repository_url(authorization.target),
-        f"{artifact.replacement_head_sha}:{ref}",
-        f"--force-with-lease={ref}:{authorization.expected_head_sha}",
-    )
     try:
-        result = runner(command, cwd=artifact.repository, timeout=timeout_value)
+        with tempfile.TemporaryDirectory(
+            prefix="syncapp-db-push-",
+            dir=artifact.repository / ".git",
+        ) as temporary:
+            authentication_root = Path(temporary)
+            askpass = _create_askpass(authentication_root, token_value)
+            command = _push_command(
+                executable=executable,
+                authentication_root=authentication_root,
+                askpass=askpass,
+                authorization=authorization,
+                artifact=artifact,
+            )
+            result = runner(command, cwd=artifact.repository, timeout=timeout_value)
     except (OSError, UnicodeError, subprocess.SubprocessError, TimeoutError):
         raise DatabaseHistoryReplacementTransportError(
             "database history replacement transport failed",
@@ -262,7 +258,7 @@ def _validate_artifact_history(
     timeout: float,
     runner: CommandRunner,
 ) -> None:
-    """Prove every replacement commit is the canonical authorized rewrite."""
+    """Prove a proposed replacement contains only the authorized snapshot trees."""
 
     executable = _git_executable()
     rebuilt_sha = artifact.replacement_head_sha
@@ -282,43 +278,35 @@ def _validate_artifact_history(
             timeout=timeout,
             runner=runner,
         )
-        _original_tree, original_parents = _commit_tree_and_parents(original)
-        _rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
+        original_tree, original_parents = _commit_tree_and_parents(original)
+        rebuilt_tree, rebuilt_parents = _commit_tree_and_parents(rebuilt)
         expected_original_parent = (
             retained[index + 1] if index + 1 < len(retained) else authorization.pruned_shas[0]
         )
-        if original_parents != (expected_original_parent,):
+        is_oldest_retained = index + 1 == len(retained)
+        if (is_oldest_retained and rebuilt_parents) or (
+            not is_oldest_retained and len(rebuilt_parents) != 1
+        ):
             raise DatabaseHistoryReplacementTransportError(
                 "database replacement artifact is invalid"
             )
-
-        is_oldest_retained = index + 1 == len(retained)
-        expected_rebuilt_parent: str | None
-        if is_oldest_retained:
-            expected_rebuilt_parent = None
-            if rebuilt_parents:
-                raise DatabaseHistoryReplacementTransportError(
-                    "database replacement artifact is invalid"
-                )
-        else:
-            if len(rebuilt_parents) != 1:
-                raise DatabaseHistoryReplacementTransportError(
-                    "database replacement artifact is invalid"
-                )
-            expected_rebuilt_parent = rebuilt_parents[0]
-
+        rebuilt_parent = None if is_oldest_retained else rebuilt_parents[0]
         expected_rebuilt = _rewrite_commit_parent(
             original,
             expected_original_parent=expected_original_parent,
-            rebuilt_parent=expected_rebuilt_parent,
+            rebuilt_parent=rebuilt_parent,
         )
-        if rebuilt != expected_rebuilt:
+        if (
+            original_parents != (expected_original_parent,)
+            or rebuilt_tree != original_tree
+            or rebuilt != expected_rebuilt
+        ):
             raise DatabaseHistoryReplacementTransportError(
                 "database replacement artifact is invalid"
             )
-
-        if expected_rebuilt_parent is not None:
-            rebuilt_sha = expected_rebuilt_parent
+        if is_oldest_retained:
+            continue
+        rebuilt_sha = rebuilt_parents[0]
 
 
 def _read_commit(
@@ -626,6 +614,98 @@ def _validate_timeout(timeout: float) -> float:
     ):
         raise DatabaseHistoryReplacementTransportError("database replacement timeout is invalid")
     return float(timeout)
+
+
+def _validate_token(token: str | None) -> str:
+    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication is invalid"
+        )
+    return token
+
+
+def _create_askpass(root: Path, token: str) -> Path:
+    helper = root / "askpass"
+    token_file = helper.with_suffix(".token")
+    script = """#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\\n' 'x-access-token' ;;
+  *) IFS= read -r token < "${0}.token"; printf '%s\\n' "$token" ;;
+esac
+"""
+    try:
+        descriptor = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(script)
+        token_descriptor = os.open(
+            token_file,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(token_descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"{token}\n")
+        helper.chmod(0o700)
+        token_file.chmod(0o600)
+        helper_metadata = helper.lstat()
+        token_metadata = token_file.lstat()
+    except OSError:
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication setup failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        ) from None
+    if (
+        not stat.S_ISREG(helper_metadata.st_mode)
+        or helper.is_symlink()
+        or stat.S_IMODE(helper_metadata.st_mode) != 0o700
+        or not stat.S_ISREG(token_metadata.st_mode)
+        or token_file.is_symlink()
+        or stat.S_IMODE(token_metadata.st_mode) != 0o600
+    ):
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement authentication setup failed",
+            kind=DatabaseHistoryReplacementFailureKind.TRANSIENT,
+        )
+    return helper
+
+
+def _push_command(
+    *,
+    executable: str,
+    authentication_root: Path,
+    askpass: Path,
+    authorization: DatabaseHistoryReplacementAuthorization,
+    artifact: DatabaseHistoryReplacementArtifact,
+) -> tuple[str, ...]:
+    environment_executable = shutil.which("env")
+    if environment_executable is None or not os.path.isabs(environment_executable):
+        raise DatabaseHistoryReplacementTransportError(
+            "database replacement environment is unavailable"
+        )
+    ref = f"refs/heads/{DATABASE_BRANCH}"
+    return (
+        environment_executable,
+        "-i",
+        f"HOME={authentication_root}",
+        f"PATH={os.path.dirname(executable)}",
+        "GIT_CONFIG_NOSYSTEM=1",
+        f"GIT_CONFIG_GLOBAL={os.devnull}",
+        "GIT_TERMINAL_PROMPT=0",
+        "GCM_INTERACTIVE=Never",
+        "LC_ALL=C",
+        executable,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        f"core.askPass={askpass}",
+        "push",
+        "--porcelain",
+        "--no-verify",
+        _repository_url(authorization.target),
+        f"{artifact.replacement_head_sha}:{ref}",
+        f"--force-with-lease={ref}:{authorization.expected_head_sha}",
+    )
 
 
 def _repository_verification_failure_kind(
