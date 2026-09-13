@@ -73,11 +73,11 @@ def reprove_preapply_repo_heads(
         if candidate.commit_sha != expected.candidate_sha:
             raise PreApplyFreshnessError("trusted candidate head is stale")
 
-        # Re-prove the in-memory preparation binding after all external I/O.  A
+        # Re-prove the in-memory preparation binding after all external I/O. A
         # caller must not be able to swap candidate evidence while GitHub is read.
-        current = _validate_binding(prepared, backup)
-        if current != expected:
+        if prepared.evidence != expected:
             raise PreApplyFreshnessError("prepared deployment evidence changed during verification")
+        _validate_binding(prepared, backup)
 
         return PreApplyFreshnessEvidence(
             target=expected.target,
