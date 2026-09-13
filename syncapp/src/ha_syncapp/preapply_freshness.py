@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .candidate_backup import CandidateBackupEvidence
 from .github_repo import (
@@ -50,7 +50,11 @@ def reprove_preapply_repo_heads(
     mutation.
     """
     try:
-        expected = _validate_binding(prepared, backup)
+        # Keep a detached immutable value snapshot. ``CandidateBackupEvidence`` is
+        # frozen for normal callers, but Python reflection can still mutate an
+        # aliased instance via ``object.__setattr__`` while external I/O is in
+        # progress.  Comparing against an alias would make that drift invisible.
+        expected = replace(_validate_binding(prepared, backup))
         credential = _validate_token(token)
 
         main = _fetch_head(
@@ -74,8 +78,9 @@ def reprove_preapply_repo_heads(
             raise PreApplyFreshnessError("trusted candidate head is stale")
 
         # Re-prove the in-memory preparation binding after all external I/O. A
-        # caller must not be able to swap candidate evidence while GitHub is read.
-        if prepared.evidence != expected:
+        # caller must not be able to swap or mutate candidate evidence while GitHub
+        # is read.
+        if prepared.evidence != expected or backup != expected:
             raise PreApplyFreshnessError("prepared deployment evidence changed during verification")
         _validate_binding(prepared, backup)
 
