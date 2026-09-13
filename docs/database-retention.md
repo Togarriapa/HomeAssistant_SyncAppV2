@@ -60,4 +60,12 @@ The gate revalidates the deterministic retention plan from the original explicit
 
 The prewrite verifier performs only repository/head verification, and authorization itself performs no network request, Git command, ref mutation, filesystem deletion, database restore, or Home Assistant mutation. Any future mutation transport must perform an atomic expected-head-bound update restricted to `database`; service integration remains separate reviewed work.
 
+## Atomic replacement transport
+
+No-op authorizations stop before repository, replacement-SHA, timeout, Git-executable or runner evaluation. Replacement authorizations require a distinct canonical 40-hex commit ID and an explicit absolute isolated repository with real local Git metadata. The transport disables hooks and credential helpers, addresses the authorized repository URL directly, pushes only the replacement commit to `refs/heads/database`, and uses `--force-with-lease=refs/heads/database:<expected-head>`. Remote movement or any Git failure rejects the operation with sanitized diagnostics.
+
+`DatabaseHistoryReplacementAuthorization` cannot be constructed through its public initializer. The side-effect-free authorization gate is its normal producer, and the transport revalidates repository identity, expected head, retained/pruned SHA shape, uniqueness and partition separation before Git execution. Raw valid-looking parameters cannot independently grant replacement authority.
+
+The transport does not construct replacement commits, delete snapshot files, restore Recorder data, schedule work, or manage retries. Commit construction and service/Retrigger integration remain separate reviewed increments.
+
 Candidate Fetch/Stage, validation, backup, Apply, reload/restart, observation, promotion, tagging and rollback remain separate controlled deployment capabilities. The Retrigger Work Cron Job remains enabled and independent.
