@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
-import subprocess
+import subprocess  # nosec B404 - only fixed sys.executable argv is launched, never a shell
 import sys
 import time
 from collections.abc import Callable
@@ -75,13 +75,16 @@ def run(arguments: list[str] | None = None, *, data_dir: Path = _DATA_DIR) -> in
     """Run the service and periodically request bounded recovery through protected IPC."""
     forwarded = list(sys.argv[1:] if arguments is None else arguments)
     if forwarded:
-        # Preserve administrative/one-shot CLI behavior exactly; scheduled recovery is
-        # only part of the normal long-running App lifecycle.
-        os.execv(sys.executable, _service_command(forwarded))
+        # Fixed interpreter/module prefix; forwarded values remain argv elements and
+        # never cross a shell or command parser.
+        os.execv(sys.executable, _service_command(forwarded))  # nosec B606
         raise AssertionError("execv returned unexpectedly")
 
     config = _load_scheduler_config(data_dir)
-    child = subprocess.Popen(_service_command([]))
+    # The child command is a fixed interpreter + module invocation, with shell=False
+    # (Popen default). No option, repository value, path, or credential can select
+    # the executable or inject shell syntax.
+    child = subprocess.Popen(_service_command([]))  # nosec B603
     stopping = False
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
