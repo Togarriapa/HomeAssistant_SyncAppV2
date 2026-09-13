@@ -75,36 +75,38 @@ def test_valid_looking_forged_sha_cannot_gain_database_publication_authority(
             pushed = True
             return subprocess.CompletedProcess(command, 0, "", "")
         if "cat-file" in command and command[-1] == EXPECTED:
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                f"tree {AUTHORIZED_TREE}\nparent {PRUNED}\nauthor A <a@b> 1 +0000\ncommitter A <a@b> 1 +0000\n\noriginal\n",
-                "",
+            payload = (
+                f"tree {AUTHORIZED_TREE}\n"
+                f"parent {PRUNED}\n"
+                "author A <a@b> 1 +0000\n"
+                "committer A <a@b> 1 +0000\n"
+                "\noriginal\n"
             )
+            return subprocess.CompletedProcess(command, 0, payload, "")
         if "cat-file" in command and command[-1] == FORGED:
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                f"tree {FORGED_TREE}\nauthor X <x@y> 1 +0000\ncommitter X <x@y> 1 +0000\n\nforged\n",
-                "",
+            payload = (
+                f"tree {FORGED_TREE}\n"
+                "author X <x@y> 1 +0000\n"
+                "committer X <x@y> 1 +0000\n"
+                "\nforged\n"
             )
+            return subprocess.CompletedProcess(command, 0, payload, "")
         raise AssertionError(command)
 
     current = BranchHead("owner/private-repo", 123, "database", EXPECTED)
     with patch(
         "ha_syncapp.database_history_replace_transport.fetch_trusted_branch_head",
         return_value=current,
-    ):
-        with pytest.raises(
-            DatabaseHistoryReplacementTransportError,
-            match="artifact is invalid",
-        ) as caught:
-            replace_database_history(
-                authorization=authorization,
-                artifact=artifact,
-                token="test-token",
-                runner=runner,
-            )
+    ), pytest.raises(
+        DatabaseHistoryReplacementTransportError,
+        match="artifact is invalid",
+    ) as caught:
+        replace_database_history(
+            authorization=authorization,
+            artifact=artifact,
+            token="test-token",
+            runner=runner,
+        )
 
     assert caught.value.kind is DatabaseHistoryReplacementFailureKind.INVALID
     assert not caught.value.retryable
