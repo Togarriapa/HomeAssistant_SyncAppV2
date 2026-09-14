@@ -4,11 +4,11 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
-from ha_syncapp.live_apply_preconditions import (
-    LiveApplyPreconditionError,
+from ha_syncapp.live_apply_operation_precondition import (
+    LiveApplyOperationPreconditionError,
     prove_live_apply_operation_precondition,
 )
+from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 
 
 def _blob_id(data: bytes) -> str:
@@ -63,7 +63,7 @@ def test_single_operation_precondition_detects_toctou_drift(tmp_path: Path) -> N
     plan = _plan("automations.yaml", original)
     target.write_bytes(b"changed after earlier proof\n")
 
-    with pytest.raises(LiveApplyPreconditionError, match="precondition mismatch"):
+    with pytest.raises(LiveApplyOperationPreconditionError, match="precondition mismatch"):
         prove_live_apply_operation_precondition(plan, tmp_path, operation_index=0)
 
 
@@ -73,12 +73,12 @@ def test_single_operation_precondition_rejects_symlink_leaf(tmp_path: Path) -> N
     (tmp_path / "automations.yaml").symlink_to(outside)
     plan = _plan("automations.yaml", b"baseline\n")
 
-    with pytest.raises(LiveApplyPreconditionError, match="unsafe"):
+    with pytest.raises(LiveApplyOperationPreconditionError, match="unsafe"):
         prove_live_apply_operation_precondition(plan, tmp_path, operation_index=0)
 
 
 def test_single_operation_precondition_rejects_invalid_index(tmp_path: Path) -> None:
     plan = _plan("automations.yaml", b"baseline\n")
 
-    with pytest.raises(LiveApplyPreconditionError, match="operation index"):
+    with pytest.raises(LiveApplyOperationPreconditionError, match="operation index"):
         prove_live_apply_operation_precondition(plan, tmp_path, operation_index=1)
