@@ -151,6 +151,17 @@ def test_rejects_symlink_and_does_not_follow_it(tmp_path: Path) -> None:
         prove_live_apply_preconditions(plan, tmp_path)
 
 
+def test_rejects_symlinked_parent_component(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-parent"
+    outside.mkdir()
+    (outside / "configuration.yaml").write_bytes(b"secret\n")
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    plan = _plan(_modified("linked/configuration.yaml", b"secret\n"))
+
+    with pytest.raises(LiveApplyPreconditionError, match="live path type is unsafe"):
+        prove_live_apply_preconditions(plan, tmp_path)
+
+
 def test_rejects_non_regular_file(tmp_path: Path) -> None:
     (tmp_path / "folder.yaml").mkdir()
     plan = _plan(_modified("folder.yaml", b"anything\n"))
@@ -196,10 +207,10 @@ def test_rejects_wrong_plan_type_and_sanitizes_filesystem_errors(
     path.write_bytes(data)
     plan = _plan(_modified("configuration.yaml", data))
 
-    def explode(self: Path) -> bytes:
+    def explode(fd: int, size: int) -> bytes:
         raise OSError("PRIVATE-NESTED-DETAIL")
 
-    monkeypatch.setattr(Path, "read_bytes", explode)
+    monkeypatch.setattr(os, "read", explode)
     with pytest.raises(LiveApplyPreconditionError) as error:
         prove_live_apply_preconditions(plan, tmp_path)
     assert "PRIVATE-NESTED-DETAIL" not in str(error.value)
@@ -213,13 +224,13 @@ def test_detects_plan_drift_during_filesystem_inspection(
     path = tmp_path / "configuration.yaml"
     path.write_bytes(data)
     plan = _plan(_modified("configuration.yaml", data))
-    original = Path.read_bytes
+    original = os.read
 
-    def mutate_after_read(self: Path) -> bytes:
-        result = original(self)
+    def mutate_after_read(fd: int, size: int) -> bytes:
+        result = original(fd, size)
         object.__setattr__(plan, "candidate_sha", "e" * 40)
         return result
 
-    monkeypatch.setattr(Path, "read_bytes", mutate_after_read)
+    monkeypatch.setattr(os, "read", mutate_after_read)
     with pytest.raises(LiveApplyPreconditionError, match="Apply plan changed during inspection"):
         prove_live_apply_preconditions(plan, tmp_path)
