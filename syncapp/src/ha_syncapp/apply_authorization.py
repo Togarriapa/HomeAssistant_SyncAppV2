@@ -38,20 +38,20 @@ class ApplyAuthorization:
     ) -> None:
         if forbidden:
             _reject("Apply authorization must be created from the verified evidence chain")
-        _validate_chain(prepared, backup, freshness)
-        assert prepared is not None
-        assert backup is not None
+        validated_prepared, validated_backup, _ = _validate_chain(
+            prepared, backup, freshness
+        )
         values = (
-            ("deployment_id", prepared.deployment_id),
-            ("target", backup.target),
-            ("repository_id", backup.repository_id),
-            ("baseline_sha", backup.baseline_sha),
-            ("candidate_sha", backup.candidate_sha),
-            ("backup_slug", backup.backup_slug),
-            ("stage_manifest_sha256", backup.stage_manifest_sha256),
-            ("runtime_sha256", backup.runtime_sha256),
-            ("risk_level", backup.risk_level),
-            ("core_version", backup.core_version),
+            ("deployment_id", validated_prepared.deployment_id),
+            ("target", validated_backup.target),
+            ("repository_id", validated_backup.repository_id),
+            ("baseline_sha", validated_backup.baseline_sha),
+            ("candidate_sha", validated_backup.candidate_sha),
+            ("backup_slug", validated_backup.backup_slug),
+            ("stage_manifest_sha256", validated_backup.stage_manifest_sha256),
+            ("runtime_sha256", validated_backup.runtime_sha256),
+            ("risk_level", validated_backup.risk_level),
+            ("core_version", validated_backup.core_version),
         )
         for name, value in values:
             object.__setattr__(self, name, value)
@@ -70,7 +70,7 @@ def _validate_chain(
     prepared: PreparedDeployment | None,
     backup: CandidateBackupEvidence | None,
     freshness: PreApplyFreshnessEvidence | None,
-) -> None:
+) -> tuple[PreparedDeployment, CandidateBackupEvidence, PreApplyFreshnessEvidence]:
     if type(prepared) is not PreparedDeployment:
         _reject("prepared deployment evidence is invalid")
     if type(backup) is not CandidateBackupEvidence:
@@ -110,6 +110,7 @@ def _validate_chain(
     )
     if observed != expected:
         _reject("pre-Apply freshness binding does not match")
+    return prepared, backup, freshness
 
 
 def _reject(message: str) -> NoReturn:
