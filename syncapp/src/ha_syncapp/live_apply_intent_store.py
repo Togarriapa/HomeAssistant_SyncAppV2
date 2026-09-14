@@ -49,7 +49,7 @@ class PersistedLiveApplyIntent:
         recorded_at: datetime,
     ) -> PersistedLiveApplyIntent:
         when = _timestamp(recorded_at)
-        values = (
+        digest_values: tuple[object, ...] = (
             intent.deployment_id,
             intent.target,
             intent.repository_id,
@@ -59,10 +59,21 @@ class PersistedLiveApplyIntent:
             intent.backup_slug,
             intent.homeassistant_root,
             intent.operations_sha256,
-            when,
+            when.isoformat(),
         )
-        digest = _record_digest((*values[:-1], when.isoformat()))
-        return cls(*values, digest)
+        return cls(
+            deployment_id=intent.deployment_id,
+            target=intent.target,
+            repository_id=intent.repository_id,
+            baseline_sha=intent.baseline_sha,
+            candidate_sha=intent.candidate_sha,
+            stage_manifest_sha256=intent.stage_manifest_sha256,
+            backup_slug=intent.backup_slug,
+            homeassistant_root=intent.homeassistant_root,
+            operations_sha256=intent.operations_sha256,
+            recorded_at=when,
+            record_sha256=_record_digest(digest_values),
+        )
 
     @classmethod
     def from_database_row(cls, row: tuple[object, ...]) -> PersistedLiveApplyIntent:
