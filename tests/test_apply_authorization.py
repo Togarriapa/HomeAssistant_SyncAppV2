@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from ha_syncapp.candidate_backup import CandidateBackupEvidence
-from ha_syncapp.preapply_freshness import PreApplyFreshnessEvidence
-from ha_syncapp.prepared_deployment import PreparedDeployment
 from ha_syncapp.apply_authorization import (
     ApplyAuthorization,
     ApplyAuthorizationError,
     authorize_candidate_apply,
 )
+from ha_syncapp.candidate_backup import CandidateBackupEvidence
+from ha_syncapp.preapply_freshness import PreApplyFreshnessEvidence
+from ha_syncapp.prepared_deployment import PreparedDeployment
 
 
 def _evidence() -> CandidateBackupEvidence:
@@ -48,7 +48,9 @@ def _freshness(evidence: CandidateBackupEvidence) -> PreApplyFreshnessEvidence:
 def test_exact_reproven_chain_produces_immutable_authorization():
     prepared = _prepared()
 
-    result = authorize_candidate_apply(prepared, prepared.evidence, _freshness(prepared.evidence))
+    result = authorize_candidate_apply(
+        prepared, prepared.evidence, _freshness(prepared.evidence)
+    )
 
     assert result.deployment_id == prepared.deployment_id
     assert result.target == prepared.evidence.target
@@ -99,7 +101,9 @@ def test_wrong_input_types_fail_closed_without_nested_details():
     prepared = _prepared()
 
     with pytest.raises(ApplyAuthorizationError) as caught:
-        authorize_candidate_apply(prepared, object(), _freshness(prepared.evidence))  # type: ignore[arg-type]
+        authorize_candidate_apply(  # type: ignore[arg-type]
+            prepared, object(), _freshness(prepared.evidence)
+        )
 
     assert caught.value.__suppress_context__ is True
     assert "object" not in str(caught.value)
