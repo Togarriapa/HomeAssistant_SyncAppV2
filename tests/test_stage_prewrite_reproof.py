@@ -68,7 +68,8 @@ def _stage(tmp_path: Path, prepared: PreparedDeployment) -> CandidateStage:
 
 
 def test_exact_authorized_stage_is_reverified_and_returns_immutable_evidence(
-    tmp_path, monkeypatch
+    tmp_path,
+    monkeypatch,
 ):
     prepared = _prepared()
     authorization = _authorization(prepared)
@@ -78,7 +79,10 @@ def test_exact_authorized_stage_is_reverified_and_returns_immutable_evidence(
     def verifier(value):
         verified.append(value)
 
-    monkeypatch.setattr("ha_syncapp.stage_prewrite_reproof.verify_candidate_stage", verifier)
+    monkeypatch.setattr(
+        "ha_syncapp.stage_prewrite_reproof.verify_candidate_stage",
+        verifier,
+    )
 
     result = reprove_stage_for_apply(authorization, stage)
 
@@ -103,7 +107,10 @@ def test_exact_authorized_stage_is_reverified_and_returns_immutable_evidence(
     ],
 )
 def test_stage_binding_mismatch_fails_closed_before_verification(
-    tmp_path, monkeypatch, field, value
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
 ):
     prepared = _prepared()
     authorization = _authorization(prepared)
@@ -114,7 +121,10 @@ def test_stage_binding_mismatch_fails_closed_before_verification(
         nonlocal called
         called = True
 
-    monkeypatch.setattr("ha_syncapp.stage_prewrite_reproof.verify_candidate_stage", verifier)
+    monkeypatch.setattr(
+        "ha_syncapp.stage_prewrite_reproof.verify_candidate_stage",
+        verifier,
+    )
 
     with pytest.raises(StagePrewriteReproofError, match="binding"):
         reprove_stage_for_apply(authorization, stage)
@@ -130,7 +140,10 @@ def test_stage_integrity_failure_is_sanitized(tmp_path, monkeypatch):
     def verifier(_value):
         raise RuntimeError("secret candidate bytes / token detail")
 
-    monkeypatch.setattr("ha_syncapp.stage_prewrite_reproof.verify_candidate_stage", verifier)
+    monkeypatch.setattr(
+        "ha_syncapp.stage_prewrite_reproof.verify_candidate_stage",
+        verifier,
+    )
 
     with pytest.raises(StagePrewriteReproofError) as caught:
         reprove_stage_for_apply(authorization, stage)
@@ -139,7 +152,10 @@ def test_stage_integrity_failure_is_sanitized(tmp_path, monkeypatch):
     assert caught.value.__suppress_context__ is True
 
 
-def test_binding_drift_during_integrity_verification_fails_closed(tmp_path, monkeypatch):
+def test_binding_drift_during_integrity_verification_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
     prepared = _prepared()
     authorization = _authorization(prepared)
     stage = _stage(tmp_path, prepared)
@@ -147,7 +163,10 @@ def test_binding_drift_during_integrity_verification_fails_closed(tmp_path, monk
     def verifier(value):
         object.__setattr__(value, "commit_sha", "e" * 40)
 
-    monkeypatch.setattr("ha_syncapp.stage_prewrite_reproof.verify_candidate_stage", verifier)
+    monkeypatch.setattr(
+        "ha_syncapp.stage_prewrite_reproof.verify_candidate_stage",
+        verifier,
+    )
 
     with pytest.raises(StagePrewriteReproofError, match="changed during verification"):
         reprove_stage_for_apply(authorization, stage)
