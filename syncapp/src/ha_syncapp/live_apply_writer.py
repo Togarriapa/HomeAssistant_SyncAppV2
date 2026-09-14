@@ -46,6 +46,10 @@ class _PostconditionMismatch(RuntimeError):
     pass
 
 
+class _PreMutationMismatch(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class LiveApplyWriterResult:
     """Sanitized result for one exact ordered operation."""
@@ -127,6 +131,7 @@ def apply_live_operation(
         _reject("unable to persist live Apply progress before mutation")
 
     try:
+        expected_root_identity = _directory_identity(root)
         second_proof = prove_live_apply_operation_precondition(
             plan, root, operation_index=operation_index
         )
@@ -136,7 +141,10 @@ def apply_live_operation(
         _reject("live path precondition changed after journaling")
 
     try:
-        _mutate_operation(root, operation, candidate_bytes)
+        _mutate_operation(root, operation, candidate_bytes, expected_root_identity)
+    except _PreMutationMismatch:
+        _block_if_possible(store, progress, plan)
+        _reject("live path precondition changed after journaling")
     except Exception:
         _reject("live Apply mutation outcome is uncertain")
 
@@ -324,11 +332,19 @@ def _validate_operation_proof(
         _reject("live operation precondition proof binding mismatch")
 
 
-def _mutate_operation(root: Path, operation: LiveApplyOperation, candidate: bytes | None) -> None:
+def _mutate_operation(
+    root: Path,
+    operation: LiveApplyOperation,
+    candidate: bytes | None,
+    expected_root_identity: tuple[int, int],
+) -> None:
     parts = operation.path.split("/")
     root_fd = _open_directory(root)
     parent_fd = root_fd
     try:
+        info = os.fstat(root_fd)
+        if (info.st_dev, info.st_ino) != expected_root_identity:
+            raise _PreMutationMismatch
         parent_fd = _walk_parent(root_fd, parts[:-1])
         name = parts[-1]
         if operation.status in {"added", "modified", "modified_and_mode_changed"}:
@@ -440,11 +456,18 @@ def _verify_postcondition(root: Path, operation: LiveApplyOperation) -> None:
 
 
 def _block_if_possible(store: StateStore, progress: LiveApplyProgress, plan: LiveApplyPlan) -> None:
-    try:
+    with contextlib.suppress(Exception):
         blocked = transition_live_apply_progress(progress, "blocked")
         record_live_apply_progress(store, blocked, plan=plan)
-    except Exception:
-        pass
+
+
+def _directory_identity(path: Path) -> tuple[int, int]:
+    fd = _open_directory(path)
+    try:
+        info = os.fstat(fd)
+        return info.st_dev, info.st_ino
+    finally:
+        os.close(fd)
 
 
 def _open_directory(path: Path) -> int:
