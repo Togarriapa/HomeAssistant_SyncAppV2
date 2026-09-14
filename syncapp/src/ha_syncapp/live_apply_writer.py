@@ -132,6 +132,7 @@ def apply_live_operation(
 
     try:
         expected_root_identity = _directory_identity(root)
+        expected_parent_identities = _parent_directory_identities(root, operation.path)
         second_proof = prove_live_apply_operation_precondition(
             plan, root, operation_index=operation_index
         )
@@ -141,7 +142,13 @@ def apply_live_operation(
         _reject("live path precondition changed after journaling")
 
     try:
-        _mutate_operation(root, operation, candidate_bytes, expected_root_identity)
+        _mutate_operation(
+            root,
+            operation,
+            candidate_bytes,
+            expected_root_identity,
+            expected_parent_identities,
+        )
     except _PreMutationMismatch:
         _block_if_possible(store, progress, plan)
         _reject("live path precondition changed after journaling")
@@ -337,6 +344,7 @@ def _mutate_operation(
     operation: LiveApplyOperation,
     candidate: bytes | None,
     expected_root_identity: tuple[int, int],
+    expected_parent_identities: tuple[tuple[int, int], ...],
 ) -> None:
     parts = operation.path.split("/")
     root_fd = _open_directory(root)
@@ -345,7 +353,7 @@ def _mutate_operation(
         info = os.fstat(root_fd)
         if (info.st_dev, info.st_ino) != expected_root_identity:
             raise _PreMutationMismatch
-        parent_fd = _walk_parent(root_fd, parts[:-1])
+        parent_fd = _walk_parent_verified(root_fd, parts[:-1], expected_parent_identities)
         name = parts[-1]
         if operation.status in {"added", "modified", "modified_and_mode_changed"}:
             if candidate is None or operation.candidate_mode not in {"100644", "100755"}:
@@ -470,6 +478,33 @@ def _directory_identity(path: Path) -> tuple[int, int]:
         os.close(fd)
 
 
+def _parent_directory_identities(root: Path, path: str) -> tuple[tuple[int, int], ...]:
+    parts = path.split("/")[:-1]
+    root_fd = _open_directory(root)
+    current = root_fd
+    identities: list[tuple[int, int]] = []
+    try:
+        for part in parts:
+            try:
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=current,
+                )
+            except OSError:
+                _reject("filesystem parent path is unavailable")
+            if current != root_fd:
+                os.close(current)
+            current = next_fd
+            info = os.fstat(current)
+            identities.append((info.st_dev, info.st_ino))
+        return tuple(identities)
+    finally:
+        if current != root_fd:
+            os.close(current)
+        os.close(root_fd)
+
+
 def _open_directory(path: Path) -> int:
     try:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -494,6 +529,33 @@ def _walk_parent(root_fd: int, parts: list[str]) -> int:
             if error.errno in {errno.ELOOP, errno.ENOTDIR}:
                 _reject("filesystem path type is unsafe")
             _reject("filesystem parent path is unavailable")
+        if current != root_fd:
+            os.close(current)
+        current = next_fd
+    return current
+
+
+def _walk_parent_verified(
+    root_fd: int,
+    parts: list[str],
+    expected_identities: tuple[tuple[int, int], ...],
+) -> int:
+    if len(parts) != len(expected_identities):
+        raise _PreMutationMismatch
+    current = root_fd
+    for index, part in enumerate(parts):
+        try:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+        except OSError:
+            if current != root_fd:
+                os.close(current)
+            raise _PreMutationMismatch from None
+        info = os.fstat(next_fd)
+        if (info.st_dev, info.st_ino) != expected_identities[index]:
+            os.close(next_fd)
+            if current != root_fd:
+                os.close(current)
+            raise _PreMutationMismatch
         if current != root_fd:
             os.close(current)
         current = next_fd
