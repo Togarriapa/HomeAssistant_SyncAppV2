@@ -13,7 +13,10 @@ from ha_syncapp.live_apply_preconditions import (
 
 
 def _git_blob_id(data: bytes, algorithm: str = "sha1") -> str:
-    digest = hashlib.new(algorithm)
+    if algorithm == "sha1":
+        digest = hashlib.sha1(usedforsecurity=False)
+    else:
+        digest = hashlib.sha256()
     digest.update(f"blob {len(data)}\0".encode())
     digest.update(data)
     return digest.hexdigest()
@@ -188,10 +191,10 @@ def test_rejects_wrong_plan_type_and_sanitizes_filesystem_errors(
     path.write_bytes(data)
     plan = _plan(_modified("configuration.yaml", data))
 
-    def explode(self: Path) -> os.stat_result:
+    def explode(self: Path) -> bytes:
         raise OSError("PRIVATE-NESTED-DETAIL")
 
-    monkeypatch.setattr(Path, "lstat", explode)
+    monkeypatch.setattr(Path, "read_bytes", explode)
     with pytest.raises(LiveApplyPreconditionError) as error:
         prove_live_apply_preconditions(plan, tmp_path)
     assert "PRIVATE-NESTED-DETAIL" not in str(error.value)
