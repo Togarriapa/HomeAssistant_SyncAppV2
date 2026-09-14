@@ -13,12 +13,9 @@ class StagePrewriteReproofError(RuntimeError):
     """The authorized candidate Stage could not be re-proven safely."""
 
 
-_PREWRITE_PRODUCER = object()
-
-
 @dataclass(frozen=True, slots=True, init=False)
 class StagePrewriteEvidence:
-    """Immutable ephemeral proof for one exact re-verified Stage tree."""
+    """Immutable ephemeral proof whose construction re-verifies the exact Stage."""
 
     deployment_id: str
     target: str
@@ -28,35 +25,18 @@ class StagePrewriteEvidence:
 
     def __init__(
         self,
-        *,
-        deployment_id: str,
-        target: str,
-        repository_id: int,
-        candidate_sha: str,
-        stage_manifest_sha256: str,
-        _producer: object | None = None,
+        authorization: ApplyAuthorization | None = None,
+        stage: CandidateStage | None = None,
+        **forbidden: object,
     ) -> None:
-        if _producer is not _PREWRITE_PRODUCER:
+        if forbidden:
             _reject("Stage pre-write evidence must be created by the trusted producer")
-        object.__setattr__(self, "deployment_id", deployment_id)
-        object.__setattr__(self, "target", target)
-        object.__setattr__(self, "repository_id", repository_id)
-        object.__setattr__(self, "candidate_sha", candidate_sha)
-        object.__setattr__(self, "stage_manifest_sha256", stage_manifest_sha256)
-
-    @classmethod
-    def _from_authorization(
-        cls,
-        authorization: ApplyAuthorization,
-    ) -> StagePrewriteEvidence:
-        return cls(
-            deployment_id=authorization.deployment_id,
-            target=authorization.target,
-            repository_id=authorization.repository_id,
-            candidate_sha=authorization.candidate_sha,
-            stage_manifest_sha256=authorization.stage_manifest_sha256,
-            _producer=_PREWRITE_PRODUCER,
-        )
+        binding = _verify_chain(authorization, stage)
+        object.__setattr__(self, "deployment_id", binding[0])
+        object.__setattr__(self, "target", binding[1])
+        object.__setattr__(self, "repository_id", binding[2])
+        object.__setattr__(self, "candidate_sha", binding[3])
+        object.__setattr__(self, "stage_manifest_sha256", binding[4])
 
 
 def reprove_stage_for_apply(
@@ -64,6 +44,13 @@ def reprove_stage_for_apply(
     stage: CandidateStage,
 ) -> StagePrewriteEvidence:
     """Re-verify exact isolated Stage bytes without mutating Home Assistant."""
+    return StagePrewriteEvidence(authorization, stage)
+
+
+def _verify_chain(
+    authorization: ApplyAuthorization | None,
+    stage: CandidateStage | None,
+) -> tuple[str, str, int, str, str]:
     if type(authorization) is not ApplyAuthorization:
         _reject("Apply authorization evidence is invalid")
     if type(stage) is not CandidateStage:
@@ -83,8 +70,7 @@ def reprove_stage_for_apply(
         _reject("Apply authorization changed during verification")
     if _stage_binding(stage) != stage_before or stage.branch != "candidate":
         _reject("candidate Stage binding changed during verification")
-
-    return StagePrewriteEvidence._from_authorization(authorization)
+    return authorized_before
 
 
 def _authorization_binding(
