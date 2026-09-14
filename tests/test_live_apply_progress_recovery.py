@@ -150,7 +150,9 @@ def test_restart_discovery_requires_reconciliation_for_uncertain_mutation(tmp_pa
         assert recovered.operation_path_sha256 == started.operation_path_sha256
 
 
-def test_recovery_advances_only_after_verified_predecessor_and_stops_on_block(tmp_path: Path) -> None:
+def test_recovery_advances_only_after_verified_predecessor_and_stops_on_block(
+    tmp_path: Path,
+) -> None:
     prepared = _prepared()
     plan = _plan(prepared)
     with StateStore(tmp_path) as store:
