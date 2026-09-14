@@ -113,11 +113,11 @@ def test_wrong_input_types_fail_closed_without_nested_details():
     assert "object" not in str(caught.value)
 
 
-def test_privileged_authorization_cannot_be_constructed_directly():
+def test_privileged_authorization_cannot_be_constructed_from_fields():
     prepared = _prepared()
     evidence = prepared.evidence
 
-    with pytest.raises(ApplyAuthorizationError, match="producer"):
+    with pytest.raises(ApplyAuthorizationError, match="verified evidence chain"):
         ApplyAuthorization(
             deployment_id=prepared.deployment_id,
             target=evidence.target,
