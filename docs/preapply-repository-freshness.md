@@ -16,6 +16,7 @@ The gate:
 - rejects missing branches, moved heads, repository-identity drift, public or mismatched repositories, malformed metadata, missing credentials and transport/API verification failures;
 - re-validates the prepared/backup binding after GitHub I/O so in-process evidence replacement cannot be accepted;
 - returns immutable evidence bound to Repo B target and repository ID, baseline SHA, candidate SHA, backup slug, Stage manifest SHA-256, runtime SHA-256, risk level and Home Assistant Core version;
+- producer-confines that privileged freshness evidence to `reprove_preapply_repo_heads()` so normal callers cannot manufacture a matching proof from persisted fields without executing the fresh repository/head verification;
 - exposes only sanitized failure messages and never propagates GitHub response bodies, credentials or nested exception text.
 
 A moved `main` or `candidate` head is deterministic stale evidence. It must fail closed and must not be treated as endlessly retryable work by a future recovery layer.
