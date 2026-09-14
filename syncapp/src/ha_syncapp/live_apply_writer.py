@@ -17,12 +17,19 @@ from .live_apply_intent import LiveApplyIntent, derive_live_apply_intent
 from .live_apply_intent_store import PersistedLiveApplyIntent, load_live_apply_intent
 from .live_apply_operation_precondition import (
     LiveApplyOperationPreconditionError,
+    LiveApplyOperationPreconditionEvidence,
     prove_live_apply_operation_precondition,
 )
 from .live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from .live_apply_preconditions import LiveApplyPreconditionEvidence
-from .live_apply_progress import start_live_apply_progress, transition_live_apply_progress
+from .live_apply_progress import (
+    LiveApplyProgress,
+    start_live_apply_progress,
+    transition_live_apply_progress,
+)
 from .live_apply_progress_store import (
+    LiveApplyRecoveryDecision,
+    discover_live_apply_progress,
     discover_live_apply_recovery,
     record_live_apply_progress,
 )
@@ -72,9 +79,7 @@ def apply_live_operation(
             _reject("operation index is invalid")
         progress = tuple(
             item
-            for item in __import__(
-                "ha_syncapp.live_apply_progress_store", fromlist=["discover_live_apply_progress"]
-            ).discover_live_apply_progress(store, plan.deployment_id)
+            for item in discover_live_apply_progress(store, plan.deployment_id)
             if item.operation_index == operation_index
         )
         if len(progress) == 1 and progress[0].phase == "mutation_verified":
@@ -188,7 +193,7 @@ def _load_exact_intent(store: StateStore, intent: LiveApplyIntent) -> PersistedL
     return persisted
 
 
-def _recovery_decision(store: StateStore, plan: LiveApplyPlan):
+def _recovery_decision(store: StateStore, plan: LiveApplyPlan) -> LiveApplyRecoveryDecision:
     try:
         return discover_live_apply_recovery(store, plan)
     except StateError:
@@ -273,7 +278,10 @@ def _candidate_bytes(stage: CandidateStage, operation: LiveApplyOperation) -> by
         if parent_fd != tree_fd:
             os.close(parent_fd)
         os.close(tree_fd)
-    if operation.staged_size != len(data) or operation.staged_sha256 != hashlib.sha256(data).hexdigest():
+    if (
+        operation.staged_size != len(data)
+        or operation.staged_sha256 != hashlib.sha256(data).hexdigest()
+    ):
         _reject("candidate Stage operation source integrity mismatch")
     candidate_id = operation.candidate_object_id
     if candidate_id is None or _git_blob_object_id(data, len(candidate_id)) != candidate_id:
@@ -281,7 +289,12 @@ def _candidate_bytes(stage: CandidateStage, operation: LiveApplyOperation) -> by
     return data
 
 
-def _validate_operation_proof(proof, intent, operation, operation_index: int) -> None:
+def _validate_operation_proof(
+    proof: LiveApplyOperationPreconditionEvidence,
+    intent: LiveApplyIntent,
+    operation: LiveApplyOperation,
+    operation_index: int,
+) -> None:
     if (
         proof.deployment_id,
         proof.target,
@@ -427,7 +440,7 @@ def _verify_postcondition(root: Path, operation: LiveApplyOperation) -> None:
         os.close(root_fd)
 
 
-def _block_if_possible(store: StateStore, progress, plan: LiveApplyPlan) -> None:
+def _block_if_possible(store: StateStore, progress: LiveApplyProgress, plan: LiveApplyPlan) -> None:
     try:
         blocked = transition_live_apply_progress(progress, "blocked")
         record_live_apply_progress(store, blocked, plan=plan)
