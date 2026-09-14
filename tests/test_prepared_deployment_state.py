@@ -87,7 +87,6 @@ def test_candidate_cannot_receive_another_deployment_identity(tmp_path, changed_
             _record(store, evidence, other_id)
         assert store.prepared_deployment(other_id) is None
         assert store.prepared_deployment(DEPLOYMENT) == original
-        # A genuinely new candidate has a new preparation identity.
         assert _record(store, replace(EVIDENCE, candidate_sha="e" * 40), other_id)
 
 
@@ -191,6 +190,7 @@ def test_v4_migration_preserves_all_existing_state(tmp_path):
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE prepared_deployment")
+        db.execute("DROP TABLE live_apply_progress")
         db.execute("DROP TABLE live_apply_intent")
         db.execute("PRAGMA user_version = 4")
     with StateStore(tmp_path) as store:
@@ -203,7 +203,7 @@ def test_v4_migration_preserves_all_existing_state(tmp_path):
         assert store.enqueue_work("candidate", EVIDENCE.candidate_sha, now=WHEN) == work
         assert _record(store).evidence == EVIDENCE
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 9
 
 
 def test_insert_failure_is_atomic_and_sanitized(tmp_path):
@@ -227,7 +227,6 @@ def test_v4_migration_failure_does_not_advance_schema_or_replace_state(tmp_path)
         _record(store)
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
-        # An unexpected pre-existing table must never be adopted or replaced.
         db.execute("PRAGMA user_version = 4")
     before = path.read_bytes()
     with pytest.raises(StateError), StateStore(tmp_path):
