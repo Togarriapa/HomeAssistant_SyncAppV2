@@ -123,9 +123,7 @@ def test_conflicting_exact_deployment_intent_is_rejected(
     authorization, stage_evidence, plan, preconditions = _chain(tmp_path, prepared, monkeypatch)
     with StateStore(tmp_path) as store:
         _prepare_store(store, prepared)
-        first = record_live_apply_intent(
-            store, authorization, stage_evidence, plan, preconditions
-        )
+        first = record_live_apply_intent(store, authorization, stage_evidence, plan, preconditions)
         other_root = tmp_path / "other-homeassistant"
         other_root.mkdir()
         other_preconditions = prove_live_apply_preconditions(plan, other_root)
