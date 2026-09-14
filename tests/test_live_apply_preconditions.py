@@ -4,7 +4,6 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from ha_syncapp.live_apply_preconditions import (
     LiveApplyPreconditionError,
@@ -13,7 +12,7 @@ from ha_syncapp.live_apply_preconditions import (
 
 
 def _git_blob_id(data: bytes, algorithm: str = "sha1") -> str:
-    digest = hashlib.new(algorithm)
+    digest = hashlib.sha1(usedforsecurity=False) if algorithm == "sha1" else hashlib.sha256()
     digest.update(f"blob {len(data)}\0".encode())
     digest.update(data)
     return digest.hexdigest()
@@ -50,6 +49,7 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
     existing.write_bytes(baseline)
     os.chmod(existing, 0o644)
     plan = _plan(
+        _modified("automations.yaml", baseline),
         LiveApplyOperation(
             path="new.yaml",
             status="added",
@@ -60,7 +60,6 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
             staged_size=3,
             staged_sha256="7" * 64,
         ),
-        _modified("automations.yaml", baseline),
     )
 
     evidence = prove_live_apply_preconditions(plan, tmp_path)
@@ -72,7 +71,7 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
     assert evidence.candidate_sha == plan.candidate_sha
     assert evidence.stage_manifest_sha256 == plan.stage_manifest_sha256
     assert evidence.root == str(tmp_path)
-    assert evidence.verified_paths == ("new.yaml", "automations.yaml")
+    assert evidence.verified_paths == ("automations.yaml", "new.yaml")
     with pytest.raises(FrozenInstanceError):
         evidence.baseline_sha = "0" * 40  # type: ignore[misc]
 
@@ -148,6 +147,17 @@ def test_rejects_symlink_and_does_not_follow_it(tmp_path: Path) -> None:
         prove_live_apply_preconditions(plan, tmp_path)
 
 
+def test_rejects_symlinked_parent_component(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-parent"
+    outside.mkdir()
+    (outside / "configuration.yaml").write_bytes(b"secret\n")
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    plan = _plan(_modified("linked/configuration.yaml", b"secret\n"))
+
+    with pytest.raises(LiveApplyPreconditionError, match="live path type is unsafe"):
+        prove_live_apply_preconditions(plan, tmp_path)
+
+
 def test_rejects_non_regular_file(tmp_path: Path) -> None:
     (tmp_path / "folder.yaml").mkdir()
     plan = _plan(_modified("folder.yaml", b"anything\n"))
@@ -156,7 +166,7 @@ def test_rejects_non_regular_file(tmp_path: Path) -> None:
         prove_live_apply_preconditions(plan, tmp_path)
 
 
-def test_rejects_relative_root_duplicate_and_unsafe_paths(tmp_path: Path) -> None:
+def test_rejects_relative_root_duplicate_unsafe_and_unsorted_paths(tmp_path: Path) -> None:
     operation = LiveApplyOperation(
         path="../escape.yaml",
         status="added",
@@ -176,6 +186,11 @@ def test_rejects_relative_root_duplicate_and_unsafe_paths(tmp_path: Path) -> Non
     with pytest.raises(LiveApplyPreconditionError, match="duplicate affected paths"):
         prove_live_apply_preconditions(_plan(duplicate, duplicate), tmp_path)
 
+    with pytest.raises(LiveApplyPreconditionError, match="operation order is invalid"):
+        prove_live_apply_preconditions(
+            _plan(_modified("z.yaml", b"z"), _modified("a.yaml", b"a")), tmp_path
+        )
+
 
 def test_rejects_wrong_plan_type_and_sanitizes_filesystem_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -188,10 +203,10 @@ def test_rejects_wrong_plan_type_and_sanitizes_filesystem_errors(
     path.write_bytes(data)
     plan = _plan(_modified("configuration.yaml", data))
 
-    def explode(self: Path) -> os.stat_result:
+    def explode(fd: int, size: int) -> bytes:
         raise OSError("PRIVATE-NESTED-DETAIL")
 
-    monkeypatch.setattr(Path, "lstat", explode)
+    monkeypatch.setattr(os, "read", explode)
     with pytest.raises(LiveApplyPreconditionError) as error:
         prove_live_apply_preconditions(plan, tmp_path)
     assert "PRIVATE-NESTED-DETAIL" not in str(error.value)
@@ -205,13 +220,13 @@ def test_detects_plan_drift_during_filesystem_inspection(
     path = tmp_path / "configuration.yaml"
     path.write_bytes(data)
     plan = _plan(_modified("configuration.yaml", data))
-    original = Path.read_bytes
+    original = os.read
 
-    def mutate_after_read(self: Path) -> bytes:
-        result = original(self)
+    def mutate_after_read(fd: int, size: int) -> bytes:
+        result = original(fd, size)
         object.__setattr__(plan, "candidate_sha", "e" * 40)
         return result
 
-    monkeypatch.setattr(Path, "read_bytes", mutate_after_read)
+    monkeypatch.setattr(os, "read", mutate_after_read)
     with pytest.raises(LiveApplyPreconditionError, match="Apply plan changed during inspection"):
         prove_live_apply_preconditions(plan, tmp_path)
