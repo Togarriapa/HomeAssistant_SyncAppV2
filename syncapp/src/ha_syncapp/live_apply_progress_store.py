@@ -165,7 +165,9 @@ def record_live_apply_progress(
         with store._connection as db:
             db.execute("BEGIN IMMEDIATE")
             _revalidate_intent_binding(store, progress)
-            existing_row = _select_progress_row(db, progress.deployment_id, progress.operation_index)
+            existing_row = _select_progress_row(
+                db, progress.deployment_id, progress.operation_index
+            )
             if existing_row is not None:
                 existing = _parse_and_revalidate(store, existing_row)
                 if not _same_operation(existing, requested):
@@ -173,7 +175,9 @@ def record_live_apply_progress(
                 if existing.phase == requested.phase:
                     return existing
                 try:
-                    transitioned = transition_live_apply_progress(existing.progress, requested.phase)
+                    transitioned = transition_live_apply_progress(
+                        existing.progress, requested.phase
+                    )
                 except LiveApplyProgressError as error:
                     raise StateError(str(error)) from None
                 replacement = PersistedLiveApplyProgress.from_progress(transitioned, when)
