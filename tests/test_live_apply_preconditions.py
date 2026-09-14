@@ -4,7 +4,6 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from ha_syncapp.live_apply_preconditions import (
     LiveApplyPreconditionError,
@@ -13,10 +12,7 @@ from ha_syncapp.live_apply_preconditions import (
 
 
 def _git_blob_id(data: bytes, algorithm: str = "sha1") -> str:
-    if algorithm == "sha1":
-        digest = hashlib.sha1(usedforsecurity=False)
-    else:
-        digest = hashlib.sha256()
+    digest = hashlib.sha1(usedforsecurity=False) if algorithm == "sha1" else hashlib.sha256()
     digest.update(f"blob {len(data)}\0".encode())
     digest.update(data)
     return digest.hexdigest()
