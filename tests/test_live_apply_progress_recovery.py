@@ -124,7 +124,9 @@ def _progress(
         intent_record_sha256=record_sha256,
         operations_sha256=operations_sha256,
         operation_index=index,
-        operation_path_sha256=hashlib.sha256(plan.operations[index].path.encode("utf-8")).hexdigest(),
+        operation_path_sha256=hashlib.sha256(
+            plan.operations[index].path.encode("utf-8")
+        ).hexdigest(),
         phase="mutation_started",
     )
 
