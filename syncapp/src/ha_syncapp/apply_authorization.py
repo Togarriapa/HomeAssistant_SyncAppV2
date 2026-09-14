@@ -38,9 +38,7 @@ class ApplyAuthorization:
     ) -> None:
         if forbidden:
             _reject("Apply authorization must be created from the verified evidence chain")
-        validated_prepared, validated_backup, _ = _validate_chain(
-            prepared, backup, freshness
-        )
+        validated_prepared, validated_backup, _ = _validate_chain(prepared, backup, freshness)
         values = (
             ("deployment_id", validated_prepared.deployment_id),
             ("target", validated_backup.target),
