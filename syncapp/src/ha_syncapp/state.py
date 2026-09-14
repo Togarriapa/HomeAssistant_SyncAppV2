@@ -1115,7 +1115,7 @@ class StateStore:
                     "UPDATE work SET status = 'succeeded', updated_at = ?, next_attempt_at = NULL "
                     "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
                     "AND attempts = ?",
-                    (current, item.work_kind, item.work_key, item.status, item.attempts),
+                    (current, item.work_kind, item.work_key, item.attempts),
                 )
                 if result.rowcount != 1:
                     raise StateError("Work transition changed unexpectedly")
