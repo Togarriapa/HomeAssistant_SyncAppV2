@@ -114,7 +114,7 @@ def start_live_apply_progress(
         raise LiveApplyProgressError("operation index is invalid")
 
     operation = plan.operations[operation_index]
-    return LiveApplyProgress.create(
+    progress = LiveApplyProgress.create(
         deployment_id=intent.deployment_id,
         intent_record_sha256=intent_record_sha256,
         operations_sha256=operations_sha256,
@@ -122,6 +122,34 @@ def start_live_apply_progress(
         operation_path_sha256=hashlib.sha256(operation.path.encode("utf-8")).hexdigest(),
         phase="mutation_started",
     )
+    validate_live_apply_progress_plan_binding(progress, plan)
+    return progress
+
+
+def validate_live_apply_progress_plan_binding(
+    progress: LiveApplyProgress,
+    plan: LiveApplyPlan,
+) -> None:
+    """Re-prove that progress identifies the exact ordered operation in a plan."""
+    if type(progress) is not LiveApplyProgress:
+        raise LiveApplyProgressError("progress evidence is invalid")
+    if type(plan) is not LiveApplyPlan:
+        raise LiveApplyProgressError("Apply plan evidence is invalid")
+    if progress.deployment_id != plan.deployment_id:
+        raise LiveApplyProgressError("Apply plan deployment binding does not match progress")
+
+    operations = _snapshot_operations(plan.operations)
+    operations_sha256 = hashlib.sha256(
+        json.dumps(operations, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+    if operations_sha256 != progress.operations_sha256:
+        raise LiveApplyProgressError("operations binding does not match Apply plan")
+    if progress.operation_index >= len(operations):
+        raise LiveApplyProgressError("operation index is invalid")
+    operation = plan.operations[progress.operation_index]
+    expected_path_sha256 = hashlib.sha256(operation.path.encode("utf-8")).hexdigest()
+    if expected_path_sha256 != progress.operation_path_sha256:
+        raise LiveApplyProgressError("operation path binding does not match Apply plan")
 
 
 def transition_live_apply_progress(
