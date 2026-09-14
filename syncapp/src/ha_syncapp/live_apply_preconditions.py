@@ -89,7 +89,7 @@ def prove_live_apply_preconditions(
 
 
 def _validate_root(root: Path) -> Path:
-    if type(root) is not Path or not root.is_absolute():
+    if not isinstance(root, Path) or not root.is_absolute():
         _reject("Home Assistant root is invalid")
     try:
         info = root.lstat()
@@ -132,6 +132,9 @@ def _snapshot_plan(plan: LiveApplyPlan) -> _PlanSnapshot:
 
 def _validate_operations(operations: tuple[_OperationSnapshot, ...]) -> None:
     seen: set[str] = set()
+    paths = tuple(operation.path for operation in operations)
+    if paths != tuple(sorted(paths, key=lambda path: path.encode("utf-8"))):
+        _reject("Apply plan operation order is invalid")
     for operation in operations:
         if not _safe_path(operation.path):
             _reject("Apply plan path is unsafe")
