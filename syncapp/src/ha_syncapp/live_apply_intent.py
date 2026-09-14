@@ -164,9 +164,13 @@ def _validate_operation(operation: LiveApplyOperation) -> None:
         _reject("Apply plan operation is invalid")
     if operation.candidate_mode is not None and operation.candidate_mode not in _ALLOWED_MODE:
         _reject("Apply plan operation is invalid")
-    if operation.baseline_object_id is not None and not _valid_object_id(operation.baseline_object_id):
+    if operation.baseline_object_id is not None and not _valid_object_id(
+        operation.baseline_object_id
+    ):
         _reject("Apply plan operation is invalid")
-    if operation.candidate_object_id is not None and not _valid_object_id(operation.candidate_object_id):
+    if operation.candidate_object_id is not None and not _valid_object_id(
+        operation.candidate_object_id
+    ):
         _reject("Apply plan operation is invalid")
     if operation.staged_size is not None and (
         type(operation.staged_size) is not int or operation.staged_size < 0
