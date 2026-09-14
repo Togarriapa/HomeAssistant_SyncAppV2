@@ -14,12 +14,9 @@ class ApplyAuthorizationError(RuntimeError):
     """The exact pre-Apply evidence chain could not authorize live mutation."""
 
 
-_AUTHORIZATION_PRODUCER = object()
-
-
 @dataclass(frozen=True, slots=True, init=False)
 class ApplyAuthorization:
-    """Immutable permit for one exact candidate; construction is producer-confined."""
+    """Immutable permit whose construction re-validates the full trusted chain."""
 
     deployment_id: str
     target: str
@@ -34,55 +31,28 @@ class ApplyAuthorization:
 
     def __init__(
         self,
-        *,
-        deployment_id: str,
-        target: str,
-        repository_id: int,
-        baseline_sha: str,
-        candidate_sha: str,
-        backup_slug: str,
-        stage_manifest_sha256: str,
-        runtime_sha256: str,
-        risk_level: str,
-        core_version: str,
-        _producer: object | None = None,
+        prepared: PreparedDeployment | None = None,
+        backup: CandidateBackupEvidence | None = None,
+        freshness: PreApplyFreshnessEvidence | None = None,
+        **forbidden: object,
     ) -> None:
-        if _producer is not _AUTHORIZATION_PRODUCER:
-            _reject("Apply authorization must be created by the trusted producer")
+        if forbidden:
+            _reject("Apply authorization must be created from the verified evidence chain")
+        validated_prepared, validated_backup, _ = _validate_chain(prepared, backup, freshness)
         values = (
-            ("deployment_id", deployment_id),
-            ("target", target),
-            ("repository_id", repository_id),
-            ("baseline_sha", baseline_sha),
-            ("candidate_sha", candidate_sha),
-            ("backup_slug", backup_slug),
-            ("stage_manifest_sha256", stage_manifest_sha256),
-            ("runtime_sha256", runtime_sha256),
-            ("risk_level", risk_level),
-            ("core_version", core_version),
+            ("deployment_id", validated_prepared.deployment_id),
+            ("target", validated_backup.target),
+            ("repository_id", validated_backup.repository_id),
+            ("baseline_sha", validated_backup.baseline_sha),
+            ("candidate_sha", validated_backup.candidate_sha),
+            ("backup_slug", validated_backup.backup_slug),
+            ("stage_manifest_sha256", validated_backup.stage_manifest_sha256),
+            ("runtime_sha256", validated_backup.runtime_sha256),
+            ("risk_level", validated_backup.risk_level),
+            ("core_version", validated_backup.core_version),
         )
         for name, value in values:
             object.__setattr__(self, name, value)
-
-    @classmethod
-    def _from_verified_chain(
-        cls,
-        prepared: PreparedDeployment,
-        evidence: CandidateBackupEvidence,
-    ) -> ApplyAuthorization:
-        return cls(
-            deployment_id=prepared.deployment_id,
-            target=evidence.target,
-            repository_id=evidence.repository_id,
-            baseline_sha=evidence.baseline_sha,
-            candidate_sha=evidence.candidate_sha,
-            backup_slug=evidence.backup_slug,
-            stage_manifest_sha256=evidence.stage_manifest_sha256,
-            runtime_sha256=evidence.runtime_sha256,
-            risk_level=evidence.risk_level,
-            core_version=evidence.core_version,
-            _producer=_AUTHORIZATION_PRODUCER,
-        )
 
 
 def authorize_candidate_apply(
@@ -91,6 +61,14 @@ def authorize_candidate_apply(
     freshness: PreApplyFreshnessEvidence,
 ) -> ApplyAuthorization:
     """Bind the complete freshly re-proven chain without performing any mutation."""
+    return ApplyAuthorization(prepared, backup, freshness)
+
+
+def _validate_chain(
+    prepared: PreparedDeployment | None,
+    backup: CandidateBackupEvidence | None,
+    freshness: PreApplyFreshnessEvidence | None,
+) -> tuple[PreparedDeployment, CandidateBackupEvidence, PreApplyFreshnessEvidence]:
     if type(prepared) is not PreparedDeployment:
         _reject("prepared deployment evidence is invalid")
     if type(backup) is not CandidateBackupEvidence:
@@ -130,8 +108,7 @@ def authorize_candidate_apply(
     )
     if observed != expected:
         _reject("pre-Apply freshness binding does not match")
-
-    return ApplyAuthorization._from_verified_chain(prepared, backup)
+    return prepared, backup, freshness
 
 
 def _reject(message: str) -> NoReturn:
