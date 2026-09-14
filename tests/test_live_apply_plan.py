@@ -212,7 +212,10 @@ def test_candidate_entry_must_match_exact_staged_metadata(tmp_path, monkeypatch)
         candidate_object_id="9" * 40,
     )
     changes = replace(changes, changes=(bad, *changes.changes[1:]))
-    monkeypatch.setattr("ha_syncapp.live_apply_plan.verify_candidate_stage", lambda _stage: None)
+    monkeypatch.setattr(
+        "ha_syncapp.live_apply_plan.verify_candidate_stage",
+        lambda _stage: None,
+    )
 
     with pytest.raises(LiveApplyPlanError, match="staged entry"):
         build_live_apply_plan(evidence, stage, changes)
@@ -235,7 +238,10 @@ def test_deleted_path_must_be_absent_from_staged_candidate(tmp_path, monkeypatch
         ),
     )
     evidence = _evidence(tmp_path, monkeypatch, prepared, stage)
-    monkeypatch.setattr("ha_syncapp.live_apply_plan.verify_candidate_stage", lambda _stage: None)
+    monkeypatch.setattr(
+        "ha_syncapp.live_apply_plan.verify_candidate_stage",
+        lambda _stage: None,
+    )
 
     with pytest.raises(LiveApplyPlanError, match="deleted path"):
         build_live_apply_plan(evidence, stage, _changes(prepared))
