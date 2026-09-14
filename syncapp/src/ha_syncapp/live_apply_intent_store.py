@@ -9,6 +9,7 @@ import sqlite3
 from dataclasses import astuple, dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import NoReturn
 
 from .apply_authorization import ApplyAuthorization
 from .live_apply_intent import LiveApplyIntent, derive_live_apply_intent
@@ -329,5 +330,5 @@ def _text(value: object) -> str:
     return value
 
 
-def _invalid_record() -> None:
+def _invalid_record() -> NoReturn:
     raise StateError("Invalid live Apply intent record") from None
