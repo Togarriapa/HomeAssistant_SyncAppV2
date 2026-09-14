@@ -124,10 +124,7 @@ def _evidence(tmp_path, monkeypatch, prepared, stage):
     return reprove_stage_for_apply(_authorization(prepared), stage)
 
 
-def test_plan_is_byte_sorted_immutable_and_reverifies_exact_stage(
-    tmp_path,
-    monkeypatch,
-):
+def test_plan_is_byte_sorted_immutable_and_reverifies_exact_stage(tmp_path, monkeypatch):
     prepared = _prepared()
     stage = _stage(tmp_path, prepared)
     evidence = _evidence(tmp_path, monkeypatch, prepared, stage)
@@ -135,8 +132,7 @@ def test_plan_is_byte_sorted_immutable_and_reverifies_exact_stage(
     verified = []
 
     monkeypatch.setattr(
-        "ha_syncapp.live_apply_plan.verify_candidate_stage",
-        lambda value: verified.append(value),
+        "ha_syncapp.live_apply_plan.verify_candidate_stage", lambda value: verified.append(value)
     )
 
     result = build_live_apply_plan(evidence, stage, changes)
@@ -207,15 +203,9 @@ def test_candidate_entry_must_match_exact_staged_metadata(tmp_path, monkeypatch)
     stage = _stage(tmp_path, prepared)
     evidence = _evidence(tmp_path, monkeypatch, prepared, stage)
     changes = _changes(prepared)
-    bad = replace(
-        changes.changes[0],
-        candidate_object_id="9" * 40,
-    )
+    bad = replace(changes.changes[0], candidate_object_id="9" * 40)
     changes = replace(changes, changes=(bad, *changes.changes[1:]))
-    monkeypatch.setattr(
-        "ha_syncapp.live_apply_plan.verify_candidate_stage",
-        lambda _stage: None,
-    )
+    monkeypatch.setattr("ha_syncapp.live_apply_plan.verify_candidate_stage", lambda _stage: None)
 
     with pytest.raises(LiveApplyPlanError, match="staged entry"):
         build_live_apply_plan(evidence, stage, changes)
@@ -238,10 +228,7 @@ def test_deleted_path_must_be_absent_from_staged_candidate(tmp_path, monkeypatch
         ),
     )
     evidence = _evidence(tmp_path, monkeypatch, prepared, stage)
-    monkeypatch.setattr(
-        "ha_syncapp.live_apply_plan.verify_candidate_stage",
-        lambda _stage: None,
-    )
+    monkeypatch.setattr("ha_syncapp.live_apply_plan.verify_candidate_stage", lambda _stage: None)
 
     with pytest.raises(LiveApplyPlanError, match="deleted path"):
         build_live_apply_plan(evidence, stage, _changes(prepared))
