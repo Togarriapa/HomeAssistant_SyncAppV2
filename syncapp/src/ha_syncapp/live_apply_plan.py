@@ -121,7 +121,9 @@ def _validate_input_types(
         _reject("candidate change evidence is invalid")
 
 
-def _evidence_binding(evidence: StagePrewriteEvidence) -> tuple[str, str, int, str, str]:
+def _evidence_binding(
+    evidence: StagePrewriteEvidence,
+) -> tuple[str, str, int, str, str]:
     return (
         evidence.deployment_id,
         evidence.target,
@@ -206,9 +208,19 @@ def _validate_bindings(
     ):
         _reject("Stage pre-write evidence binding is invalid")
 
-    if stage[:5] != (target, repository_id, "candidate", candidate_sha, manifest_sha256):
+    if stage[:5] != (
+        target,
+        repository_id,
+        "candidate",
+        candidate_sha,
+        manifest_sha256,
+    ):
         _reject("candidate Stage binding does not match Stage pre-write evidence")
-    if changes[0] != target or changes[1] != repository_id or changes[3] != candidate_sha:
+    if (
+        changes[0] != target
+        or changes[1] != repository_id
+        or changes[3] != candidate_sha
+    ):
         _reject("candidate change binding does not match Stage pre-write evidence")
     if not _valid_object_id(changes[2]):
         _reject("candidate change baseline binding is invalid")
@@ -282,9 +294,17 @@ def _validate_change(change: _ChangeSnapshot) -> None:
     candidate_present = _valid_git_side(change.candidate_mode, change.candidate_object_id)
 
     if change.status == "added":
-        valid = change.baseline_mode is None and change.baseline_object_id is None and candidate_present
+        valid = (
+            change.baseline_mode is None
+            and change.baseline_object_id is None
+            and candidate_present
+        )
     elif change.status == "deleted":
-        valid = baseline_present and change.candidate_mode is None and change.candidate_object_id is None
+        valid = (
+            baseline_present
+            and change.candidate_mode is None
+            and change.candidate_object_id is None
+        )
     elif change.status == "modified":
         valid = (
             baseline_present
@@ -323,8 +343,7 @@ def _safe_path(path: object) -> bool:
         return False
     parts = path.split("/")
     return not any(
-        part in {"", ".", ".."} or part.casefold() == ".git"
-        for part in parts
+        part in {"", ".", ".."} or part.casefold() == ".git" for part in parts
     )
 
 
