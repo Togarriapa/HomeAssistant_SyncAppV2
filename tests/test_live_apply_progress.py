@@ -12,6 +12,7 @@ from ha_syncapp.live_apply_progress import (
     LiveApplyProgressError,
     start_live_apply_progress,
     transition_live_apply_progress,
+    validate_live_apply_progress_plan_binding,
 )
 
 
@@ -177,6 +178,23 @@ def test_start_progress_is_bound_to_exact_intent_plan_and_operation() -> None:
     assert progress.operation_index == 1
     assert progress.operation_path_sha256 == hashlib.sha256(b"scripts.yaml").hexdigest()
     assert progress.phase == "mutation_started"
+    validate_live_apply_progress_plan_binding(progress, plan)
+
+
+def test_plan_binding_rejects_caller_forged_operation_identity() -> None:
+    intent, plan = _bound_chain()
+    progress = start_live_apply_progress(intent, "a" * 64, plan, operation_index=0)
+    forged = LiveApplyProgress.create(
+        deployment_id=progress.deployment_id,
+        intent_record_sha256=progress.intent_record_sha256,
+        operations_sha256=progress.operations_sha256,
+        operation_index=progress.operation_index,
+        operation_path_sha256="f" * 64,
+        phase=progress.phase,
+    )
+
+    with pytest.raises(LiveApplyProgressError, match="operation path binding"):
+        validate_live_apply_progress_plan_binding(forged, plan)
 
 
 def test_start_progress_rejects_plan_drift_reorder_and_invalid_index() -> None:
