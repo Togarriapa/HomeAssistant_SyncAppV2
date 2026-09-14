@@ -11,10 +11,12 @@ from datetime import UTC, datetime
 from typing import NoReturn
 
 from .live_apply_intent_store import load_live_apply_intent
+from .live_apply_plan import LiveApplyPlan
 from .live_apply_progress import (
     LiveApplyProgress,
     LiveApplyProgressError,
     transition_live_apply_progress,
+    validate_live_apply_progress_plan_binding,
 )
 from .prepared_deployment import PreparedDeploymentError, validate_deployment_id
 from .state import StateError, StateStore
@@ -151,20 +153,21 @@ def record_live_apply_progress(
     store: StateStore,
     progress: LiveApplyProgress,
     *,
+    plan: LiveApplyPlan,
     updated_at: datetime | None = None,
 ) -> PersistedLiveApplyProgress:
-    """Durably record one monotonic operation transition before/after mutation."""
+    """Durably record one plan-proven monotonic transition before/after mutation."""
     if type(store) is not StateStore:
         raise StateError("Invalid live Apply progress store")
     if type(progress) is not LiveApplyProgress:
         raise StateError("Invalid live Apply progress evidence")
-    _revalidate_intent_binding(store, progress)
+    _revalidate_plan_binding(store, progress, plan)
     when = _timestamp(updated_at)
     requested = PersistedLiveApplyProgress.from_progress(progress, when)
     try:
         with store._connection as db:
             db.execute("BEGIN IMMEDIATE")
-            _revalidate_intent_binding(store, progress)
+            _revalidate_plan_binding(store, progress, plan)
             existing_row = _select_progress_row(
                 db, progress.deployment_id, progress.operation_index
             )
@@ -269,6 +272,43 @@ def discover_live_apply_progress(
         raise
     except sqlite3.Error:
         raise StateError("Unable to discover live Apply progress") from None
+
+
+def _revalidate_plan_binding(
+    store: StateStore,
+    progress: LiveApplyProgress,
+    plan: LiveApplyPlan,
+) -> None:
+    if type(plan) is not LiveApplyPlan:
+        raise StateError("Invalid live Apply progress Apply plan")
+    intent = load_live_apply_intent(store, progress.deployment_id)
+    if intent is None:
+        raise StateError("Live Apply progress requires matching durable intent")
+    if (
+        intent.record_sha256 != progress.intent_record_sha256
+        or intent.operations_sha256 != progress.operations_sha256
+    ):
+        raise StateError("Live Apply progress durable intent binding mismatch")
+    if (
+        plan.deployment_id,
+        plan.target,
+        plan.repository_id,
+        plan.baseline_sha,
+        plan.candidate_sha,
+        plan.stage_manifest_sha256,
+    ) != (
+        intent.deployment_id,
+        intent.target,
+        intent.repository_id,
+        intent.baseline_sha,
+        intent.candidate_sha,
+        intent.stage_manifest_sha256,
+    ):
+        raise StateError("Live Apply progress Apply plan binding mismatch")
+    try:
+        validate_live_apply_progress_plan_binding(progress, plan)
+    except LiveApplyProgressError as error:
+        raise StateError(str(error)) from None
 
 
 def _revalidate_intent_binding(store: StateStore, progress: LiveApplyProgress) -> None:
