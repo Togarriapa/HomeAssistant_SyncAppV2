@@ -78,16 +78,16 @@ def apply_live_operation(
     if decision.action == "complete":
         if type(operation_index) is not int or not 0 <= operation_index < len(plan.operations):
             _reject("operation index is invalid")
-        progress = tuple(
+        persisted_progress = tuple(
             item
             for item in discover_live_apply_progress(store, plan.deployment_id)
             if item.operation_index == operation_index
         )
-        if len(progress) == 1 and progress[0].phase == "mutation_verified":
+        if len(persisted_progress) == 1 and persisted_progress[0].phase == "mutation_verified":
             return LiveApplyWriterResult(
                 status="mutation_verified",
                 operation_index=operation_index,
-                operation_path_sha256=progress[0].operation_path_sha256,
+                operation_path_sha256=persisted_progress[0].operation_path_sha256,
                 replayed=True,
             )
         _reject("live Apply recovery state is inconsistent")
