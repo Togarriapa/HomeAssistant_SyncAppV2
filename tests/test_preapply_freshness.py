@@ -7,6 +7,7 @@ from ha_syncapp.candidate_backup import CandidateBackupEvidence
 from ha_syncapp.github_repo import BranchHead, RepositoryVerificationError
 from ha_syncapp.preapply_freshness import (
     PreApplyFreshnessError,
+    PreApplyFreshnessEvidence,
     reprove_preapply_repo_heads,
 )
 from ha_syncapp.prepared_deployment import PreparedDeployment
@@ -52,6 +53,24 @@ def test_exact_main_and_candidate_heads_produce_immutable_freshness_evidence():
     assert result.risk_level == prepared.evidence.risk_level
     assert result.core_version == prepared.evidence.core_version
     assert [call[3] for call in calls] == ["main", "candidate"]
+
+
+def test_freshness_evidence_cannot_be_constructed_without_reproof():
+    prepared = _prepared()
+    evidence = prepared.evidence
+
+    with pytest.raises(PreApplyFreshnessError, match="producer"):
+        PreApplyFreshnessEvidence(
+            target=evidence.target,
+            repository_id=evidence.repository_id,
+            baseline_sha=evidence.baseline_sha,
+            candidate_sha=evidence.candidate_sha,
+            backup_slug=evidence.backup_slug,
+            stage_manifest_sha256=evidence.stage_manifest_sha256,
+            runtime_sha256=evidence.runtime_sha256,
+            risk_level=evidence.risk_level,
+            core_version=evidence.core_version,
+        )
 
 
 @pytest.mark.parametrize("moved_branch", ["main", "candidate"])
