@@ -194,7 +194,7 @@ def test_start_progress_rejects_plan_drift_reorder_and_invalid_index() -> None:
         object.__setattr__(drifted, name, getattr(plan, name))
     object.__setattr__(drifted, "operations", tuple(reversed(plan.operations)))
 
-    with pytest.raises(LiveApplyProgressError, match="operations binding"):
+    with pytest.raises(LiveApplyProgressError, match="not deterministically ordered"):
         start_live_apply_progress(intent, "a" * 64, drifted, operation_index=0)
     with pytest.raises(LiveApplyProgressError, match="operation index"):
         start_live_apply_progress(intent, "a" * 64, plan, operation_index=2)
