@@ -53,6 +53,7 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
     existing.write_bytes(baseline)
     os.chmod(existing, 0o644)
     plan = _plan(
+        _modified("automations.yaml", baseline),
         LiveApplyOperation(
             path="new.yaml",
             status="added",
@@ -63,7 +64,6 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
             staged_size=3,
             staged_sha256="7" * 64,
         ),
-        _modified("automations.yaml", baseline),
     )
 
     evidence = prove_live_apply_preconditions(plan, tmp_path)
@@ -75,7 +75,7 @@ def test_proves_absent_added_and_matching_existing_paths(tmp_path: Path) -> None
     assert evidence.candidate_sha == plan.candidate_sha
     assert evidence.stage_manifest_sha256 == plan.stage_manifest_sha256
     assert evidence.root == str(tmp_path)
-    assert evidence.verified_paths == ("new.yaml", "automations.yaml")
+    assert evidence.verified_paths == ("automations.yaml", "new.yaml")
     with pytest.raises(FrozenInstanceError):
         evidence.baseline_sha = "0" * 40  # type: ignore[misc]
 
@@ -159,7 +159,7 @@ def test_rejects_non_regular_file(tmp_path: Path) -> None:
         prove_live_apply_preconditions(plan, tmp_path)
 
 
-def test_rejects_relative_root_duplicate_and_unsafe_paths(tmp_path: Path) -> None:
+def test_rejects_relative_root_duplicate_unsafe_and_unsorted_paths(tmp_path: Path) -> None:
     operation = LiveApplyOperation(
         path="../escape.yaml",
         status="added",
@@ -178,6 +178,11 @@ def test_rejects_relative_root_duplicate_and_unsafe_paths(tmp_path: Path) -> Non
     duplicate = _modified("same.yaml", b"x")
     with pytest.raises(LiveApplyPreconditionError, match="duplicate affected paths"):
         prove_live_apply_preconditions(_plan(duplicate, duplicate), tmp_path)
+
+    with pytest.raises(LiveApplyPreconditionError, match="operation order is invalid"):
+        prove_live_apply_preconditions(
+            _plan(_modified("z.yaml", b"z"), _modified("a.yaml", b"a")), tmp_path
+        )
 
 
 def test_rejects_wrong_plan_type_and_sanitizes_filesystem_errors(
