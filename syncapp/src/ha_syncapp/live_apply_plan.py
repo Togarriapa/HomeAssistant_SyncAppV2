@@ -283,9 +283,7 @@ def _validate_change(change: _ChangeSnapshot) -> None:
 
     if change.status == "added":
         valid = (
-            change.baseline_mode is None
-            and change.baseline_object_id is None
-            and candidate_present
+            change.baseline_mode is None and change.baseline_object_id is None and candidate_present
         )
     elif change.status == "deleted":
         valid = (
