@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import os
@@ -396,10 +397,8 @@ def _replace_bytes(parent_fd: int, name: str, data: bytes, git_mode: str, status
         if fd is not None:
             os.close(fd)
         if created:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(temporary, dir_fd=parent_fd)
-            except OSError:
-                pass
 
 
 def _verify_postcondition(root: Path, operation: LiveApplyOperation) -> None:
