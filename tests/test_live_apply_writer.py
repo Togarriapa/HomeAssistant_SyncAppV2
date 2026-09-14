@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,7 +12,10 @@ from ha_syncapp.candidate_backup import CandidateBackupEvidence
 from ha_syncapp.candidate_stage import CandidateStage, CandidateStageEntry
 from ha_syncapp.live_apply_intent_store import record_live_apply_intent
 from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
-from ha_syncapp.live_apply_preconditions import prove_live_apply_preconditions
+from ha_syncapp.live_apply_preconditions import (
+    LiveApplyPreconditionEvidence,
+    prove_live_apply_preconditions,
+)
 from ha_syncapp.live_apply_progress_store import discover_live_apply_progress
 from ha_syncapp.live_apply_writer import LiveApplyWriterError, apply_live_operation
 from ha_syncapp.prepared_deployment import PreparedDeployment
@@ -24,7 +28,12 @@ def _blob_id(data: bytes) -> str:
     return hashlib.sha1(payload, usedforsecurity=False).hexdigest()
 
 
-def _operation(path: str, status: str, baseline: bytes | None, candidate: bytes | None) -> LiveApplyOperation:
+def _operation(
+    path: str,
+    status: str,
+    baseline: bytes | None,
+    candidate: bytes | None,
+) -> LiveApplyOperation:
     baseline_mode = None if baseline is None else "100644"
     baseline_id = None if baseline is None else _blob_id(baseline)
     candidate_mode = None if candidate is None else "100644"
@@ -52,7 +61,14 @@ def _chain(
     status: str = "modified",
     baseline: bytes | None = b"baseline\n",
     candidate: bytes | None = b"candidate\n",
-) -> tuple[StateStore, ApplyAuthorization, StagePrewriteEvidence, CandidateStage, LiveApplyPlan, object]:
+) -> tuple[
+    StateStore,
+    ApplyAuthorization,
+    StagePrewriteEvidence,
+    CandidateStage,
+    LiveApplyPlan,
+    LiveApplyPreconditionEvidence,
+]:
     live = tmp_path / "homeassistant"
     live.mkdir()
     path = "automations.yaml"
@@ -72,7 +88,7 @@ def _chain(
         core_version="2026.9.1",
         backup_slug="backup_123",
     )
-    prepared = PreparedDeployment(str(uuid4()), backup)
+    prepared = PreparedDeployment(str(uuid4()), backup, datetime.now(UTC))
     authorization = object.__new__(ApplyAuthorization)
     for name, value in {
         "deployment_id": prepared.deployment_id,
