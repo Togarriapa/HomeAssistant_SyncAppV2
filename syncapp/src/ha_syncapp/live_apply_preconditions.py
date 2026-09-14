@@ -17,9 +17,9 @@ class LiveApplyPreconditionError(RuntimeError):
     """The live Home Assistant tree no longer satisfies an exact Apply plan."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class LiveApplyPreconditionEvidence:
-    """Ephemeral immutable proof that affected live paths matched one exact baseline."""
+    """Ephemeral immutable proof issued only by the read-only live-path verifier."""
 
     deployment_id: str
     target: str
@@ -81,16 +81,20 @@ def prove_live_apply_preconditions(
     if _snapshot_plan(plan) != before:
         _reject("Apply plan changed during inspection")
 
-    return LiveApplyPreconditionEvidence(
-        deployment_id=before.deployment_id,
-        target=before.target,
-        repository_id=before.repository_id,
-        baseline_sha=before.baseline_sha,
-        candidate_sha=before.candidate_sha,
-        stage_manifest_sha256=before.stage_manifest_sha256,
-        root=str(root),
-        verified_paths=tuple(verified),
-    )
+    evidence = object.__new__(LiveApplyPreconditionEvidence)
+    values = {
+        "deployment_id": before.deployment_id,
+        "target": before.target,
+        "repository_id": before.repository_id,
+        "baseline_sha": before.baseline_sha,
+        "candidate_sha": before.candidate_sha,
+        "stage_manifest_sha256": before.stage_manifest_sha256,
+        "root": str(root),
+        "verified_paths": tuple(verified),
+    }
+    for name, value in values.items():
+        object.__setattr__(evidence, name, value)
+    return evidence
 
 
 def _validate_root(root: Path) -> Path:
