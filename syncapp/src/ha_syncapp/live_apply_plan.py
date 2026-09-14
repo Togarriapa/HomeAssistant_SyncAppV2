@@ -330,10 +330,7 @@ def _safe_path(path: object) -> bool:
     if not isinstance(path, str) or not path or path.startswith("/"):
         return False
     parts = path.split("/")
-    return not any(
-        part in {"", ".", ".."} or part.casefold() == ".git"
-        for part in parts
-    )
+    return not any(part in {"", ".", ".."} or part.casefold() == ".git" for part in parts)
 
 
 def _reject(message: str) -> NoReturn:
