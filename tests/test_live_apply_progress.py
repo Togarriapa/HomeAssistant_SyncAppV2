@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
-
 from ha_syncapp.live_apply_progress import (
     LiveApplyProgress,
     LiveApplyProgressError,
