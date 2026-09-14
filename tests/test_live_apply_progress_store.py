@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from ha_syncapp.candidate_backup import CandidateBackupEvidence
+from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from ha_syncapp.live_apply_progress import LiveApplyProgress, transition_live_apply_progress
 from ha_syncapp.live_apply_progress_store import (
     discover_live_apply_progress,
@@ -37,18 +38,69 @@ def _prepared() -> PreparedDeployment:
     return PreparedDeployment(str(uuid4()), _backup(), datetime.now(UTC))
 
 
+def _operation(path: str, marker: str) -> LiveApplyOperation:
+    return LiveApplyOperation(
+        path=path,
+        status="modified",
+        baseline_mode="100644",
+        baseline_object_id=marker * 40,
+        candidate_mode="100644",
+        candidate_object_id=("f" if marker != "f" else "e") * 40,
+        staged_size=7,
+        staged_sha256=marker * 64,
+    )
+
+
+def _plan(prepared: PreparedDeployment) -> LiveApplyPlan:
+    evidence = prepared.evidence
+    plan = object.__new__(LiveApplyPlan)
+    for name, value in {
+        "deployment_id": prepared.deployment_id,
+        "target": evidence.target,
+        "repository_id": evidence.repository_id,
+        "baseline_sha": evidence.baseline_sha,
+        "candidate_sha": evidence.candidate_sha,
+        "stage_manifest_sha256": evidence.stage_manifest_sha256,
+        "operations": (
+            _operation("automations.yaml", "1"),
+            _operation("scripts.yaml", "2"),
+            _operation("themes.yaml", "3"),
+            _operation("ui-lovelace.yaml", "4"),
+        ),
+    }.items():
+        object.__setattr__(plan, name, value)
+    return plan
+
+
+def _operation_tuple(operation: LiveApplyOperation) -> tuple[object, ...]:
+    return (
+        operation.path,
+        operation.status,
+        operation.baseline_mode,
+        operation.baseline_object_id,
+        operation.candidate_mode,
+        operation.candidate_object_id,
+        operation.staged_size,
+        operation.staged_sha256,
+    )
+
+
 def _digest(values: tuple[object, ...]) -> str:
     return hashlib.sha256(
         json.dumps(values, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     ).hexdigest()
 
 
-def _prepare_store(store: StateStore, prepared: PreparedDeployment) -> tuple[str, str]:
+def _prepare_store(
+    store: StateStore,
+    prepared: PreparedDeployment,
+    plan: LiveApplyPlan,
+) -> tuple[str, str]:
     evidence = prepared.evidence
     store.bind_repository(evidence.target, evidence.repository_id)
     store.record_prepared_deployment(prepared.deployment_id, evidence)
     recorded_at = datetime(2026, 9, 14, 12, 0, tzinfo=UTC).isoformat()
-    operations_sha256 = "e" * 64
+    operations_sha256 = _digest(tuple(_operation_tuple(item) for item in plan.operations))
     values: tuple[object, ...] = (
         prepared.deployment_id,
         evidence.target,
@@ -93,11 +145,12 @@ def _progress(
 
 def test_started_progress_persists_idempotently_and_survives_restart(tmp_path: Path) -> None:
     prepared = _prepared()
+    plan = _plan(prepared)
     first_time = datetime(2026, 9, 14, 12, 1, tzinfo=UTC)
     later = datetime(2026, 9, 14, 12, 2, tzinfo=UTC)
 
     with StateStore(tmp_path) as store:
-        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared)
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
         progress = _progress(
             prepared,
             operations_sha256,
@@ -105,8 +158,8 @@ def test_started_progress_persists_idempotently_and_survives_restart(tmp_path: P
             operation_index=0,
             path="automations.yaml",
         )
-        first = record_live_apply_progress(store, progress, updated_at=first_time)
-        replay = record_live_apply_progress(store, progress, updated_at=later)
+        first = record_live_apply_progress(store, progress, plan=plan, updated_at=first_time)
+        replay = record_live_apply_progress(store, progress, plan=plan, updated_at=later)
         assert replay == first
         assert first.updated_at == first_time
         assert first.progress == progress
@@ -118,8 +171,9 @@ def test_started_progress_persists_idempotently_and_survives_restart(tmp_path: P
 
 def test_next_operation_requires_verified_contiguous_predecessor(tmp_path: Path) -> None:
     prepared = _prepared()
+    plan = _plan(prepared)
     with StateStore(tmp_path) as store:
-        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared)
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
         first = _progress(
             prepared,
             operations_sha256,
@@ -134,13 +188,13 @@ def test_next_operation_requires_verified_contiguous_predecessor(tmp_path: Path)
             operation_index=1,
             path="scripts.yaml",
         )
-        record_live_apply_progress(store, first)
+        record_live_apply_progress(store, first, plan=plan)
         with pytest.raises(StateError, match="previous operation is not verified"):
-            record_live_apply_progress(store, second)
+            record_live_apply_progress(store, second, plan=plan)
 
         verified = transition_live_apply_progress(first, "mutation_verified")
-        record_live_apply_progress(store, verified)
-        stored_second = record_live_apply_progress(store, second)
+        record_live_apply_progress(store, verified, plan=plan)
+        stored_second = record_live_apply_progress(store, second, plan=plan)
         assert stored_second.progress == second
 
         skipped = _progress(
@@ -148,16 +202,17 @@ def test_next_operation_requires_verified_contiguous_predecessor(tmp_path: Path)
             operations_sha256,
             intent_record_sha256,
             operation_index=3,
-            path="scenes.yaml",
+            path="ui-lovelace.yaml",
         )
         with pytest.raises(StateError, match="operations must be contiguous"):
-            record_live_apply_progress(store, skipped)
+            record_live_apply_progress(store, skipped, plan=plan)
 
 
 def test_progress_transition_is_monotonic_and_conflicts_fail_closed(tmp_path: Path) -> None:
     prepared = _prepared()
+    plan = _plan(prepared)
     with StateStore(tmp_path) as store:
-        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared)
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
         started = _progress(
             prepared,
             operations_sha256,
@@ -165,13 +220,13 @@ def test_progress_transition_is_monotonic_and_conflicts_fail_closed(tmp_path: Pa
             operation_index=0,
             path="automations.yaml",
         )
-        record_live_apply_progress(store, started)
+        record_live_apply_progress(store, started, plan=plan)
         verified = transition_live_apply_progress(started, "mutation_verified")
-        durable = record_live_apply_progress(store, verified)
+        durable = record_live_apply_progress(store, verified, plan=plan)
         assert durable.progress.phase == "mutation_verified"
 
         with pytest.raises(StateError, match="transition is not permitted"):
-            record_live_apply_progress(store, started)
+            record_live_apply_progress(store, started, plan=plan)
 
         conflicting = LiveApplyProgress.create(
             deployment_id=started.deployment_id,
@@ -181,14 +236,31 @@ def test_progress_transition_is_monotonic_and_conflicts_fail_closed(tmp_path: Pa
             operation_path_sha256="f" * 64,
             phase="mutation_verified",
         )
-        with pytest.raises(StateError, match="cannot be rebound"):
-            record_live_apply_progress(store, conflicting)
+        with pytest.raises(StateError, match="operation path binding"):
+            record_live_apply_progress(store, conflicting, plan=plan)
+
+
+def test_new_progress_must_match_exact_apply_plan_operation(tmp_path: Path) -> None:
+    prepared = _prepared()
+    plan = _plan(prepared)
+    with StateStore(tmp_path) as store:
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
+        forged = _progress(
+            prepared,
+            operations_sha256,
+            intent_record_sha256,
+            operation_index=0,
+            path="scripts.yaml",
+        )
+        with pytest.raises(StateError, match="operation path binding"):
+            record_live_apply_progress(store, forged, plan=plan)
 
 
 def test_missing_or_changed_intent_binding_fails_closed(tmp_path: Path) -> None:
     prepared = _prepared()
+    plan = _plan(prepared)
     with StateStore(tmp_path) as store:
-        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared)
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
         progress = _progress(
             prepared,
             operations_sha256,
@@ -202,13 +274,14 @@ def test_missing_or_changed_intent_binding_fails_closed(tmp_path: Path) -> None:
         )
         store._connection.commit()
         with pytest.raises(StateError, match="intent"):
-            record_live_apply_progress(store, progress)
+            record_live_apply_progress(store, progress, plan=plan)
 
 
-def test_tampered_progress_fails_closed_without_leaking_persisted_values(tmp_path: Path) -> None:
+def test_plan_identity_drift_from_durable_intent_fails_closed(tmp_path: Path) -> None:
     prepared = _prepared()
+    plan = _plan(prepared)
     with StateStore(tmp_path) as store:
-        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared)
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
         progress = _progress(
             prepared,
             operations_sha256,
@@ -216,7 +289,24 @@ def test_tampered_progress_fails_closed_without_leaking_persisted_values(tmp_pat
             operation_index=0,
             path="automations.yaml",
         )
-        record_live_apply_progress(store, progress)
+        object.__setattr__(plan, "candidate_sha", "9" * 40)
+        with pytest.raises(StateError, match="Apply plan binding"):
+            record_live_apply_progress(store, progress, plan=plan)
+
+
+def test_tampered_progress_fails_closed_without_leaking_persisted_values(tmp_path: Path) -> None:
+    prepared = _prepared()
+    plan = _plan(prepared)
+    with StateStore(tmp_path) as store:
+        operations_sha256, intent_record_sha256 = _prepare_store(store, prepared, plan)
+        progress = _progress(
+            prepared,
+            operations_sha256,
+            intent_record_sha256,
+            operation_index=0,
+            path="automations.yaml",
+        )
+        record_live_apply_progress(store, progress, plan=plan)
 
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
