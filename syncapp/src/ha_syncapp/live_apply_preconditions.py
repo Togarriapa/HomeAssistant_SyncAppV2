@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,14 +66,17 @@ def prove_live_apply_preconditions(
     _validate_operations(before.operations)
 
     verified: list[str] = []
+    root_fd = _open_root(root)
     try:
         for operation in before.operations:
-            _verify_operation(root, operation)
+            _verify_operation(root_fd, operation)
             verified.append(operation.path)
     except LiveApplyPreconditionError:
         raise
     except (OSError, ValueError):
         _reject("live path inspection failed")
+    finally:
+        os.close(root_fd)
 
     if _snapshot_plan(plan) != before:
         _reject("Apply plan changed during inspection")
@@ -91,13 +96,20 @@ def prove_live_apply_preconditions(
 def _validate_root(root: Path) -> Path:
     if not isinstance(root, Path) or not root.is_absolute():
         _reject("Home Assistant root is invalid")
+    return root
+
+
+def _open_root(root: Path) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        info = root.lstat()
+        root_fd = os.open(root, flags)
+        info = os.fstat(root_fd)
     except OSError:
         _reject("Home Assistant root is invalid")
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+    if not stat.S_ISDIR(info.st_mode):
+        os.close(root_fd)
         _reject("Home Assistant root is invalid")
-    return root
+    return root_fd
 
 
 def _snapshot_plan(plan: LiveApplyPlan) -> _PlanSnapshot:
@@ -158,12 +170,48 @@ def _validate_operations(operations: tuple[_OperationSnapshot, ...]) -> None:
                 _reject("Apply plan baseline precondition is invalid")
 
 
-def _verify_operation(root: Path, operation: _OperationSnapshot) -> None:
+def _verify_operation(root_fd: int, operation: _OperationSnapshot) -> None:
     parts = operation.path.split("/")
-    _verify_parent_chain(root, parts[:-1])
-    target = root.joinpath(*parts)
+    parent_fd = _open_parent_chain(root_fd, parts[:-1], operation.status == "added")
+    if parent_fd is None:
+        return
     try:
-        info = target.lstat()
+        _verify_leaf(parent_fd, parts[-1], operation)
+    finally:
+        if parent_fd != root_fd:
+            os.close(parent_fd)
+
+
+def _open_parent_chain(root_fd: int, parts: list[str], added: bool) -> int | None:
+    current_fd = root_fd
+    for part in parts:
+        try:
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=current_fd,
+            )
+        except FileNotFoundError:
+            if current_fd != root_fd:
+                os.close(current_fd)
+            if added:
+                return None
+            _reject("live path precondition mismatch")
+        except OSError as error:
+            if current_fd != root_fd:
+                os.close(current_fd)
+            if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+                _reject("live path type is unsafe")
+            raise
+        if current_fd != root_fd:
+            os.close(current_fd)
+        current_fd = next_fd
+    return current_fd
+
+
+def _verify_leaf(parent_fd: int, name: str, operation: _OperationSnapshot) -> None:
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
         if operation.status == "added":
             return
@@ -177,23 +225,32 @@ def _verify_operation(root: Path, operation: _OperationSnapshot) -> None:
     baseline_object_id = operation.baseline_object_id
     if baseline_object_id is None:
         _reject("Apply plan baseline precondition is invalid")
-    data = target.read_bytes()
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            _reject("live path type is unsafe")
+        raise
+    try:
+        opened_info = os.fstat(fd)
+        if not stat.S_ISREG(opened_info.st_mode):
+            _reject("live path type is unsafe")
+        data = _read_all(fd)
+    finally:
+        os.close(fd)
     if _git_blob_object_id(data, len(baseline_object_id)) != baseline_object_id:
         _reject("live path precondition mismatch")
-    if _git_mode(info.st_mode) != operation.baseline_mode:
+    if _git_mode(opened_info.st_mode) != operation.baseline_mode:
         _reject("live path precondition mismatch")
 
 
-def _verify_parent_chain(root: Path, parts: list[str]) -> None:
-    current = root
-    for part in parts:
-        current = current / part
-        try:
-            info = current.lstat()
-        except FileNotFoundError:
-            return
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            _reject("live path type is unsafe")
+def _read_all(fd: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
 
 
 def _git_blob_object_id(data: bytes, width: int) -> str:
