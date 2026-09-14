@@ -9,7 +9,11 @@ from ha_syncapp.apply_authorization import (
     authorize_candidate_apply,
 )
 from ha_syncapp.candidate_backup import CandidateBackupEvidence
-from ha_syncapp.preapply_freshness import PreApplyFreshnessEvidence
+from ha_syncapp.github_repo import BranchHead
+from ha_syncapp.preapply_freshness import (
+    PreApplyFreshnessEvidence,
+    reprove_preapply_repo_heads,
+)
 from ha_syncapp.prepared_deployment import PreparedDeployment
 
 
@@ -31,26 +35,25 @@ def _prepared() -> PreparedDeployment:
     return PreparedDeployment(str(uuid4()), _evidence(), datetime.now(UTC))
 
 
-def _freshness(evidence: CandidateBackupEvidence) -> PreApplyFreshnessEvidence:
-    return PreApplyFreshnessEvidence(
-        target=evidence.target,
-        repository_id=evidence.repository_id,
-        baseline_sha=evidence.baseline_sha,
-        candidate_sha=evidence.candidate_sha,
-        backup_slug=evidence.backup_slug,
-        stage_manifest_sha256=evidence.stage_manifest_sha256,
-        runtime_sha256=evidence.runtime_sha256,
-        risk_level=evidence.risk_level,
-        core_version=evidence.core_version,
+def _freshness(prepared: PreparedDeployment) -> PreApplyFreshnessEvidence:
+    evidence = prepared.evidence
+
+    def fetcher(target, token, *, expected_id, branch="main"):
+        sha = evidence.baseline_sha if branch == "main" else evidence.candidate_sha
+        return BranchHead(target, expected_id, branch, sha)
+
+    return reprove_preapply_repo_heads(
+        prepared,
+        evidence,
+        token="secret-token",
+        head_fetcher=fetcher,
     )
 
 
 def test_exact_reproven_chain_produces_immutable_authorization():
     prepared = _prepared()
 
-    result = authorize_candidate_apply(
-        prepared, prepared.evidence, _freshness(prepared.evidence)
-    )
+    result = authorize_candidate_apply(prepared, prepared.evidence, _freshness(prepared))
 
     assert result.deployment_id == prepared.deployment_id
     assert result.target == prepared.evidence.target
@@ -83,7 +86,8 @@ def test_exact_reproven_chain_produces_immutable_authorization():
 )
 def test_any_freshness_binding_drift_fails_closed(field, value):
     prepared = _prepared()
-    freshness = replace(_freshness(prepared.evidence), **{field: value})
+    freshness = _freshness(prepared)
+    object.__setattr__(freshness, field, value)
 
     with pytest.raises(ApplyAuthorizationError, match="freshness"):
         authorize_candidate_apply(prepared, prepared.evidence, freshness)
@@ -94,7 +98,7 @@ def test_backup_must_be_exact_prepared_binding():
     wrong_backup = replace(prepared.evidence, backup_slug="backup_other")
 
     with pytest.raises(ApplyAuthorizationError, match="backup"):
-        authorize_candidate_apply(prepared, wrong_backup, _freshness(prepared.evidence))
+        authorize_candidate_apply(prepared, wrong_backup, _freshness(prepared))
 
 
 def test_wrong_input_types_fail_closed_without_nested_details():
@@ -102,7 +106,7 @@ def test_wrong_input_types_fail_closed_without_nested_details():
 
     with pytest.raises(ApplyAuthorizationError) as caught:
         authorize_candidate_apply(  # type: ignore[arg-type]
-            prepared, object(), _freshness(prepared.evidence)
+            prepared, object(), _freshness(prepared)
         )
 
     assert caught.value.__suppress_context__ is True
