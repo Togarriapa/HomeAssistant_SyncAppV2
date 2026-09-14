@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 
 import pytest
-
 from ha_syncapp.live_apply_intent import LiveApplyIntent, LiveApplyIntentError
 
 
@@ -26,4 +25,4 @@ def test_live_apply_intent_is_not_publicly_constructible_from_scalar_values() ->
 
 
 def test_live_apply_intent_is_immutable() -> None:
-    assert getattr(LiveApplyIntent, "__dataclass_params__").frozen is True
+    assert LiveApplyIntent.__dataclass_params__.frozen is True
