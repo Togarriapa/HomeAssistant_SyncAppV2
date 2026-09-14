@@ -166,9 +166,7 @@ def _chain(
 
 
 def test_modified_file_is_journaled_then_atomically_verified(tmp_path: Path, monkeypatch) -> None:
-    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-        tmp_path, monkeypatch
-    )
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     live = Path(preconditions.root)
     try:
         result = apply_live_operation(
@@ -188,10 +186,10 @@ def test_modified_file_is_journaled_then_atomically_verified(tmp_path: Path, mon
         store.close()
 
 
-def test_progress_persistence_failure_happens_before_any_mutation(tmp_path: Path, monkeypatch) -> None:
-    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-        tmp_path, monkeypatch
-    )
+def test_progress_persistence_failure_happens_before_any_mutation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     live = Path(preconditions.root)
 
     def fail_record(*_args, **_kwargs):
@@ -214,10 +212,10 @@ def test_progress_persistence_failure_happens_before_any_mutation(tmp_path: Path
         store.close()
 
 
-def test_crash_after_journal_before_write_recovers_as_uncertain(tmp_path: Path, monkeypatch) -> None:
-    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-        tmp_path, monkeypatch
-    )
+def test_crash_after_journal_before_write_recovers_as_uncertain(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     live = Path(preconditions.root)
 
     def crash(*_args, **_kwargs):
@@ -253,9 +251,7 @@ def test_crash_after_journal_before_write_recovers_as_uncertain(tmp_path: Path, 
 
 
 def test_stage_tamper_fails_before_journal_or_live_mutation(tmp_path: Path, monkeypatch) -> None:
-    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-        tmp_path, monkeypatch
-    )
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     live = Path(preconditions.root)
 
     def reject(_stage):
