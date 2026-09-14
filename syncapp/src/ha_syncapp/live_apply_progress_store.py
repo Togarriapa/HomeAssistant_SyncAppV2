@@ -15,6 +15,7 @@ from .live_apply_plan import LiveApplyPlan
 from .live_apply_progress import (
     LiveApplyProgress,
     LiveApplyProgressError,
+    live_apply_plan_operations_sha256,
     transition_live_apply_progress,
     validate_live_apply_progress_plan_binding,
 )
@@ -23,6 +24,15 @@ from .state import StateError, StateStore
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _MAX_DISCOVERABLE_PROGRESS = 4096
+
+
+@dataclass(frozen=True, slots=True)
+class LiveApplyRecoveryDecision:
+    """Deterministic, non-authoritative restart/retrigger recovery classification."""
+
+    action: str
+    operation_index: int | None
+    operation_path_sha256: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,21 +284,60 @@ def discover_live_apply_progress(
         raise StateError("Unable to discover live Apply progress") from None
 
 
-def _revalidate_plan_binding(
+def discover_live_apply_recovery(
     store: StateStore,
-    progress: LiveApplyProgress,
     plan: LiveApplyPlan,
-) -> None:
+) -> LiveApplyRecoveryDecision:
+    """Classify the only safe restart/retrigger action without granting write authority."""
+    intent = _revalidate_plan_identity(store, plan)
+    records = discover_live_apply_progress(store, intent.deployment_id)
+    for record in records:
+        _revalidate_plan_binding(store, record.progress, plan)
+
+    operation_count = len(plan.operations)
+    if len(records) > operation_count:
+        _invalid_record()
+    if not records:
+        if operation_count == 0:
+            return LiveApplyRecoveryDecision("complete", None, None)
+        return LiveApplyRecoveryDecision(
+            "start_next",
+            0,
+            hashlib.sha256(plan.operations[0].path.encode("utf-8")).hexdigest(),
+        )
+
+    current = records[-1]
+    if current.phase == "mutation_started":
+        return LiveApplyRecoveryDecision(
+            "reconcile_uncertain",
+            current.operation_index,
+            current.operation_path_sha256,
+        )
+    if current.phase == "blocked":
+        return LiveApplyRecoveryDecision(
+            "blocked",
+            current.operation_index,
+            current.operation_path_sha256,
+        )
+    if len(records) == operation_count:
+        return LiveApplyRecoveryDecision("complete", None, None)
+
+    next_index = len(records)
+    return LiveApplyRecoveryDecision(
+        "start_next",
+        next_index,
+        hashlib.sha256(plan.operations[next_index].path.encode("utf-8")).hexdigest(),
+    )
+
+
+def _revalidate_plan_identity(store: StateStore, plan: LiveApplyPlan):
+    if type(store) is not StateStore:
+        raise StateError("Invalid live Apply progress store")
     if type(plan) is not LiveApplyPlan:
         raise StateError("Invalid live Apply progress Apply plan")
-    intent = load_live_apply_intent(store, progress.deployment_id)
+    intent = load_live_apply_intent(store, plan.deployment_id)
     if intent is None:
         raise StateError("Live Apply progress requires matching durable intent")
-    if (
-        intent.record_sha256 != progress.intent_record_sha256
-        or intent.operations_sha256 != progress.operations_sha256
-    ):
-        raise StateError("Live Apply progress durable intent binding mismatch")
     if (
         plan.deployment_id,
         plan.target,
@@ -305,6 +354,28 @@ def _revalidate_plan_binding(
         intent.stage_manifest_sha256,
     ):
         raise StateError("Live Apply progress Apply plan binding mismatch")
+    try:
+        operations_sha256 = live_apply_plan_operations_sha256(plan)
+    except LiveApplyProgressError as error:
+        raise StateError(str(error)) from None
+    if operations_sha256 != intent.operations_sha256:
+        raise StateError("Live Apply progress durable intent binding mismatch")
+    return intent
+
+
+def _revalidate_plan_binding(
+    store: StateStore,
+    progress: LiveApplyProgress,
+    plan: LiveApplyPlan,
+) -> None:
+    intent = _revalidate_plan_identity(store, plan)
+    if intent.deployment_id != progress.deployment_id:
+        raise StateError("Live Apply progress durable intent binding mismatch")
+    if (
+        intent.record_sha256 != progress.intent_record_sha256
+        or intent.operations_sha256 != progress.operations_sha256
+    ):
+        raise StateError("Live Apply progress durable intent binding mismatch")
     try:
         validate_live_apply_progress_plan_binding(progress, plan)
     except LiveApplyProgressError as error:
