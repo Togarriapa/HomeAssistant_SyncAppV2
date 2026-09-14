@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
+
+from .live_apply_intent import LiveApplyIntent
+from .live_apply_plan import LiveApplyOperation, LiveApplyPlan
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _PHASES = {"mutation_started", "mutation_verified", "blocked"}
@@ -68,6 +73,57 @@ class LiveApplyProgress:
         return progress
 
 
+def start_live_apply_progress(
+    intent: LiveApplyIntent,
+    intent_record_sha256: str,
+    plan: LiveApplyPlan,
+    *,
+    operation_index: int,
+) -> LiveApplyProgress:
+    """Issue progress only for an operation from the exact bound plan."""
+    if type(intent) is not LiveApplyIntent:
+        raise LiveApplyProgressError("live Apply intent is invalid")
+    if not _valid_hash(intent_record_sha256):
+        raise LiveApplyProgressError("intent record binding is invalid")
+    if type(plan) is not LiveApplyPlan:
+        raise LiveApplyProgressError("Apply plan evidence is invalid")
+    if (
+        plan.deployment_id,
+        plan.target,
+        plan.repository_id,
+        plan.baseline_sha,
+        plan.candidate_sha,
+        plan.stage_manifest_sha256,
+    ) != (
+        intent.deployment_id,
+        intent.target,
+        intent.repository_id,
+        intent.baseline_sha,
+        intent.candidate_sha,
+        intent.stage_manifest_sha256,
+    ):
+        raise LiveApplyProgressError("Apply plan binding does not match live Apply intent")
+
+    operations = _snapshot_operations(plan.operations)
+    operations_sha256 = hashlib.sha256(
+        json.dumps(operations, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+    if operations_sha256 != intent.operations_sha256:
+        raise LiveApplyProgressError("operations binding does not match live Apply intent")
+    if type(operation_index) is not int or not 0 <= operation_index < len(operations):
+        raise LiveApplyProgressError("operation index is invalid")
+
+    operation = plan.operations[operation_index]
+    return LiveApplyProgress.create(
+        deployment_id=intent.deployment_id,
+        intent_record_sha256=intent_record_sha256,
+        operations_sha256=operations_sha256,
+        operation_index=operation_index,
+        operation_path_sha256=hashlib.sha256(operation.path.encode("utf-8")).hexdigest(),
+        phase="mutation_started",
+    )
+
+
 def transition_live_apply_progress(
     current: LiveApplyProgress,
     destination: str,
@@ -89,6 +145,44 @@ def transition_live_apply_progress(
         operation_path_sha256=current.operation_path_sha256,
         phase=destination,
     )
+
+
+def _snapshot_operations(operations: object) -> tuple[tuple[object, ...], ...]:
+    if type(operations) is not tuple:
+        raise LiveApplyProgressError("Apply plan operations are invalid")
+    result: list[tuple[object, ...]] = []
+    previous: bytes | None = None
+    seen: set[str] = set()
+    for operation in operations:
+        if type(operation) is not LiveApplyOperation:
+            raise LiveApplyProgressError("Apply plan operations are invalid")
+        if not _safe_path(operation.path):
+            raise LiveApplyProgressError("Apply plan operations are invalid")
+        key = operation.path.encode("utf-8")
+        if operation.path in seen or (previous is not None and key <= previous):
+            raise LiveApplyProgressError("Apply plan operations are not deterministically ordered")
+        previous = key
+        seen.add(operation.path)
+        result.append(
+            (
+                operation.path,
+                operation.status,
+                operation.baseline_mode,
+                operation.baseline_object_id,
+                operation.candidate_mode,
+                operation.candidate_object_id,
+                operation.staged_size,
+                operation.staged_sha256,
+            )
+        )
+    return tuple(result)
+
+
+def _safe_path(value: object) -> bool:
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        return False
+    parts = value.split("/")
+    return not any(part in {"", ".", ".."} or part.casefold() == ".git" for part in parts)
 
 
 def _valid_hash(value: object) -> bool:
