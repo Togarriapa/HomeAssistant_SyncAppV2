@@ -18,7 +18,10 @@ class PreApplyFreshnessError(RuntimeError):
     """Fresh trusted Repo B heads could not be proven for the prepared candidate."""
 
 
-@dataclass(frozen=True, slots=True)
+_FRESHNESS_PRODUCER = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class PreApplyFreshnessEvidence:
     """Immutable proof that Repo B still matches one prepared candidate and backup."""
 
@@ -31,6 +34,53 @@ class PreApplyFreshnessEvidence:
     runtime_sha256: str
     risk_level: str
     core_version: str
+
+    def __init__(
+        self,
+        *,
+        target: str,
+        repository_id: int,
+        baseline_sha: str,
+        candidate_sha: str,
+        backup_slug: str,
+        stage_manifest_sha256: str,
+        runtime_sha256: str,
+        risk_level: str,
+        core_version: str,
+        _producer: object | None = None,
+    ) -> None:
+        if _producer is not _FRESHNESS_PRODUCER:
+            raise PreApplyFreshnessError(
+                "pre-Apply freshness evidence must be created by the trusted producer"
+            ) from None
+        values = (
+            ("target", target),
+            ("repository_id", repository_id),
+            ("baseline_sha", baseline_sha),
+            ("candidate_sha", candidate_sha),
+            ("backup_slug", backup_slug),
+            ("stage_manifest_sha256", stage_manifest_sha256),
+            ("runtime_sha256", runtime_sha256),
+            ("risk_level", risk_level),
+            ("core_version", core_version),
+        )
+        for name, value in values:
+            object.__setattr__(self, name, value)
+
+    @classmethod
+    def _from_reproof(cls, evidence: CandidateBackupEvidence) -> PreApplyFreshnessEvidence:
+        return cls(
+            target=evidence.target,
+            repository_id=evidence.repository_id,
+            baseline_sha=evidence.baseline_sha,
+            candidate_sha=evidence.candidate_sha,
+            backup_slug=evidence.backup_slug,
+            stage_manifest_sha256=evidence.stage_manifest_sha256,
+            runtime_sha256=evidence.runtime_sha256,
+            risk_level=evidence.risk_level,
+            core_version=evidence.core_version,
+            _producer=_FRESHNESS_PRODUCER,
+        )
 
 
 TrustedHeadFetcher = Callable[..., BranchHead]
@@ -83,17 +133,7 @@ def reprove_preapply_repo_heads(
         # defense before freshness evidence is returned.
         _validate_binding(prepared, backup)
 
-        return PreApplyFreshnessEvidence(
-            target=expected.target,
-            repository_id=expected.repository_id,
-            baseline_sha=expected.baseline_sha,
-            candidate_sha=expected.candidate_sha,
-            backup_slug=expected.backup_slug,
-            stage_manifest_sha256=expected.stage_manifest_sha256,
-            runtime_sha256=expected.runtime_sha256,
-            risk_level=expected.risk_level,
-            core_version=expected.core_version,
-        )
+        return PreApplyFreshnessEvidence._from_reproof(expected)
     except PreApplyFreshnessError:
         raise
     except RepositoryVerificationError:
