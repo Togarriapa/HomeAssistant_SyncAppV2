@@ -211,10 +211,11 @@ def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Pat
         db.execute("DROP TABLE repository_binding")
         db.execute("DROP TABLE synchronization_baseline")
         db.execute("DROP TABLE prepared_deployment")
+        db.execute("DROP TABLE live_apply_intent")
         db.execute("PRAGMA user_version = 2")
     with StateStore(tmp_path) as store:
         store.bind_repository("Owner/Home", 123)
         assert store.repository_id("Owner/Home") == 123
         assert store.claim_work() is not None
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
