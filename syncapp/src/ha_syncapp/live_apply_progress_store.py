@@ -10,7 +10,7 @@ from dataclasses import astuple, dataclass
 from datetime import UTC, datetime
 from typing import NoReturn
 
-from .live_apply_intent_store import load_live_apply_intent
+from .live_apply_intent_store import PersistedLiveApplyIntent, load_live_apply_intent
 from .live_apply_plan import LiveApplyPlan
 from .live_apply_progress import (
     LiveApplyProgress,
@@ -330,7 +330,10 @@ def discover_live_apply_recovery(
     )
 
 
-def _revalidate_plan_identity(store: StateStore, plan: LiveApplyPlan):
+def _revalidate_plan_identity(
+    store: StateStore,
+    plan: LiveApplyPlan,
+) -> PersistedLiveApplyIntent:
     if type(store) is not StateStore:
         raise StateError("Invalid live Apply progress store")
     if type(plan) is not LiveApplyPlan:
