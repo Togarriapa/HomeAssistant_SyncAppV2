@@ -184,10 +184,10 @@ def record_live_apply_intent(
                 )
             except sqlite3.IntegrityError:
                 raise StateError("Live Apply intent cannot be rebound") from None
-        persisted = load_live_apply_intent(store, intent.deployment_id)
-        if persisted is None or not _same_intent(persisted, expected):
+        loaded = load_live_apply_intent(store, intent.deployment_id)
+        if loaded is None or not _same_intent(loaded, expected):
             raise StateError("Live Apply intent was not persisted")
-        return persisted
+        return loaded
     except StateError:
         raise
     except sqlite3.Error:
@@ -257,7 +257,8 @@ def _select_intent_row(
         return None
     if len(rows) != 1:
         _invalid_record()
-    return rows[0]
+    row: tuple[object, ...] = tuple(rows[0])
+    return row
 
 
 def _parse_and_revalidate(
