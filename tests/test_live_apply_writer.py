@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from ha_syncapp import live_apply_writer
 from ha_syncapp.apply_authorization import ApplyAuthorization
 from ha_syncapp.candidate_backup import CandidateBackupEvidence
 from ha_syncapp.candidate_stage import CandidateStage, CandidateStageEntry
@@ -309,3 +310,47 @@ def test_added_deleted_and_mode_only_operations_are_verified(tmp_path: Path, mon
                 assert (target.stat().st_mode & 0o777) == mode
         finally:
             store.close()
+
+
+def test_root_replacement_after_final_precondition_proof_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+    live = Path(preconditions.root)
+    original = live.with_name("homeassistant-original")
+    real_prove = live_apply_writer.prove_live_apply_operation_precondition
+    calls = 0
+
+    def prove_then_replace_root(*args, **kwargs):
+        nonlocal calls
+        proof = real_prove(*args, **kwargs)
+        calls += 1
+        if calls == 2:
+            live.rename(original)
+            live.mkdir()
+            (live / "automations.yaml").write_bytes(b"baseline\n")
+            os.chmod(live / "automations.yaml", 0o644)
+        return proof
+
+    monkeypatch.setattr(
+        live_apply_writer,
+        "prove_live_apply_operation_precondition",
+        prove_then_replace_root,
+    )
+    try:
+        with pytest.raises(LiveApplyWriterError, match="precondition changed after journaling"):
+            apply_live_operation(
+                store,
+                authorization,
+                stage_evidence,
+                stage,
+                plan,
+                preconditions,
+                operation_index=0,
+            )
+        assert (original / "automations.yaml").read_bytes() == b"baseline\n"
+        assert (live / "automations.yaml").read_bytes() == b"baseline\n"
+        progress = discover_live_apply_progress(store, plan.deployment_id)
+        assert progress[-1].phase == "blocked"
+    finally:
+        store.close()
