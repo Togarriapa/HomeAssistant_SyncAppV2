@@ -19,15 +19,19 @@ def _git_blob_id(data: bytes, algorithm: str = "sha1") -> str:
 
 
 def _plan(*operations: LiveApplyOperation) -> LiveApplyPlan:
-    return LiveApplyPlan(
-        deployment_id="deploy-1",
-        target="owner/private-repo",
-        repository_id=123,
-        baseline_sha="1" * 40,
-        candidate_sha="2" * 40,
-        stage_manifest_sha256="3" * 64,
-        operations=operations,
-    )
+    plan = object.__new__(LiveApplyPlan)
+    values = {
+        "deployment_id": "deploy-1",
+        "target": "owner/private-repo",
+        "repository_id": 123,
+        "baseline_sha": "1" * 40,
+        "candidate_sha": "2" * 40,
+        "stage_manifest_sha256": "3" * 64,
+        "operations": operations,
+    }
+    for name, value in values.items():
+        object.__setattr__(plan, name, value)
+    return plan
 
 
 def _modified(path: str, baseline: bytes, *, mode: str = "100644") -> LiveApplyOperation:
