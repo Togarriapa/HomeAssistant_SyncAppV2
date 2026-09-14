@@ -73,6 +73,16 @@ class LiveApplyProgress:
         return progress
 
 
+def live_apply_plan_operations_sha256(plan: LiveApplyPlan) -> str:
+    """Return the deterministic digest of an exact ordered Apply plan."""
+    if type(plan) is not LiveApplyPlan:
+        raise LiveApplyProgressError("Apply plan evidence is invalid")
+    operations = _snapshot_operations(plan.operations)
+    return hashlib.sha256(
+        json.dumps(operations, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+
+
 def start_live_apply_progress(
     intent: LiveApplyIntent,
     intent_record_sha256: str,
@@ -104,13 +114,10 @@ def start_live_apply_progress(
     ):
         raise LiveApplyProgressError("Apply plan binding does not match live Apply intent")
 
-    operations = _snapshot_operations(plan.operations)
-    operations_sha256 = hashlib.sha256(
-        json.dumps(operations, ensure_ascii=True, separators=(",", ":")).encode("ascii")
-    ).hexdigest()
+    operations_sha256 = live_apply_plan_operations_sha256(plan)
     if operations_sha256 != intent.operations_sha256:
         raise LiveApplyProgressError("operations binding does not match live Apply intent")
-    if type(operation_index) is not int or not 0 <= operation_index < len(operations):
+    if type(operation_index) is not int or not 0 <= operation_index < len(plan.operations):
         raise LiveApplyProgressError("operation index is invalid")
 
     operation = plan.operations[operation_index]
@@ -138,13 +145,10 @@ def validate_live_apply_progress_plan_binding(
     if progress.deployment_id != plan.deployment_id:
         raise LiveApplyProgressError("Apply plan deployment binding does not match progress")
 
-    operations = _snapshot_operations(plan.operations)
-    operations_sha256 = hashlib.sha256(
-        json.dumps(operations, ensure_ascii=True, separators=(",", ":")).encode("ascii")
-    ).hexdigest()
+    operations_sha256 = live_apply_plan_operations_sha256(plan)
     if operations_sha256 != progress.operations_sha256:
         raise LiveApplyProgressError("operations binding does not match Apply plan")
-    if progress.operation_index >= len(operations):
+    if progress.operation_index >= len(plan.operations):
         raise LiveApplyProgressError("operation index is invalid")
     operation = plan.operations[progress.operation_index]
     expected_path_sha256 = hashlib.sha256(operation.path.encode("utf-8")).hexdigest()
