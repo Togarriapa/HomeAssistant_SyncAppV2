@@ -110,6 +110,7 @@ def test_schema_v6_migrates_log_retention_intent_without_losing_existing_state(
     path = data / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE log_retention_intent")
+        db.execute("DROP TABLE live_apply_intent")
         db.execute("PRAGMA user_version = 6")
 
     with StateStore(data) as migrated:
@@ -124,4 +125,4 @@ def test_schema_v6_migrates_log_retention_intent_without_losing_existing_state(
         assert baseline.commit_sha == EXPECTED
 
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
