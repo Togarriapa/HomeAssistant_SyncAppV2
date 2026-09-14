@@ -40,9 +40,9 @@ class LiveApplyOperation:
     staged_sha256: str | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class LiveApplyPlan:
-    """Ephemeral immutable authorization data for one exact future Apply."""
+    """Ephemeral immutable authorization data issued only by the validated planner."""
 
     deployment_id: str
     target: str
@@ -97,15 +97,19 @@ def build_live_apply_plan(
         _reject("candidate change evidence changed during verification")
 
     operations = _build_operations(stage_before[5], changes_before[4])
-    return LiveApplyPlan(
-        deployment_id=evidence_before[0],
-        target=evidence_before[1],
-        repository_id=evidence_before[2],
-        baseline_sha=changes_before[2],
-        candidate_sha=evidence_before[3],
-        stage_manifest_sha256=evidence_before[4],
-        operations=operations,
-    )
+    plan = object.__new__(LiveApplyPlan)
+    values = {
+        "deployment_id": evidence_before[0],
+        "target": evidence_before[1],
+        "repository_id": evidence_before[2],
+        "baseline_sha": changes_before[2],
+        "candidate_sha": evidence_before[3],
+        "stage_manifest_sha256": evidence_before[4],
+        "operations": operations,
+    }
+    for name, value in values.items():
+        object.__setattr__(plan, name, value)
+    return plan
 
 
 def _validate_input_types(
