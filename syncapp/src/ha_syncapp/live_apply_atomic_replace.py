@@ -56,6 +56,37 @@ def exchange_leaf(parent_fd: int, temporary: str, target: str) -> None:
     raise OSError(error, os.strerror(error))
 
 
+def exchange_verified_baseline(
+    parent_fd: int,
+    temporary: str,
+    target: str,
+    *,
+    expected_object_id: str,
+    expected_mode: str,
+) -> bool:
+    """Exchange a candidate only when the displaced target is the exact baseline.
+
+    ``False`` means the displaced object did not match and the original names were
+    restored. If restoration cannot be completed, raise rather than claiming a
+    safe deterministic block because the live mutation outcome is then uncertain.
+    """
+    exchange_leaf(parent_fd, temporary, target)
+    if verify_displaced_leaf(
+        parent_fd,
+        temporary,
+        expected_object_id=expected_object_id,
+        expected_mode=expected_mode,
+    ):
+        return True
+    try:
+        exchange_leaf(parent_fd, temporary, target)
+    except (LiveApplyAtomicReplaceError, OSError) as exc:
+        raise LiveApplyAtomicReplaceError(
+            "atomic exchange baseline mismatch could not be safely reversed; live mutation outcome is uncertain"
+        ) from exc
+    return False
+
+
 def verify_displaced_leaf(
     parent_fd: int,
     displaced: str,
