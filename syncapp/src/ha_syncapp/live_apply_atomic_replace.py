@@ -82,7 +82,8 @@ def exchange_verified_baseline(
         exchange_leaf(parent_fd, temporary, target)
     except (LiveApplyAtomicReplaceError, OSError) as exc:
         raise LiveApplyAtomicReplaceError(
-            "atomic exchange baseline mismatch could not be safely reversed; live mutation outcome is uncertain"
+            "atomic exchange baseline mismatch could not be safely reversed; "
+            "live mutation outcome is uncertain"
         ) from exc
     return False
 
