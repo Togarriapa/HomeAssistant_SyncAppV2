@@ -73,10 +73,7 @@ def verify_displaced_leaf(
         return False
     if expected_mode not in {"100644", "100755"}:
         return False
-    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {
-        40,
-        64,
-    }:
+    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {40, 64}:
         return False
     try:
         fd = os.open(displaced, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
