@@ -1,10 +1,11 @@
-"""Linux atomic exchange primitive for race-safe live Apply file replacement."""
+"""Linux atomic exchange primitives for race-safe live Apply file replacement."""
 
 from __future__ import annotations
 
 import ctypes
-import errno
+import hashlib
 import os
+import stat
 from typing import NoReturn
 
 _RENAME_EXCHANGE = 2
@@ -18,7 +19,7 @@ def exchange_leaf(parent_fd: int, temporary: str, target: str) -> None:
     """Atomically exchange two names in one already-verified parent directory.
 
     After success, ``target`` names the prepared candidate and ``temporary`` names
-    the exact object displaced from ``target``.  The caller must verify that
+    the exact object displaced from ``target``. The caller must verify that
     displaced object before deciding whether to keep the exchange or exchange
     the names back.
     """
@@ -44,9 +45,68 @@ def exchange_leaf(parent_fd: int, temporary: str, target: str) -> None:
     if result == 0:
         return
     error = ctypes.get_errno()
-    if error in {errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP}:
+    if error in {38, 22, 95}:  # ENOSYS, EINVAL, EOPNOTSUPP
         _reject("atomic exchange is unavailable on this filesystem")
     raise OSError(error, os.strerror(error))
+
+
+def verify_displaced_leaf(
+    parent_fd: int,
+    displaced: str,
+    *,
+    expected_object_id: str,
+    expected_mode: str,
+) -> bool:
+    """Verify the exact regular file displaced by an exchange, without following links.
+
+    This verifier is intentionally read-only. A mismatch returns ``False`` so the
+    caller can exchange the names back before classifying the operation as blocked.
+    Unsafe arguments or an unavailable displaced object fail closed with ``False``.
+    """
+    if type(parent_fd) is not int or parent_fd < 0 or not _safe_leaf(displaced):
+        return False
+    if expected_mode not in {"100644", "100755"}:
+        return False
+    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {40, 64}:
+        return False
+    try:
+        fd = os.open(displaced, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        data = _read_all(fd)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    return _git_mode(info.st_mode) == expected_mode and _git_blob_object_id(
+        data, len(expected_object_id)
+    ) == expected_object_id
+
+
+def _read_all(fd: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _git_blob_object_id(data: bytes, width: int) -> str:
+    payload = f"blob {len(data)}\0".encode() + data
+    if width == 40:
+        return hashlib.sha1(payload, usedforsecurity=False).hexdigest()
+    if width == 64:
+        return hashlib.sha256(payload).hexdigest()
+    return ""
+
+
+def _git_mode(mode: int) -> str:
+    return "100755" if mode & 0o111 else "100644"
 
 
 def _safe_leaf(value: str) -> bool:
