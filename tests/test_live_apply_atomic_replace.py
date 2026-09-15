@@ -5,10 +5,10 @@ import os
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_atomic_replace import (
     LiveApplyAtomicReplaceError,
     exchange_leaf,
+    exchange_verified_baseline,
     verify_displaced_leaf,
 )
 
@@ -52,6 +52,57 @@ def test_exchange_leaf_can_be_reversed_without_losing_raced_object(tmp_path: Pat
         os.close(parent_fd)
 
     assert target.read_bytes() == b"changed-after-proof\n"
+    assert temporary.read_bytes() == b"candidate\n"
+
+
+def test_exchange_verified_baseline_keeps_candidate_for_exact_baseline(tmp_path: Path) -> None:
+    baseline = b"baseline\n"
+    parent = tmp_path / "homeassistant"
+    parent.mkdir()
+    target = parent / "automations.yaml"
+    temporary = parent / ".syncapp-candidate.tmp"
+    target.write_bytes(baseline)
+    temporary.write_bytes(b"candidate\n")
+
+    parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        assert exchange_verified_baseline(
+            parent_fd,
+            temporary.name,
+            target.name,
+            expected_object_id=_blob_id(baseline),
+            expected_mode="100644",
+        )
+    finally:
+        os.close(parent_fd)
+
+    assert target.read_bytes() == b"candidate\n"
+    assert temporary.read_bytes() == baseline
+
+
+def test_exchange_verified_baseline_restores_changed_target(tmp_path: Path) -> None:
+    baseline = b"baseline\n"
+    raced = b"changed-after-proof\n"
+    parent = tmp_path / "homeassistant"
+    parent.mkdir()
+    target = parent / "automations.yaml"
+    temporary = parent / ".syncapp-candidate.tmp"
+    target.write_bytes(raced)
+    temporary.write_bytes(b"candidate\n")
+
+    parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        assert not exchange_verified_baseline(
+            parent_fd,
+            temporary.name,
+            target.name,
+            expected_object_id=_blob_id(baseline),
+            expected_mode="100644",
+        )
+    finally:
+        os.close(parent_fd)
+
+    assert target.read_bytes() == raced
     assert temporary.read_bytes() == b"candidate\n"
 
 
