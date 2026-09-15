@@ -32,7 +32,13 @@ def exchange_leaf(parent_fd: int, temporary: str, target: str) -> None:
     renameat2 = getattr(libc, "renameat2", None)
     if renameat2 is None:
         _reject("atomic exchange is unavailable on this platform")
-    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
     renameat2.restype = ctypes.c_int
 
     result = renameat2(
@@ -110,7 +116,12 @@ def _git_mode(mode: int) -> str:
 
 
 def _safe_leaf(value: str) -> bool:
-    return bool(value) and value not in {".", ".."} and "/" not in value and "\x00" not in value
+    return (
+        bool(value)
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\x00" not in value
+    )
 
 
 def _reject(message: str) -> NoReturn:
