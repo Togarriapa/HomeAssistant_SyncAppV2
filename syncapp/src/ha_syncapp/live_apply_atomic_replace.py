@@ -88,9 +88,10 @@ def verify_displaced_leaf(
         return False
     finally:
         os.close(fd)
-    return _git_mode(info.st_mode) == expected_mode and _git_blob_object_id(
-        data, len(expected_object_id)
-    ) == expected_object_id
+    return (
+        _git_mode(info.st_mode) == expected_mode
+        and _git_blob_object_id(data, len(expected_object_id)) == expected_object_id
+    )
 
 
 def _read_all(fd: int) -> bytes:
@@ -116,12 +117,7 @@ def _git_mode(mode: int) -> str:
 
 
 def _safe_leaf(value: str) -> bool:
-    return (
-        bool(value)
-        and value not in {".", ".."}
-        and "/" not in value
-        and "\x00" not in value
-    )
+    return bool(value) and value not in {".", ".."} and "/" not in value and "\x00" not in value
 
 
 def _reject(message: str) -> NoReturn:
