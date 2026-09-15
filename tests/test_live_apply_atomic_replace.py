@@ -141,8 +141,9 @@ def test_verify_displaced_leaf_rejects_raced_content_or_mode(tmp_path: Path) -> 
 
 
 def test_verify_displaced_leaf_fails_closed_for_symlink(tmp_path: Path) -> None:
+    baseline = b"baseline\n"
     target = tmp_path / "target"
-    target.write_bytes(b"baseline\n")
+    target.write_bytes(baseline)
     displaced = tmp_path / ".syncapp-displaced.tmp"
     displaced.symlink_to(target)
     parent_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
