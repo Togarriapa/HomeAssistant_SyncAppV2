@@ -159,6 +159,7 @@ def _chain(
 
     preconditions = prove_live_apply_preconditions(plan, live)
     store = StateStore(tmp_path / "state")
+    store.__enter__()
     store.bind_repository(backup.target, backup.repository_id)
     store.record_prepared_deployment(prepared.deployment_id, backup)
     record_live_apply_intent(store, authorization, stage_evidence, plan, preconditions)
@@ -166,25 +167,23 @@ def _chain(
     return store, authorization, stage_evidence, stage, plan, preconditions
 
 
+def _close(store: StateStore) -> None:
+    store.__exit__(None, None, None)
+
+
 def test_modified_file_is_journaled_then_atomically_verified(tmp_path: Path, monkeypatch) -> None:
     store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     live = Path(preconditions.root)
     try:
         result = apply_live_operation(
-            store,
-            authorization,
-            stage_evidence,
-            stage,
-            plan,
-            preconditions,
-            operation_index=0,
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
         )
         assert result.status == "mutation_verified"
         assert (live / "automations.yaml").read_bytes() == b"candidate\n"
         progress = discover_live_apply_progress(store, plan.deployment_id)
         assert [item.phase for item in progress] == ["mutation_verified"]
     finally:
-        store.close()
+        _close(store)
 
 
 def test_progress_persistence_failure_happens_before_any_mutation(
@@ -200,17 +199,11 @@ def test_progress_persistence_failure_happens_before_any_mutation(
     try:
         with pytest.raises(LiveApplyWriterError, match="progress"):
             apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
         assert (live / "automations.yaml").read_bytes() == b"baseline\n"
     finally:
-        store.close()
+        _close(store)
 
 
 def test_crash_after_journal_before_write_recovers_as_uncertain(
@@ -226,29 +219,17 @@ def test_crash_after_journal_before_write_recovers_as_uncertain(
     try:
         with pytest.raises(LiveApplyWriterError, match="uncertain"):
             apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
         assert (live / "automations.yaml").read_bytes() == b"baseline\n"
         progress = discover_live_apply_progress(store, plan.deployment_id)
         assert progress[-1].phase == "mutation_started"
         with pytest.raises(LiveApplyWriterError, match="reconciliation"):
             apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
     finally:
-        store.close()
+        _close(store)
 
 
 def test_stage_tamper_fails_before_journal_or_live_mutation(tmp_path: Path, monkeypatch) -> None:
@@ -262,19 +243,13 @@ def test_stage_tamper_fails_before_journal_or_live_mutation(tmp_path: Path, monk
     try:
         with pytest.raises(LiveApplyWriterError, match="Stage") as caught:
             apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
         assert "private staged bytes" not in str(caught.value)
         assert (live / "automations.yaml").read_bytes() == b"baseline\n"
         assert discover_live_apply_progress(store, plan.deployment_id) == ()
     finally:
-        store.close()
+        _close(store)
 
 
 def test_added_deleted_and_mode_only_operations_are_verified(tmp_path: Path, monkeypatch) -> None:
@@ -287,29 +262,19 @@ def test_added_deleted_and_mode_only_operations_are_verified(tmp_path: Path, mon
         case = tmp_path / str(index)
         case.mkdir()
         store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-            case,
-            monkeypatch,
-            status=status,
-            baseline=baseline,
-            candidate=candidate,
+            case, monkeypatch, status=status, baseline=baseline, candidate=candidate
         )
         target = Path(preconditions.root) / "automations.yaml"
         try:
             result = apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
             assert result.status == "mutation_verified"
             assert target.exists() is exists
             if mode is not None:
                 assert (target.stat().st_mode & 0o777) == mode
         finally:
-            store.close()
+            _close(store)
 
 
 def test_root_replacement_after_final_precondition_proof_is_rejected(
@@ -333,24 +298,16 @@ def test_root_replacement_after_final_precondition_proof_is_rejected(
         return proof
 
     monkeypatch.setattr(
-        live_apply_writer,
-        "prove_live_apply_operation_precondition",
-        prove_then_replace_root,
+        live_apply_writer, "prove_live_apply_operation_precondition", prove_then_replace_root
     )
     try:
         with pytest.raises(LiveApplyWriterError, match="precondition changed after journaling"):
             apply_live_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
         assert (original / "automations.yaml").read_bytes() == b"baseline\n"
         assert (live / "automations.yaml").read_bytes() == b"baseline\n"
         progress = discover_live_apply_progress(store, plan.deployment_id)
         assert progress[-1].phase == "blocked"
     finally:
-        store.close()
+        _close(store)
