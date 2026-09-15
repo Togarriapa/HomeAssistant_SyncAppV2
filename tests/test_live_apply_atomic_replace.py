@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from ha_syncapp.live_apply_atomic_replace import (
     LiveApplyAtomicReplaceError,
     exchange_leaf,
