@@ -158,7 +158,9 @@ def _chain(
         object.__setattr__(plan, name, value)
 
     preconditions = prove_live_apply_preconditions(plan, live)
-    store = StateStore(tmp_path / "state")
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    store = StateStore(state_root)
     store.__enter__()
     store.bind_repository(backup.target, backup.repository_id)
     store.record_prepared_deployment(prepared.deployment_id, backup)
