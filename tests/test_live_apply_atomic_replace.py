@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_atomic_replace import (
     LiveApplyAtomicReplaceError,
     exchange_leaf,
@@ -98,7 +97,7 @@ def test_verify_displaced_leaf_fails_closed_for_symlink(tmp_path: Path) -> None:
         assert not verify_displaced_leaf(
             parent_fd,
             displaced.name,
-            expected_object_id=_blob_id(b"baseline\n"),
+            expected_object_id=_blob_id(baseline),
             expected_mode="100644",
         )
     finally:
