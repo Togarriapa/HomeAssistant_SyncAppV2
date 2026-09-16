@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp.live_apply_atomic_guard import (
+    LiveApplyAtomicBaselineMismatch,
     LiveApplyAtomicGuardError,
+    LiveApplyAtomicOutcomeUncertain,
     exchange_verified_baseline,
 )
 
@@ -46,7 +48,7 @@ def test_exchange_verified_baseline_restores_raced_target_before_blocking(tmp_pa
     temporary.write_bytes(b"candidate\n")
     parent_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with pytest.raises(LiveApplyAtomicGuardError, match="baseline changed"):
+        with pytest.raises(LiveApplyAtomicBaselineMismatch, match="baseline changed"):
             exchange_verified_baseline(
                 parent_fd,
                 temporary.name,
@@ -58,3 +60,9 @@ def test_exchange_verified_baseline_restores_raced_target_before_blocking(tmp_pa
         os.close(parent_fd)
     assert target.read_bytes() == raced
     assert temporary.read_bytes() == b"candidate\n"
+
+
+def test_atomic_guard_failure_taxonomy_is_writer_safe() -> None:
+    assert issubclass(LiveApplyAtomicBaselineMismatch, LiveApplyAtomicGuardError)
+    assert issubclass(LiveApplyAtomicOutcomeUncertain, LiveApplyAtomicGuardError)
+    assert not issubclass(LiveApplyAtomicBaselineMismatch, LiveApplyAtomicOutcomeUncertain)
