@@ -42,7 +42,19 @@ jobs:
           retention-days: 1
       - run: python -m mypy
       - run: python -m bandit -q -r syncapp/src
-      - run: python -m pytest -q
+      - name: Run pytest
+        run: |
+          set -o pipefail
+          mkdir -p quality-diagnostics
+          python -m pytest -q 2>&1 | tee quality-diagnostics/pytest.txt
+      - name: Upload pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-pytest-diagnostics
+          path: quality-diagnostics/pytest.txt
+          if-no-files-found: error
+          retention-days: 1
 
   container:
     strategy:
