@@ -9,6 +9,14 @@ class LiveApplyAtomicGuardError(RuntimeError):
     """A live leaf could not be exchanged while preserving its baseline safely."""
 
 
+class LiveApplyAtomicBaselineMismatch(LiveApplyAtomicGuardError):
+    """The displaced target differed from baseline and was safely restored."""
+
+
+class LiveApplyAtomicOutcomeUncertain(LiveApplyAtomicGuardError):
+    """The exchange could not be safely reversed, leaving mutation state uncertain."""
+
+
 def exchange_verified_baseline(
     parent_fd: int,
     temporary: str,
@@ -35,7 +43,7 @@ def exchange_verified_baseline(
     try:
         exchange_leaf(parent_fd, temporary, target)
     except Exception as error:
-        raise LiveApplyAtomicGuardError(
+        raise LiveApplyAtomicOutcomeUncertain(
             "live baseline changed and atomic exchange reversal is uncertain"
         ) from error
-    raise LiveApplyAtomicGuardError("live baseline changed; atomic exchange was reversed")
+    raise LiveApplyAtomicBaselineMismatch("live baseline changed; atomic exchange was reversed")
