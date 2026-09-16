@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_atomic_commit import commit_verified_modified_leaf
 from ha_syncapp.live_apply_atomic_guard import LiveApplyAtomicBaselineMismatch
 
