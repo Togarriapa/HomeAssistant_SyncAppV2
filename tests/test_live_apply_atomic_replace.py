@@ -28,7 +28,7 @@ def test_exchange_leaf_preserves_exact_displaced_object_for_verification(tmp_pat
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        exchange_leaf(parent_fd=parent_fd, target_name=target.name, temporary_name=temporary.name)
+        exchange_leaf(parent_fd, temporary.name, target.name)
     finally:
         os.close(parent_fd)
 
@@ -45,14 +45,16 @@ def test_verify_displaced_leaf_accepts_expected_regular_file(tmp_path: Path) -> 
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        verify_displaced_leaf(
-            parent_fd=parent_fd,
-            displaced_name=displaced.name,
-            expected_blob_id=_blob_id(baseline),
-            expected_mode=0o100644,
+        verified = verify_displaced_leaf(
+            parent_fd,
+            displaced.name,
+            expected_object_id=_blob_id(baseline),
+            expected_mode="100644",
         )
     finally:
         os.close(parent_fd)
+
+    assert verified is True
 
 
 def test_verify_displaced_leaf_fails_closed_for_content_race(tmp_path: Path) -> None:
@@ -63,15 +65,16 @@ def test_verify_displaced_leaf_fails_closed_for_content_race(tmp_path: Path) -> 
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with pytest.raises(LiveApplyAtomicReplaceError, match="blob mismatch"):
-            verify_displaced_leaf(
-                parent_fd=parent_fd,
-                displaced_name=displaced.name,
-                expected_blob_id=_blob_id(b"baseline\n"),
-                expected_mode=0o100644,
-            )
+        verified = verify_displaced_leaf(
+            parent_fd,
+            displaced.name,
+            expected_object_id=_blob_id(b"baseline\n"),
+            expected_mode="100644",
+        )
     finally:
         os.close(parent_fd)
+
+    assert verified is False
 
 
 def test_verify_displaced_leaf_fails_closed_for_symlink(tmp_path: Path) -> None:
@@ -85,15 +88,16 @@ def test_verify_displaced_leaf_fails_closed_for_symlink(tmp_path: Path) -> None:
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with pytest.raises(LiveApplyAtomicReplaceError, match="regular file"):
-            verify_displaced_leaf(
-                parent_fd=parent_fd,
-                displaced_name=displaced.name,
-                expected_blob_id=_blob_id(baseline),
-                expected_mode=0o100644,
-            )
+        verified = verify_displaced_leaf(
+            parent_fd,
+            displaced.name,
+            expected_object_id=_blob_id(baseline),
+            expected_mode="100644",
+        )
     finally:
         os.close(parent_fd)
+
+    assert verified is False
 
 
 def test_exchange_verified_baseline_restores_displaced_file_when_baseline_mismatches(
@@ -109,17 +113,17 @@ def test_exchange_verified_baseline_restores_displaced_file_when_baseline_mismat
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with pytest.raises(LiveApplyAtomicReplaceError, match="baseline verification failed"):
-            exchange_verified_baseline(
-                parent_fd=parent_fd,
-                target_name=target.name,
-                temporary_name=temporary.name,
-                expected_blob_id=_blob_id(b"expected-baseline\n"),
-                expected_mode=0o100644,
-            )
+        committed = exchange_verified_baseline(
+            parent_fd,
+            temporary.name,
+            target.name,
+            expected_object_id=_blob_id(b"expected-baseline\n"),
+            expected_mode="100644",
+        )
     finally:
         os.close(parent_fd)
 
+    assert committed is False
     assert target.read_bytes() == raced
     assert temporary.read_bytes() == b"candidate\n"
 
@@ -135,15 +139,21 @@ def test_exchange_verified_baseline_commits_candidate_when_baseline_matches(tmp_
 
     parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        exchange_verified_baseline(
-            parent_fd=parent_fd,
-            target_name=target.name,
-            temporary_name=temporary.name,
-            expected_blob_id=_blob_id(baseline),
-            expected_mode=0o100644,
+        committed = exchange_verified_baseline(
+            parent_fd,
+            temporary.name,
+            target.name,
+            expected_object_id=_blob_id(baseline),
+            expected_mode="100644",
         )
     finally:
         os.close(parent_fd)
 
+    assert committed is True
     assert target.read_bytes() == b"candidate\n"
-    assert not temporary.exists()
+    assert temporary.read_bytes() == baseline
+
+
+def test_exchange_leaf_rejects_invalid_parent_descriptor() -> None:
+    with pytest.raises(LiveApplyAtomicReplaceError, match="parent directory descriptor is invalid"):
+        exchange_leaf(-1, ".syncapp-candidate.tmp", "automations.yaml")
