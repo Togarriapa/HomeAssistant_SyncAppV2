@@ -14,6 +14,11 @@ from typing import NoReturn
 
 from .apply_authorization import ApplyAuthorization
 from .candidate_stage import CandidateStage, CandidateStageEntry, verify_candidate_stage
+from .live_apply_atomic_commit import commit_verified_modified_leaf
+from .live_apply_atomic_guard import (
+    LiveApplyAtomicBaselineMismatch,
+    LiveApplyAtomicOutcomeUncertain,
+)
 from .live_apply_intent import LiveApplyIntent, derive_live_apply_intent
 from .live_apply_intent_store import PersistedLiveApplyIntent, load_live_apply_intent
 from .live_apply_operation_precondition import (
@@ -358,7 +363,7 @@ def _mutate_operation(
         if operation.status in {"added", "modified", "modified_and_mode_changed"}:
             if candidate is None or operation.candidate_mode not in {"100644", "100755"}:
                 _reject("candidate mutation data is invalid")
-            _replace_bytes(parent_fd, name, candidate, operation.candidate_mode, operation.status)
+            _replace_bytes(parent_fd, name, candidate, operation)
         elif operation.status == "deleted":
             os.unlink(name, dir_fd=parent_fd)
             os.fsync(parent_fd)
@@ -381,7 +386,7 @@ def _mutate_operation(
         os.close(root_fd)
 
 
-def _replace_bytes(parent_fd: int, name: str, data: bytes, git_mode: str, status: str) -> None:
+def _replace_bytes(parent_fd: int, name: str, data: bytes, operation: LiveApplyOperation) -> None:
     temporary = f".syncapp-apply-{uuid.uuid4().hex}.tmp"
     fd: int | None = None
     created = False
@@ -394,11 +399,11 @@ def _replace_bytes(parent_fd: int, name: str, data: bytes, git_mode: str, status
         )
         created = True
         _write_all(fd, data)
-        os.fchmod(fd, _mode_bits(git_mode))
+        os.fchmod(fd, _mode_bits(operation.candidate_mode))
         os.fsync(fd)
         os.close(fd)
         fd = None
-        if status == "added":
+        if operation.status == "added":
             os.link(
                 temporary,
                 name,
@@ -408,15 +413,26 @@ def _replace_bytes(parent_fd: int, name: str, data: bytes, git_mode: str, status
             )
             os.unlink(temporary, dir_fd=parent_fd)
             created = False
-        else:
-            os.replace(
+            os.fsync(parent_fd)
+            return
+        if operation.status not in {"modified", "modified_and_mode_changed"}:
+            _reject("candidate replacement status is invalid")
+        if operation.baseline_object_id is None or operation.baseline_mode not in {"100644", "100755"}:
+            _reject("modified baseline identity is invalid")
+        try:
+            commit_verified_modified_leaf(
+                parent_fd,
                 temporary,
                 name,
-                src_dir_fd=parent_fd,
-                dst_dir_fd=parent_fd,
+                expected_object_id=operation.baseline_object_id,
+                expected_mode=operation.baseline_mode,
             )
+        except LiveApplyAtomicBaselineMismatch:
+            raise _PreMutationMismatch from None
+        except LiveApplyAtomicOutcomeUncertain:
             created = False
-        os.fsync(parent_fd)
+            raise
+        created = False
     finally:
         if fd is not None:
             os.close(fd)
