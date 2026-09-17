@@ -34,7 +34,7 @@ jobs:
           mkdir -p quality-diagnostics
           python -m ruff check . 2>&1 | tee quality-diagnostics/ruff.txt
       - name: Upload Ruff diagnostics
-        if: steps.ruff.outcome == 'failure'
+        if: failure() && steps.ruff.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-ruff-diagnostics
@@ -50,7 +50,7 @@ jobs:
           mkdir -p quality-diagnostics
           python -m pytest -q 2>&1 | tee quality-diagnostics/pytest.txt
       - name: Upload pytest diagnostics
-        if: steps.pytest.outcome == 'failure'
+        if: failure() && steps.pytest.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-pytest-diagnostics
