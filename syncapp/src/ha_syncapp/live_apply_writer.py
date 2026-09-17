@@ -417,7 +417,10 @@ def _replace_bytes(parent_fd: int, name: str, data: bytes, operation: LiveApplyO
             return
         if operation.status not in {"modified", "modified_and_mode_changed"}:
             _reject("candidate replacement status is invalid")
-        if operation.baseline_object_id is None or operation.baseline_mode not in {"100644", "100755"}:
+        if operation.baseline_object_id is None or operation.baseline_mode not in {
+            "100644",
+            "100755",
+        }:
             _reject("modified baseline identity is invalid")
         try:
             commit_verified_modified_leaf(
