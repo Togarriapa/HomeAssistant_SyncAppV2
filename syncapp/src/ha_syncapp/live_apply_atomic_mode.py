@@ -49,16 +49,13 @@ def commit_verified_mode_leaf(
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
-            raise LiveApplyAtomicModeBaselineMismatch(
-                "live baseline is not a regular file"
-            )
+            raise LiveApplyAtomicModeBaselineMismatch("live baseline is not a regular file")
         data = _read_all(fd)
-        if _git_mode(before.st_mode) != expected_mode or _git_blob_object_id(
-            data, len(expected_object_id)
-        ) != expected_object_id:
-            raise LiveApplyAtomicModeBaselineMismatch(
-                "live baseline changed before mode mutation"
-            )
+        if (
+            _git_mode(before.st_mode) != expected_mode
+            or _git_blob_object_id(data, len(expected_object_id)) != expected_object_id
+        ):
+            raise LiveApplyAtomicModeBaselineMismatch("live baseline changed before mode mutation")
         os.fchmod(fd, 0o755 if target_mode == "100755" else 0o644)
         os.fsync(fd)
         try:
@@ -68,9 +65,7 @@ def commit_verified_mode_leaf(
                 "live name changed after mode mutation"
             ) from error
         if (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino):
-            raise LiveApplyAtomicModeOutcomeUncertain(
-                "live name changed after mode mutation"
-            )
+            raise LiveApplyAtomicModeOutcomeUncertain("live name changed after mode mutation")
         os.fsync(parent_fd)
     finally:
         os.close(fd)
@@ -97,9 +92,4 @@ def _git_mode(mode: int) -> str:
 
 
 def _safe_leaf(value: str) -> bool:
-    return (
-        bool(value)
-        and value not in {".", ".."}
-        and "/" not in value
-        and "\x00" not in value
-    )
+    return bool(value) and value not in {".", ".."} and "/" not in value and "\x00" not in value
