@@ -92,4 +92,9 @@ def _git_mode(mode: int) -> str:
 
 
 def _safe_leaf(value: str) -> bool:
-    return bool(value) and value not in {".", ".."} and "/" not in value and "\x00" not in value
+    return (
+        bool(value)
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\x00" not in value
+    )
