@@ -35,7 +35,10 @@ def commit_verified_mode_leaf(
         "100755",
     }:
         raise LiveApplyAtomicModeError("atomic mode is invalid")
-    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {40, 64}:
+    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {
+        40,
+        64,
+    }:
         raise LiveApplyAtomicModeError("atomic mode object id is invalid")
     try:
         fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
@@ -46,7 +49,9 @@ def commit_verified_mode_leaf(
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
-            raise LiveApplyAtomicModeBaselineMismatch("live baseline is not a regular file")
+            raise LiveApplyAtomicModeBaselineMismatch(
+                "live baseline is not a regular file"
+            )
         data = _read_all(fd)
         if _git_mode(before.st_mode) != expected_mode or _git_blob_object_id(
             data, len(expected_object_id)
