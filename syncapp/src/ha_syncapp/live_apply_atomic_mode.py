@@ -12,7 +12,11 @@ class LiveApplyAtomicModeError(RuntimeError):
 
 
 class LiveApplyAtomicModeBaselineMismatch(LiveApplyAtomicModeError):
-    """The opened leaf was not the authorized baseline."""
+    """The opened leaf was not the authorized baseline before mutation."""
+
+
+class LiveApplyAtomicModeOutcomeUncertain(LiveApplyAtomicModeError):
+    """The live name changed after mode mutation began."""
 
 
 def commit_verified_mode_leaf(
@@ -55,11 +59,13 @@ def commit_verified_mode_leaf(
         try:
             named = os.stat(target, dir_fd=parent_fd, follow_symlinks=False)
         except OSError as error:
-            raise LiveApplyAtomicModeBaselineMismatch(
-                "live name changed during mode mutation"
+            raise LiveApplyAtomicModeOutcomeUncertain(
+                "live name changed after mode mutation"
             ) from error
         if (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino):
-            raise LiveApplyAtomicModeBaselineMismatch("live name changed during mode mutation")
+            raise LiveApplyAtomicModeOutcomeUncertain(
+                "live name changed after mode mutation"
+            )
         os.fsync(parent_fd)
     finally:
         os.close(fd)
