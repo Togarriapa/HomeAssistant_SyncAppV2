@@ -64,6 +64,7 @@ def test_mode_name_loss_after_fchmod_is_uncertain(
     target.write_bytes(b"echo safe\n")
     os.chmod(target, 0o644)
     parent_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    original_stat = os.stat
 
     def missing_live_name(*args: object, **kwargs: object) -> os.stat_result:
         raise FileNotFoundError
@@ -83,4 +84,4 @@ def test_mode_name_loss_after_fchmod_is_uncertain(
 
     # fchmod already happened before live-name verification; this must never be
     # classified as a deterministic pre-mutation baseline mismatch.
-    assert target.stat().st_mode & 0o777 == 0o755
+    assert original_stat(target).st_mode & 0o777 == 0o755
