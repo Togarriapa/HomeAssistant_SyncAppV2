@@ -34,16 +34,27 @@ def commit_verified_deleted_leaf(
     """Remove ``target`` only when the atomically displaced leaf is the baseline.
 
     The target is first atomically renamed to an unpredictable tombstone in the
-    already-verified parent directory.  Verification therefore occurs against the
-    exact object removed from the live name.  A mismatch is restored with
+    already-verified parent directory. Verification therefore occurs against the
+    exact object removed from the live name. A mismatch is restored with
     ``RENAME_NOREPLACE`` so an independently-created replacement is never
-    overwritten.  Failure to restore is explicitly uncertain rather than being
+    overwritten. Failure to restore is explicitly uncertain rather than being
     misclassified as a deterministic pre-mutation block.
     """
     if type(parent_fd) is not int or parent_fd < 0 or not _safe_leaf(target):
         raise LiveApplyAtomicDeleteError("atomic delete arguments are invalid")
+    if expected_mode not in {"100644", "100755"}:
+        raise LiveApplyAtomicDeleteError("atomic delete baseline mode is invalid")
+    if not isinstance(expected_object_id, str) or len(expected_object_id) not in {40, 64}:
+        raise LiveApplyAtomicDeleteError("atomic delete object id is invalid")
+
     tombstone = f".syncapp-delete-{uuid.uuid4().hex}.tmp"
-    _rename_noreplace(parent_fd, target, tombstone)
+    try:
+        _rename_noreplace(parent_fd, target, tombstone)
+    except FileNotFoundError as error:
+        raise LiveApplyAtomicDeleteBaselineMismatch(
+            "live baseline changed before atomic delete"
+        ) from error
+
     if verify_displaced_leaf(
         parent_fd,
         tombstone,
