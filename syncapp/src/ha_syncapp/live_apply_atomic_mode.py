@@ -26,14 +26,19 @@ def commit_verified_mode_leaf(
     """Change mode through a descriptor verified as the exact authorized baseline."""
     if type(parent_fd) is not int or parent_fd < 0 or not _safe_leaf(target):
         raise LiveApplyAtomicModeError("atomic mode arguments are invalid")
-    if expected_mode not in {"100644", "100755"} or target_mode not in {"100644", "100755"}:
+    if expected_mode not in {"100644", "100755"} or target_mode not in {
+        "100644",
+        "100755",
+    }:
         raise LiveApplyAtomicModeError("atomic mode is invalid")
     if not isinstance(expected_object_id, str) or len(expected_object_id) not in {40, 64}:
         raise LiveApplyAtomicModeError("atomic mode object id is invalid")
     try:
         fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
     except OSError as error:
-        raise LiveApplyAtomicModeBaselineMismatch("live baseline changed before mode mutation") from error
+        raise LiveApplyAtomicModeBaselineMismatch(
+            "live baseline changed before mode mutation"
+        ) from error
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
@@ -42,7 +47,9 @@ def commit_verified_mode_leaf(
         if _git_mode(before.st_mode) != expected_mode or _git_blob_object_id(
             data, len(expected_object_id)
         ) != expected_object_id:
-            raise LiveApplyAtomicModeBaselineMismatch("live baseline changed before mode mutation")
+            raise LiveApplyAtomicModeBaselineMismatch(
+                "live baseline changed before mode mutation"
+            )
         os.fchmod(fd, 0o755 if target_mode == "100755" else 0o644)
         os.fsync(fd)
         try:
