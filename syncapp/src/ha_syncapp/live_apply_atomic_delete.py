@@ -76,9 +76,7 @@ def commit_verified_deleted_leaf(
         raise LiveApplyAtomicDeleteOutcomeUncertain(
             "live baseline changed and atomic delete restoration is uncertain"
         ) from error
-    raise LiveApplyAtomicDeleteBaselineMismatch(
-        "live baseline changed; atomic delete was reversed"
-    )
+    raise LiveApplyAtomicDeleteBaselineMismatch("live baseline changed; atomic delete was reversed")
 
 
 def _rename_noreplace(parent_fd: int, source: str, target: str) -> None:
