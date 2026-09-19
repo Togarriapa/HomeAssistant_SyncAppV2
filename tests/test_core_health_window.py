@@ -162,6 +162,26 @@ def test_missing_initial_health_never_starts_window(tmp_path: Path, monkeypatch)
         store.__exit__(None, None, None)
 
 
+@pytest.mark.parametrize("duration", [True, 29, 3601])
+def test_invalid_duration_fails_before_state_or_network(
+    tmp_path: Path, monkeypatch, duration: object
+) -> None:
+    chain, authorization = _initial_health(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(CoreHealthWindowError, match="duration is invalid"):
+            advance_core_health_window_once(
+                store,
+                authorization.deployment_id,
+                observation_seconds=duration,
+                now=START,
+                transport=lambda *_args: pytest.fail("invalid duration performed a request"),
+            )
+        assert load_core_health_window(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_tampered_window_fails_closed(tmp_path: Path, monkeypatch) -> None:
     chain, authorization = _initial_health(tmp_path, monkeypatch)
     store = chain[0]
