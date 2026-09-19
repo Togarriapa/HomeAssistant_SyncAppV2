@@ -35,4 +35,6 @@ later controlled invocation; corrupt, rebound, or unacknowledged state fails clo
 This proof means only that Core's API root answered after the exact acknowledged restart.
 It does not establish an observation window, validate runtime assertions or logs,
 promote or reject the candidate, reconcile an uncertain restart, restore a backup, or
-roll back. Those decisions require their own durable evidence and safeguards.
+roll back. The subsequent two-point API availability interval is documented in
+[`core-health-window.md`](core-health-window.md). Other decisions require their own
+durable evidence and safeguards.
