@@ -20,6 +20,7 @@ from ha_syncapp.post_apply_activation import (
     PostApplyActivationAuthorization,
     PostApplyActivationError,
     authorize_post_apply_activation,
+    discover_post_apply_activation_authorizations,
     load_post_apply_activation_authorization,
 )
 from ha_syncapp.prepared_deployment import PreparedDeployment
@@ -152,6 +153,7 @@ def test_complete_apply_is_durably_authorized_idempotently(tmp_path: Path, monke
             load_post_apply_activation_authorization(store, plan.deployment_id)
             == first.authorization
         )
+        assert discover_post_apply_activation_authorizations(store) == (first.authorization,)
     finally:
         store.__exit__(None, None, None)
 
@@ -177,6 +179,7 @@ def test_empty_plan_is_no_activation_required_and_is_not_persisted(
         assert result.action == "no_activation_required"
         assert result.authorization is None
         assert load_post_apply_activation_authorization(store, chain[4].deployment_id) is None
+        assert discover_post_apply_activation_authorizations(store) == ()
     finally:
         store.__exit__(None, None, None)
 
@@ -261,5 +264,21 @@ def test_stage_verification_failure_is_sanitized(tmp_path: Path, monkeypatch) ->
             authorize_post_apply_activation(store, *chain[1:])
         assert "SECRET" not in str(caught.value)
         assert "private.yaml" not in str(caught.value)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_activation_discovery_is_bounded(tmp_path: Path, monkeypatch) -> None:
+    chain = _chain(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        apply_live_operation(store, *chain[1:], operation_index=0)
+        authorize_post_apply_activation(store, *chain[1:])
+        monkeypatch.setattr(
+            "ha_syncapp.post_apply_activation._MAX_DISCOVERABLE_AUTHORIZATIONS",
+            0,
+        )
+        with pytest.raises(PostApplyActivationError, match="exceeds the limit"):
+            discover_post_apply_activation_authorizations(store)
     finally:
         store.__exit__(None, None, None)
