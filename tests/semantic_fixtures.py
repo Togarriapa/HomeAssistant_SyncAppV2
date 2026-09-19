@@ -14,7 +14,7 @@ from ha_syncapp.core_version_evidence import bind_core_version
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
 
 
-def candidate_inputs(parent: Path, files: dict[str, bytes], version: str = "2026.9.1") -> tuple:
+def candidate_inputs(parent: Path, files: dict[str, bytes], version: str = "2026.9.3") -> tuple:
     root = parent / uuid4().hex
     root.mkdir(mode=0o700)
     tree = root / "tree"
