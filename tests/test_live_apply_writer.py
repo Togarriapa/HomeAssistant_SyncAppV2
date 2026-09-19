@@ -665,6 +665,40 @@ def test_controller_advances_one_operation_then_reports_complete(
         _close(store)
 
 
+def test_controller_empty_plan_is_a_no_op_completion(tmp_path: Path, monkeypatch) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+    empty_plan = object.__new__(LiveApplyPlan)
+    for name in (
+        "deployment_id",
+        "target",
+        "repository_id",
+        "baseline_sha",
+        "candidate_sha",
+        "stage_manifest_sha256",
+    ):
+        object.__setattr__(empty_plan, name, getattr(plan, name))
+    object.__setattr__(empty_plan, "operations", ())
+    empty_preconditions = prove_live_apply_preconditions(empty_plan, Path(preconditions.root))
+    store._connection.execute("DELETE FROM live_apply_intent")
+    store._connection.commit()
+    record_live_apply_intent(store, authorization, stage_evidence, empty_plan, empty_preconditions)
+    try:
+        result = advance_live_apply_once(
+            store,
+            authorization,
+            stage_evidence,
+            stage,
+            empty_plan,
+            empty_preconditions,
+        )
+        assert result.action == "complete"
+        assert result.operation_index is None
+        assert discover_live_apply_progress(store, plan.deployment_id) == ()
+        assert (Path(preconditions.root) / "automations.yaml").read_bytes() == b"baseline\n"
+    finally:
+        _close(store)
+
+
 def test_controller_reconciles_applied_crash_without_second_write(
     tmp_path: Path, monkeypatch
 ) -> None:
