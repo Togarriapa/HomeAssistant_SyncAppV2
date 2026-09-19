@@ -15,7 +15,6 @@ from ha_syncapp.live_apply_writer import apply_live_operation
 from ha_syncapp.post_apply_activation import authorize_post_apply_activation
 from test_post_apply_activation import _chain
 
-
 TOKEN = "secret-supervisor-token"
 
 
@@ -38,7 +37,7 @@ def test_restart_is_journaled_before_exact_supervisor_request(tmp_path: Path, mo
         assert attempt is not None
         assert attempt.phase == "request_started"
         calls.append((method, url, headers, body, timeout_seconds, max_response_bytes))
-        return CoreRestartResponse(200, "application/json", b'{"result":"ok"}')
+        return CoreRestartResponse(200, "application/json", b'{"result":"ok","data":{}}')
 
     try:
         result = request_core_restart_once(store, authorization, token=TOKEN, transport=transport)
@@ -73,7 +72,7 @@ def test_acknowledged_replay_never_restarts_again(tmp_path: Path, monkeypatch) -
     def transport(*_args):
         nonlocal calls
         calls += 1
-        return CoreRestartResponse(200, "application/json", b'{"result":"ok"}')
+        return CoreRestartResponse(200, "application/json", b'{"result":"ok","data":{}}')
 
     try:
         request_core_restart_once(store, authorization, token=TOKEN, transport=transport)
@@ -120,7 +119,7 @@ def test_crash_after_response_remains_uncertain_without_duplicate_request(
     def transport(*_args):
         nonlocal calls
         calls += 1
-        return CoreRestartResponse(200, "application/json", b'{"result":"ok"}')
+        return CoreRestartResponse(200, "application/json", b'{"result":"ok","data":{}}')
 
     def interrupt(*_args, **_kwargs):
         raise SystemExit("simulated interruption")
@@ -143,6 +142,11 @@ def test_crash_after_response_remains_uncertain_without_duplicate_request(
         CoreRestartResponse(200, "text/plain", b"ok"),
         CoreRestartResponse(200, "application/json", b"not-json"),
         CoreRestartResponse(200, "application/json", b'{"result":"error"}'),
+        CoreRestartResponse(
+            200,
+            "application/json",
+            b'{"result":"ok","result":"ok","data":{}}',
+        ),
         CoreRestartResponse(200, "application/json", b"x" * (64 * 1024 + 1)),
     ],
 )
@@ -161,7 +165,9 @@ def test_invalid_response_remains_uncertain(tmp_path: Path, monkeypatch, respons
         store.__exit__(None, None, None)
 
 
-def test_forged_authorization_and_invalid_token_fail_before_journal(tmp_path: Path, monkeypatch) -> None:
+def test_forged_authorization_and_invalid_token_fail_before_journal(
+    tmp_path: Path, monkeypatch
+) -> None:
     chain, authorization = _authorized(tmp_path, monkeypatch)
     store = chain[0]
     forged = object.__new__(type(authorization))
@@ -172,7 +178,53 @@ def test_forged_authorization_and_invalid_token_fail_before_journal(tmp_path: Pa
         with pytest.raises(CoreRestartError, match="authorization is invalid"):
             request_core_restart_once(store, forged, token=TOKEN, transport=lambda *_args: None)
         with pytest.raises(CoreRestartError, match="credential is invalid"):
-            request_core_restart_once(store, authorization, token=" bad\n", transport=lambda *_args: None)
+            request_core_restart_once(
+                store, authorization, token=" bad\n", transport=lambda *_args: None
+            )
         assert load_core_restart_attempt(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_invalid_limits_fail_before_journal(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _authorized(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(CoreRestartError, match="limits are invalid"):
+            request_core_restart_once(
+                store,
+                authorization,
+                token=TOKEN,
+                timeout_seconds=61,
+                transport=lambda *_args: None,
+            )
+        assert load_core_restart_attempt(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_tampered_journal_fails_closed_without_request(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _authorized(tmp_path, monkeypatch)
+    store = chain[0]
+
+    def fail(*_args):
+        raise TimeoutError("uncertain")
+
+    try:
+        with pytest.raises(CoreRestartError, match="outcome is uncertain"):
+            request_core_restart_once(store, authorization, token=TOKEN, transport=fail)
+        store._connection.execute(
+            "UPDATE core_restart_attempt SET authorization_record_sha256 = ?",
+            ("f" * 64,),
+        )
+        store._connection.commit()
+
+        with pytest.raises(CoreRestartError, match="state is invalid"):
+            request_core_restart_once(
+                store,
+                authorization,
+                token=TOKEN,
+                transport=lambda *_args: pytest.fail("tampered journal reached transport"),
+            )
     finally:
         store.__exit__(None, None, None)
