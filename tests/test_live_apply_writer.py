@@ -18,10 +18,7 @@ from ha_syncapp.live_apply_preconditions import (
     prove_live_apply_preconditions,
 )
 from ha_syncapp.live_apply_progress_store import discover_live_apply_progress
-from ha_syncapp.live_apply_reconciliation import (
-    LiveApplyReconciliationError,
-    reconcile_live_apply_operation,
-)
+from ha_syncapp.live_apply_reconciliation import reconcile_live_apply_operation
 from ha_syncapp.live_apply_writer import LiveApplyWriterError, apply_live_operation
 from ha_syncapp.prepared_deployment import PreparedDeployment
 from ha_syncapp.stage_prewrite_reproof import StagePrewriteEvidence
@@ -598,17 +595,47 @@ def test_tampered_mutation_guard_fails_closed_with_sanitized_error(
         )
         store._connection.commit()
 
-        with pytest.raises(LiveApplyReconciliationError) as caught:
-            reconcile_live_apply_operation(
-                store,
-                authorization,
-                stage_evidence,
-                stage,
-                plan,
-                preconditions,
-                operation_index=0,
+        result = reconcile_live_apply_operation(
+            store,
+            authorization,
+            stage_evidence,
+            stage,
+            plan,
+            preconditions,
+            operation_index=0,
+        )
+        assert result.outcome == "ambiguous"
+        assert discover_live_apply_progress(store, plan.deployment_id)[-1].phase == "blocked"
+    finally:
+        _close(store)
+
+
+def test_stage_corruption_after_interruption_is_blocked_without_retry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+
+    def crash_before_write(*_args, **_kwargs):
+        raise SystemExit("simulated process interruption")
+
+    def reject_stage(_stage):
+        raise RuntimeError("PRIVATE-STAGE-SENTINEL")
+
+    monkeypatch.setattr(live_apply_writer, "_mutate_operation", crash_before_write)
+    try:
+        with pytest.raises(SystemExit):
+            apply_live_operation(
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
             )
-        assert "999999" not in str(caught.value)
-        assert "guard" in str(caught.value)
+        monkeypatch.setattr(
+            "ha_syncapp.live_apply_reconciliation.verify_candidate_stage", reject_stage
+        )
+
+        result = reconcile_live_apply_operation(
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+        )
+        assert result.outcome == "ambiguous"
+        assert discover_live_apply_progress(store, plan.deployment_id)[-1].phase == "blocked"
+        assert "PRIVATE-STAGE-SENTINEL" not in repr(result)
     finally:
         _close(store)
