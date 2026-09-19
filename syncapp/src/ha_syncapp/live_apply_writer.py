@@ -15,9 +15,17 @@ from typing import NoReturn
 from .apply_authorization import ApplyAuthorization
 from .candidate_stage import CandidateStage, CandidateStageEntry, verify_candidate_stage
 from .live_apply_atomic_commit import commit_verified_modified_leaf
+from .live_apply_atomic_delete import (
+    LiveApplyAtomicDeleteBaselineMismatch,
+    commit_verified_deleted_leaf,
+)
 from .live_apply_atomic_guard import (
     LiveApplyAtomicBaselineMismatch,
     LiveApplyAtomicOutcomeUncertain,
+)
+from .live_apply_atomic_mode import (
+    LiveApplyAtomicModeBaselineMismatch,
+    commit_verified_mode_leaf,
 )
 from .live_apply_intent import LiveApplyIntent, derive_live_apply_intent
 from .live_apply_intent_store import PersistedLiveApplyIntent, load_live_apply_intent
@@ -365,19 +373,36 @@ def _mutate_operation(
                 _reject("candidate mutation data is invalid")
             _replace_bytes(parent_fd, name, candidate, operation)
         elif operation.status == "deleted":
-            os.unlink(name, dir_fd=parent_fd)
-            os.fsync(parent_fd)
-        elif operation.status == "mode_changed":
-            mode = _mode_bits(operation.candidate_mode)
-            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+            if operation.baseline_object_id is None or operation.baseline_mode not in {
+                "100644",
+                "100755",
+            }:
+                _reject("deleted baseline identity is invalid")
             try:
-                if not stat.S_ISREG(os.fstat(fd).st_mode):
-                    _reject("live path type is unsafe")
-                os.fchmod(fd, mode)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.fsync(parent_fd)
+                commit_verified_deleted_leaf(
+                    parent_fd,
+                    name,
+                    expected_object_id=operation.baseline_object_id,
+                    expected_mode=operation.baseline_mode,
+                )
+            except LiveApplyAtomicDeleteBaselineMismatch:
+                raise _PreMutationMismatch from None
+        elif operation.status == "mode_changed":
+            if operation.baseline_object_id is None or operation.baseline_mode not in {
+                "100644",
+                "100755",
+            } or operation.candidate_mode not in {"100644", "100755"}:
+                _reject("mode baseline identity is invalid")
+            try:
+                commit_verified_mode_leaf(
+                    parent_fd,
+                    name,
+                    expected_object_id=operation.baseline_object_id,
+                    expected_mode=operation.baseline_mode,
+                    target_mode=operation.candidate_mode,
+                )
+            except LiveApplyAtomicModeBaselineMismatch:
+                raise _PreMutationMismatch from None
         else:
             _reject("Apply plan operation status is invalid")
     finally:
