@@ -11,6 +11,7 @@ from ha_syncapp import live_apply_writer
 from ha_syncapp.apply_authorization import ApplyAuthorization
 from ha_syncapp.candidate_backup import CandidateBackupEvidence
 from ha_syncapp.candidate_stage import CandidateStage, CandidateStageEntry
+from ha_syncapp.live_apply_controller import advance_live_apply_once
 from ha_syncapp.live_apply_intent_store import record_live_apply_intent
 from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from ha_syncapp.live_apply_preconditions import (
@@ -637,5 +638,113 @@ def test_stage_corruption_after_interruption_is_blocked_without_retry(
         assert result.outcome == "ambiguous"
         assert discover_live_apply_progress(store, plan.deployment_id)[-1].phase == "blocked"
         assert "PRIVATE-STAGE-SENTINEL" not in repr(result)
+    finally:
+        _close(store)
+
+
+def test_controller_advances_one_operation_then_reports_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
+        tmp_path, monkeypatch
+    )
+    live = Path(preconditions.root)
+    try:
+        advanced = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+        complete = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+
+        assert advanced.action == "operation_verified"
+        assert advanced.operation_index == 0
+        assert advanced.reconciliation_outcome is None
+        assert complete.action == "complete"
+        assert complete.operation_index is None
+        assert (live / "automations.yaml").read_bytes() == b"candidate\n"
+    finally:
+        _close(store)
+
+
+def test_controller_reconciles_applied_crash_without_second_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
+        tmp_path, monkeypatch
+    )
+
+    def crash_after_write(*_args, **_kwargs):
+        raise SystemExit("simulated interruption")
+
+    monkeypatch.setattr(live_apply_writer, "_verify_postcondition", crash_after_write)
+    try:
+        with pytest.raises(SystemExit):
+            advance_live_apply_once(
+                store, authorization, stage_evidence, stage, plan, preconditions
+            )
+
+        def reject_writer(*_args, **_kwargs):
+            raise AssertionError("reconciliation must not invoke the writer")
+
+        monkeypatch.setattr(
+            "ha_syncapp.live_apply_controller.apply_live_operation", reject_writer
+        )
+        reconciled = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+        complete = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+
+        assert reconciled.action == "reconciled"
+        assert reconciled.reconciliation_outcome == "applied"
+        assert complete.action == "complete"
+    finally:
+        _close(store)
+
+
+@pytest.mark.parametrize(
+    ("replacement", "expected"),
+    ((b"baseline\n", "not_applied"), (b"conflicting\n", "ambiguous")),
+)
+def test_controller_blocks_uncertain_non_applied_state_without_retry(
+    tmp_path: Path, monkeypatch, replacement: bytes, expected: str
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
+        tmp_path, monkeypatch
+    )
+    live = Path(preconditions.root)
+
+    def crash_before_write(*_args, **_kwargs):
+        raise SystemExit("simulated interruption")
+
+    monkeypatch.setattr(live_apply_writer, "_mutate_operation", crash_before_write)
+    try:
+        with pytest.raises(SystemExit):
+            advance_live_apply_once(
+                store, authorization, stage_evidence, stage, plan, preconditions
+            )
+        (live / "automations.yaml").write_bytes(replacement)
+
+        blocked = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+
+        def reject_writer(*_args, **_kwargs):
+            raise AssertionError("blocked reconciliation must never retry the writer")
+
+        monkeypatch.setattr(
+            "ha_syncapp.live_apply_controller.apply_live_operation", reject_writer
+        )
+        replay = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, preconditions
+        )
+
+        assert blocked.action == "blocked"
+        assert blocked.reconciliation_outcome == expected
+        assert replay.action == "blocked"
+        assert replay.reconciliation_outcome == expected
+        assert replay.replayed is True
     finally:
         _close(store)
