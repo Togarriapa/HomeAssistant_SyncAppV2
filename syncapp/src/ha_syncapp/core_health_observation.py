@@ -129,6 +129,29 @@ def observe_core_api_once(
     if existing is not None:
         return CoreHealthResult("healthy", replayed=True)
 
+    probe_core_api_health(
+        token=token,
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        transport=transport,
+    )
+
+    requested = CoreHealthObservation.create(
+        deployment_id, restart.record_sha256, _timestamp(observed_at)
+    )
+    if requested.observed_at < restart.updated_at:
+        _invalid_state()
+    return _record_observation(store, requested)
+
+
+def probe_core_api_health(
+    *,
+    token: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    transport: CoreHealthTransport | None = None,
+) -> None:
+    """Perform one bounded exact Core API-root probe without persisting authority."""
     bearer = _resolve_token(token)
     _validate_limits(timeout_seconds, max_response_bytes)
     headers = {"Accept": "application/json", "Authorization": f"Bearer {bearer}"}
@@ -138,13 +161,6 @@ def observe_core_api_once(
         _validate_response(response, max_response_bytes)
     except Exception:
         raise CoreHealthError("Core API health is unavailable") from None
-
-    requested = CoreHealthObservation.create(
-        deployment_id, restart.record_sha256, _timestamp(observed_at)
-    )
-    if requested.observed_at < restart.updated_at:
-        _invalid_state()
-    return _record_observation(store, requested)
 
 
 def load_core_health_observation(
