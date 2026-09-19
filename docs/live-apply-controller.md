@@ -32,7 +32,8 @@ reported through bounded diagnostic categories.
 
 This boundary does not reload or restart Home Assistant, accept an observation
 window, promote or tag Git history, restore a backup, reject a candidate, or run
-rollback. Those remain separate controlled-deployment gates required by the
-initial V2 README. Retrigger may call this boundary only with the complete freshly
-verified evidence chain and must continue to respect durable blocked outcomes and
-bounded retry policy.
+rollback. A separate [post-Apply activation gate](post-apply-activation.md) may
+create durable restart eligibility only after this controller reports a complete,
+fully verified non-empty plan. Retrigger may call either boundary only with the
+complete freshly verified evidence chain and must continue to respect durable
+blocked outcomes and bounded retry policy.
