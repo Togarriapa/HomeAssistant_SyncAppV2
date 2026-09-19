@@ -26,6 +26,10 @@ durable Apply-intent digest, canonical operations digest, operation count, and t
 action `restart_core`. The write is transactional and idempotent. An exact replay returns
 the existing record; any attempt to rebind the deployment fails closed.
 
+Bounded discovery returns at most 4,096 fully revalidated authorizations in stable
+authorization-time/deployment order. It grants no execution authority by itself and gives
+a future Retrigger worker a deterministic way to find interrupted activation work.
+
 The authorization class cannot be constructed from caller-supplied scalar fields. A
 future restart transport must load and revalidate the durable record and must still own
 its own bounded Supervisor call, journal-before-mutation semantics, crash reconciliation,
