@@ -35,13 +35,15 @@ record never causes another request:
 - `request_started` requires later reconciliation and is not retried blindly.
 
 Acknowledgement proves only that Supervisor accepted the request. It is not evidence
-that Core restarted, became healthy, or loaded the candidate successfully. A crash,
+that Core restarted, became healthy, or loaded the candidate successfully. The
+subsequent bounded API-root proof is documented in
+[`core-health-observation.md`](core-health-observation.md). A crash,
 timeout, connection failure, invalid response, or interruption after the request leaves
 `request_started`, because the mutation outcome is uncertain.
 
 ## Authority boundary
 
-This slice performs at most one authorized Supervisor request. It does not observe Core
-health, reconcile uncertain restart outcomes, promote or reject a candidate, update Git,
-restore a backup, or roll back. Those later decisions must use their own durable,
-read-only evidence and must never convert uncertainty into a repeated restart.
+This slice performs at most one authorized Supervisor restart request. It does not
+reconcile uncertain restart outcomes, promote or reject a candidate, update Git, restore
+a backup, or roll back. Those later decisions must use their own durable, read-only
+evidence and must never convert uncertainty into a repeated restart.
