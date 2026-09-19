@@ -28,6 +28,7 @@ _COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$")
 _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_MAX_DISCOVERABLE_AUTHORIZATIONS = 4096
 
 
 class PostApplyActivationError(RuntimeError):
@@ -219,6 +220,35 @@ def load_post_apply_activation_authorization(
             return None
         return _parse_and_revalidate(store, row)
     except (PreparedDeploymentError, StateError, sqlite3.Error):
+        _reject("post-Apply activation state is invalid")
+
+
+def discover_post_apply_activation_authorizations(
+    store: StateStore,
+) -> tuple[PostApplyActivationAuthorization, ...]:
+    """Discover bounded durable activation eligibility without executing it."""
+    if type(store) is not StateStore:
+        _reject("post-Apply activation state is invalid")
+    try:
+        rows = store._connection.execute(
+            "SELECT deployment_id FROM post_apply_activation_authorization "
+            "ORDER BY authorized_at, deployment_id LIMIT ?",
+            (_MAX_DISCOVERABLE_AUTHORIZATIONS + 1,),
+        ).fetchall()
+        if len(rows) > _MAX_DISCOVERABLE_AUTHORIZATIONS:
+            _reject("post-Apply activation discovery exceeds the limit")
+        result: list[PostApplyActivationAuthorization] = []
+        for row in rows:
+            if len(row) != 1 or not isinstance(row[0], str):
+                _invalid_record()
+            authorization = load_post_apply_activation_authorization(store, row[0])
+            if authorization is None:
+                _invalid_record()
+            result.append(authorization)
+        return tuple(result)
+    except PostApplyActivationError:
+        raise
+    except sqlite3.Error:
         _reject("post-Apply activation state is invalid")
 
 
