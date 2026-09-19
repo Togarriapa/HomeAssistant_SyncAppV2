@@ -47,6 +47,7 @@ from .live_apply_progress_store import (
     discover_live_apply_recovery,
     record_live_apply_progress,
 )
+from .live_apply_reconciliation_store import record_live_apply_mutation_guard
 from .stage_prewrite_reproof import StagePrewriteEvidence
 from .state import StateError, StateStore
 
@@ -150,9 +151,19 @@ def apply_live_operation(
             plan, root, operation_index=operation_index
         )
         _validate_operation_proof(second_proof, intent, operation, operation_index)
+        record_live_apply_mutation_guard(
+            store,
+            progress,
+            plan=plan,
+            root_identity=expected_root_identity,
+            parent_identities=expected_parent_identities,
+        )
     except (LiveApplyOperationPreconditionError, LiveApplyWriterError):
         _block_if_possible(store, progress, plan)
         _reject("live path precondition changed after journaling")
+    except Exception:
+        _block_if_possible(store, progress, plan)
+        _reject("unable to persist live Apply mutation guard")
 
     try:
         _mutate_operation(
