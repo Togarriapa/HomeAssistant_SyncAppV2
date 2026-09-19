@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -163,5 +164,24 @@ def test_tampered_observation_fails_closed(tmp_path: Path, monkeypatch) -> None:
         store._connection.commit()
         with pytest.raises(CoreHealthError, match="state is invalid"):
             load_core_health_observation(store, authorization.deployment_id)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_observation_time_cannot_predate_acknowledged_restart(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _acknowledged(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(CoreHealthError, match="state is invalid"):
+            observe_core_api_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=datetime(2000, 1, 1, tzinfo=UTC),
+                transport=lambda *_args: CoreHealthResponse(
+                    200, "application/json", b'{"message":"API running."}'
+                ),
+            )
+        assert load_core_health_observation(store, authorization.deployment_id) is None
     finally:
         store.__exit__(None, None, None)
