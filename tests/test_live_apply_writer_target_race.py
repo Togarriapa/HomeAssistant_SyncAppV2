@@ -58,7 +58,7 @@ def test_modified_leaf_replacement_at_mutation_boundary_fails_closed(
     expected_root_identity, expected_parent_identities = _identities(live, operation)
 
     def reject_after_leaf_race(*_args, **_kwargs):
-        target.write_bytes(b"changed-after-proof\\n")
+        target.write_bytes(b"changed-after-proof\n")
         os.chmod(target, 0o644)
         raise live_apply_writer.LiveApplyAtomicBaselineMismatch
 
@@ -89,7 +89,7 @@ def test_deleted_leaf_replacement_at_mutation_boundary_fails_closed(
     expected_root_identity, expected_parent_identities = _identities(live, operation)
 
     def reject_after_leaf_race(*_args, **_kwargs):
-        target.write_bytes(b"changed-after-proof\\n")
+        target.write_bytes(b"changed-after-proof\n")
         os.chmod(target, 0o644)
         raise live_apply_writer.LiveApplyAtomicDeleteBaselineMismatch
 
