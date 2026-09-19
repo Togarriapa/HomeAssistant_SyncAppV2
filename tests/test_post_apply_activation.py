@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from ha_syncapp import live_apply_writer
 from ha_syncapp.apply_authorization import ApplyAuthorization
 from ha_syncapp.candidate_backup import CandidateBackupEvidence
 from ha_syncapp.candidate_stage import CandidateStage, CandidateStageEntry
@@ -15,6 +17,7 @@ from ha_syncapp.live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from ha_syncapp.live_apply_preconditions import prove_live_apply_preconditions
 from ha_syncapp.live_apply_writer import apply_live_operation
 from ha_syncapp.post_apply_activation import (
+    PostApplyActivationAuthorization,
     PostApplyActivationError,
     authorize_post_apply_activation,
     load_post_apply_activation_authorization,
@@ -125,7 +128,9 @@ def _chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, empty: bool = Fal
     store.record_prepared_deployment(prepared.deployment_id, backup)
     record_live_apply_intent(store, authorization, stage_evidence, plan, preconditions)
     monkeypatch.setattr("ha_syncapp.live_apply_writer.verify_candidate_stage", lambda _stage: None)
-    monkeypatch.setattr("ha_syncapp.post_apply_activation.verify_candidate_stage", lambda _stage: None)
+    monkeypatch.setattr(
+        "ha_syncapp.post_apply_activation.verify_candidate_stage", lambda _stage: None
+    )
     return store, authorization, stage_evidence, stage, plan, preconditions
 
 
@@ -133,7 +138,9 @@ def test_complete_apply_is_durably_authorized_idempotently(tmp_path: Path, monke
     chain = _chain(tmp_path, monkeypatch)
     store, authorization, stage_evidence, stage, plan, preconditions = chain
     try:
-        apply_live_operation(store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0)
+        apply_live_operation(
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+        )
         first = authorize_post_apply_activation(store, *chain[1:])
         replay = authorize_post_apply_activation(store, *chain[1:])
 
@@ -141,7 +148,10 @@ def test_complete_apply_is_durably_authorized_idempotently(tmp_path: Path, monke
         assert first.authorization is not None
         assert replay.authorization == first.authorization
         assert replay.replayed is True
-        assert load_post_apply_activation_authorization(store, plan.deployment_id) == first.authorization
+        assert (
+            load_post_apply_activation_authorization(store, plan.deployment_id)
+            == first.authorization
+        )
     finally:
         store.__exit__(None, None, None)
 
@@ -157,7 +167,9 @@ def test_incomplete_apply_cannot_authorize_activation(tmp_path: Path, monkeypatc
         store.__exit__(None, None, None)
 
 
-def test_empty_plan_is_no_activation_required_and_is_not_persisted(tmp_path: Path, monkeypatch) -> None:
+def test_empty_plan_is_no_activation_required_and_is_not_persisted(
+    tmp_path: Path, monkeypatch
+) -> None:
     chain = _chain(tmp_path, monkeypatch, empty=True)
     store = chain[0]
     try:
@@ -173,7 +185,9 @@ def test_corrupt_verified_progress_fails_closed(tmp_path: Path, monkeypatch) -> 
     chain = _chain(tmp_path, monkeypatch)
     store, authorization, stage_evidence, stage, plan, preconditions = chain
     try:
-        apply_live_operation(store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0)
+        apply_live_operation(
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+        )
         store._connection.execute(
             "UPDATE live_apply_progress SET operation_path_sha256 = ? WHERE deployment_id = ?",
             ("f" * 64, plan.deployment_id),
@@ -181,5 +195,71 @@ def test_corrupt_verified_progress_fails_closed(tmp_path: Path, monkeypatch) -> 
         store._connection.commit()
         with pytest.raises(PostApplyActivationError, match="invalid"):
             authorize_post_apply_activation(store, *chain[1:])
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_uncertain_apply_cannot_authorize_activation(tmp_path: Path, monkeypatch) -> None:
+    chain = _chain(tmp_path, monkeypatch)
+    store = chain[0]
+
+    def interrupt_before_write(*_args, **_kwargs):
+        raise SystemExit("simulated interruption")
+
+    monkeypatch.setattr(live_apply_writer, "_mutate_operation", interrupt_before_write)
+    try:
+        with pytest.raises(SystemExit):
+            apply_live_operation(store, *chain[1:], operation_index=0)
+        with pytest.raises(PostApplyActivationError, match="not complete"):
+            authorize_post_apply_activation(store, *chain[1:])
+        assert load_post_apply_activation_authorization(store, chain[4].deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_persisted_authorization_tampering_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    chain = _chain(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        apply_live_operation(store, *chain[1:], operation_index=0)
+        authorize_post_apply_activation(store, *chain[1:])
+        store._connection.execute(
+            "UPDATE post_apply_activation_authorization SET candidate_sha = ? "
+            "WHERE deployment_id = ?",
+            ("e" * 40, chain[4].deployment_id),
+        )
+        store._connection.commit()
+        with pytest.raises(PostApplyActivationError, match="state is invalid"):
+            load_post_apply_activation_authorization(store, chain[4].deployment_id)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_activation_authorization_is_not_constructible_from_scalars() -> None:
+    assert tuple(inspect.signature(PostApplyActivationAuthorization).parameters) == ()
+    with pytest.raises(TypeError):
+        PostApplyActivationAuthorization(  # type: ignore[call-arg]
+            deployment_id="forged",
+            target="owner/private-repo",
+        )
+
+
+def test_stage_verification_failure_is_sanitized(tmp_path: Path, monkeypatch) -> None:
+    chain = _chain(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        apply_live_operation(store, *chain[1:], operation_index=0)
+
+        def fail_with_private_detail(_stage):
+            raise RuntimeError("SECRET /homeassistant/private.yaml")
+
+        monkeypatch.setattr(
+            "ha_syncapp.post_apply_activation.verify_candidate_stage",
+            fail_with_private_detail,
+        )
+        with pytest.raises(PostApplyActivationError, match="evidence is invalid") as caught:
+            authorize_post_apply_activation(store, *chain[1:])
+        assert "SECRET" not in str(caught.value)
+        assert "private.yaml" not in str(caught.value)
     finally:
         store.__exit__(None, None, None)
