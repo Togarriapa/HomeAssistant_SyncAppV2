@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -387,6 +387,20 @@ class StateStore:
             "PRIMARY KEY (deployment_id, operation_index))"
         )
 
+    @staticmethod
+    def _create_post_apply_activation_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS post_apply_activation_authorization ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, "
+            "stage_manifest_sha256 TEXT NOT NULL, backup_slug TEXT NOT NULL, "
+            "intent_record_sha256 TEXT NOT NULL, operations_sha256 TEXT NOT NULL, "
+            "operation_count INTEGER NOT NULL CHECK (operation_count > 0), "
+            "action TEXT NOT NULL CHECK (action = 'restart_core'), "
+            "authorized_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -433,6 +447,7 @@ class StateStore:
                 self._create_live_apply_intent_table(db)
                 self._create_live_apply_progress_table(db)
                 self._create_live_apply_recovery_tables(db)
+                self._create_post_apply_activation_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -440,7 +455,7 @@ class StateStore:
             finally:
                 os.close(root_fd)
         else:
-            if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION}:
+            if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION}:
                 raise StateError("Unsupported state schema")
             self._identity()
             if version == 1:
@@ -495,6 +510,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_live_apply_recovery_tables(db)
+                    db.execute("PRAGMA user_version = 10")
+                version = 10
+            if version == 10:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_post_apply_activation_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
