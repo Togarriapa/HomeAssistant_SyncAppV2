@@ -15,6 +15,7 @@ def test_defaults_are_passive(tmp_path: Path) -> None:
     assert load_config(write_options(tmp_path, {})) == Config(
         log_level="info",
         status_interval_seconds=300,
+        deployment_observation_seconds=300,
         repo_b=None,
         github_token=None,
         recorder_database_path=None,
@@ -29,6 +30,7 @@ def test_explicit_options(tmp_path: Path) -> None:
             {
                 "log_level": "warning",
                 "status_interval_seconds": 30,
+                "deployment_observation_seconds": 600,
                 "repo_b": "Owner/Home",
                 "github_token": "secret-sentinel",
                 "recorder_database_path": "/homeassistant/recorder.db",
@@ -38,6 +40,7 @@ def test_explicit_options(tmp_path: Path) -> None:
     )
     assert config.log_level == "warning"
     assert config.status_interval_seconds == 30
+    assert config.deployment_observation_seconds == 600
     assert config.repo_b == "Owner/Home"
     assert config.github_token == "secret-sentinel"
     assert config.recorder_database_path == "/homeassistant/recorder.db"
@@ -59,6 +62,11 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"status_interval_seconds": 30.0},
         {"status_interval_seconds": 29},
         {"status_interval_seconds": 3601},
+        {"deployment_observation_seconds": True},
+        {"deployment_observation_seconds": "300"},
+        {"deployment_observation_seconds": 30.0},
+        {"deployment_observation_seconds": 29},
+        {"deployment_observation_seconds": 3601},
         {"repo_b": "Owner/Home"},
         {"github_token": "secret-sentinel"},
         {"repo_b": "https://github.com/Owner/Home", "github_token": "secret-sentinel"},
