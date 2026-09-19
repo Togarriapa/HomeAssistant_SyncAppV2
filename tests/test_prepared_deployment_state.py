@@ -203,7 +203,7 @@ def test_v4_migration_preserves_all_existing_state(tmp_path):
         assert store.enqueue_work("candidate", EVIDENCE.candidate_sha, now=WHEN) == work
         assert _record(store).evidence == EVIDENCE
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 13
 
 
 def test_insert_failure_is_atomic_and_sanitized(tmp_path):
