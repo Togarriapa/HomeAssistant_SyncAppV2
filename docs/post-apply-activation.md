@@ -1,9 +1,9 @@
 # Post-Apply Core activation authorization
 
 `authorize_post_apply_activation()` is the fail-closed boundary between completed
-path-level Apply and a future Home Assistant Core restart transport. It does not call
-the Supervisor API. It only records that one exact non-empty deployment is eligible
-for the separately implemented activation step.
+path-level Apply and the separately journaled Home Assistant Core restart transport. It
+does not call the Supervisor API. It only records that one exact non-empty deployment
+is eligible for activation.
 
 ## Complete evidence requirement
 
@@ -30,10 +30,11 @@ Bounded discovery returns at most 4,096 fully revalidated authorizations in stab
 authorization-time/deployment order. It grants no execution authority by itself and gives
 a future Retrigger worker a deterministic way to find interrupted activation work.
 
-The authorization class cannot be constructed from caller-supplied scalar fields. A
-future restart transport must load and revalidate the durable record and must still own
-its own bounded Supervisor call, journal-before-mutation semantics, crash reconciliation,
-locking, retry classification, and runtime reporting.
+The authorization class cannot be constructed from caller-supplied scalar fields. The
+[Core restart transport](core-restart-transport.md) reloads this durable record and owns
+the bounded Supervisor request plus journal-before-mutation ordering. Observation,
+uncertain-outcome reconciliation, retry classification, and runtime reporting remain
+separate responsibilities.
 
 ## Authority boundary
 
