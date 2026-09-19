@@ -161,15 +161,15 @@ def request_core_restart_once(
 ) -> CoreRestartResult:
     """Journal first, then request one exact restart without blind replay."""
     _validate_authorization(store, authorization)
-    bearer = _resolve_token(token)
-    _validate_limits(timeout_seconds, max_response_bytes)
-    when = _timestamp(now)
     existing = load_core_restart_attempt(store, authorization.deployment_id)
     if existing is not None:
         if existing.phase == "request_acknowledged":
             return CoreRestartResult("request_acknowledged", replayed=True)
         return CoreRestartResult("reconciliation_required", replayed=True)
 
+    bearer = _resolve_token(token)
+    _validate_limits(timeout_seconds, max_response_bytes)
+    when = _timestamp(now)
     attempt, inserted = _record_started(store, authorization, when)
     if not inserted:
         if attempt.phase == "request_acknowledged":
