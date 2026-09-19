@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp.core_health_observation import CoreHealthResponse
 from ha_syncapp.core_health_window import advance_core_health_window_once
 from ha_syncapp.supervisor_health_observation import (
     SupervisorHealthError,
@@ -30,9 +31,9 @@ def _completed_window(tmp_path: Path, monkeypatch):
         observation_seconds=300,
         now=START + timedelta(seconds=300),
         token=TOKEN,
-        transport=lambda *_args: __import__(
-            "ha_syncapp.core_health_observation", fromlist=["CoreHealthResponse"]
-        ).CoreHealthResponse(200, "application/json", b'{"message":"API running."}'),
+        transport=lambda *_args: CoreHealthResponse(
+            200, "application/json", b'{"message":"API running."}'
+        ),
     )
     return chain, authorization
 
@@ -69,9 +70,7 @@ def test_records_one_exact_bounded_authenticated_supervisor_read(
                 4096,
             )
         ]
-        observation = load_supervisor_health_observation(
-            store, authorization.deployment_id
-        )
+        observation = load_supervisor_health_observation(store, authorization.deployment_id)
         assert observation is not None
         assert observation.observed_at == START + timedelta(seconds=301)
     finally:
@@ -106,13 +105,31 @@ def test_completed_replay_is_credential_and_network_free(tmp_path: Path, monkeyp
         SupervisorHealthResponse(503, "application/json", b"{}"),
         SupervisorHealthResponse(200, "text/plain", b"{}"),
         SupervisorHealthResponse(200, "application/json", b"not-json"),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"error","data":{"healthy":true,"supported":true}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","extra":1,"data":{"healthy":true,"supported":true}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","data":{"healthy":false,"supported":true}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","data":{"healthy":true,"supported":false}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","data":{"healthy":1,"supported":true}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","data":{"healthy":true}}'),
-        SupervisorHealthResponse(200, "application/json", b'{"result":"ok","result":"ok","data":{"healthy":true,"supported":true}}'),
+        SupervisorHealthResponse(
+            200, "application/json", b'{"result":"error","data":{"healthy":true,"supported":true}}'
+        ),
+        SupervisorHealthResponse(
+            200,
+            "application/json",
+            b'{"result":"ok","extra":1,"data":{"healthy":true,"supported":true}}',
+        ),
+        SupervisorHealthResponse(
+            200, "application/json", b'{"result":"ok","data":{"healthy":false,"supported":true}}'
+        ),
+        SupervisorHealthResponse(
+            200, "application/json", b'{"result":"ok","data":{"healthy":true,"supported":false}}'
+        ),
+        SupervisorHealthResponse(
+            200, "application/json", b'{"result":"ok","data":{"healthy":1,"supported":true}}'
+        ),
+        SupervisorHealthResponse(
+            200, "application/json", b'{"result":"ok","data":{"healthy":true}}'
+        ),
+        SupervisorHealthResponse(
+            200,
+            "application/json",
+            b'{"result":"ok","result":"ok","data":{"healthy":true,"supported":true}}',
+        ),
     ],
 )
 def test_invalid_or_unacceptable_response_persists_no_authority(
@@ -128,10 +145,7 @@ def test_invalid_or_unacceptable_response_persists_no_authority(
                 token=TOKEN,
                 transport=lambda *_args: response,
             )
-        assert (
-            load_supervisor_health_observation(store, authorization.deployment_id)
-            is None
-        )
+        assert load_supervisor_health_observation(store, authorization.deployment_id) is None
     finally:
         store.__exit__(None, None, None)
 
@@ -201,3 +215,48 @@ def test_tampered_binding_fails_closed(tmp_path: Path, monkeypatch) -> None:
     finally:
         store.__exit__(None, None, None)
 
+
+def test_observation_cannot_predate_completed_window(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _completed_window(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(SupervisorHealthError, match="state is invalid"):
+            observe_supervisor_health_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=299),
+                transport=lambda *_args: SUPERVISOR_HEALTHY,
+            )
+        assert load_supervisor_health_observation(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_persistence_failure_is_sanitized_and_records_no_authority(
+    tmp_path: Path, monkeypatch
+) -> None:
+    chain, authorization = _completed_window(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        store._connection.execute(
+            "CREATE TRIGGER reject_supervisor_health BEFORE INSERT ON "
+            "supervisor_health_observation BEGIN SELECT RAISE(ABORT, 'secret detail'); END"
+        )
+        with pytest.raises(SupervisorHealthError, match="state is invalid") as error:
+            observe_supervisor_health_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=301),
+                transport=lambda *_args: SUPERVISOR_HEALTHY,
+            )
+        assert "secret detail" not in str(error.value)
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM supervisor_health_observation"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        store.__exit__(None, None, None)
