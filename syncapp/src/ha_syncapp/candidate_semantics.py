@@ -32,7 +32,7 @@ from .core_version_evidence import CoreVersionEvidence, verify_core_version_evid
 from .runtime_inventory import RuntimeInventoryInput
 
 # Updated together with the pinned official Core image and actual-image CI fixtures.
-BUNDLED_CORE_VERSION = "2026.9.1"
+BUNDLED_CORE_VERSION = "2026.9.3"
 _VALIDATOR = "homeassistant.check_config.fail_on_warnings"
 _VALIDATOR_PYTHON = "/opt/syncapp-validator/python3"
 _TIMEOUT_SECONDS = 180
