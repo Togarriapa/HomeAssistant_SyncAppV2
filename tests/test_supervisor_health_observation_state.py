@@ -11,8 +11,7 @@ def test_current_schema_contains_supervisor_health_observation_table(tmp_path: P
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         columns = tuple(
-            row[1]
-            for row in db.execute("PRAGMA table_info(supervisor_health_observation)")
+            row[1] for row in db.execute("PRAGMA table_info(supervisor_health_observation)")
         )
         assert columns == (
             "deployment_id",
