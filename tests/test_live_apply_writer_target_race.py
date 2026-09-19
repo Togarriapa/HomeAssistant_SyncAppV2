@@ -87,6 +87,7 @@ def test_deleted_leaf_replacement_at_mutation_boundary_fails_closed(
     os.chmod(target, 0o644)
     operation = _operation(status="deleted", candidate_mode=None)
     expected_root_identity, expected_parent_identities = _identities(live, operation)
+
     def reject_after_leaf_race(*_args, **_kwargs):
         target.write_bytes(b"changed-after-proof\\n")
         os.chmod(target, 0o644)
