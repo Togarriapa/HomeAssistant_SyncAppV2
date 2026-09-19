@@ -76,7 +76,7 @@ def test_acknowledged_replay_never_restarts_again(tmp_path: Path, monkeypatch) -
 
     try:
         request_core_restart_once(store, authorization, token=TOKEN, transport=transport)
-        replay = request_core_restart_once(store, authorization, token=TOKEN, transport=transport)
+        replay = request_core_restart_once(store, authorization, transport=transport)
         assert replay.status == "request_acknowledged"
         assert replay.replayed is True
         assert calls == 1
@@ -102,7 +102,7 @@ def test_uncertain_started_attempt_never_blindly_restarts(tmp_path: Path, monkey
         def forbidden(*_args):
             pytest.fail("uncertain restart was sent twice")
 
-        retry = request_core_restart_once(store, authorization, token=TOKEN, transport=forbidden)
+        retry = request_core_restart_once(store, authorization, transport=forbidden)
         assert retry.status == "reconciliation_required"
         assert retry.replayed is True
     finally:
