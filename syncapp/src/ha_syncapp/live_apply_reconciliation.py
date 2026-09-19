@@ -16,7 +16,7 @@ from .live_apply_intent import LiveApplyIntent, derive_live_apply_intent
 from .live_apply_intent_store import load_live_apply_intent
 from .live_apply_plan import LiveApplyOperation, LiveApplyPlan
 from .live_apply_preconditions import LiveApplyPreconditionEvidence
-from .live_apply_progress import transition_live_apply_progress
+from .live_apply_progress import LiveApplyProgress, transition_live_apply_progress
 from .live_apply_progress_store import (
     discover_live_apply_recovery,
     load_live_apply_progress,
@@ -80,11 +80,16 @@ def reconcile_live_apply_operation(
         _reject("operation is not the uncertain live Apply action")
 
     try:
+        verify_candidate_stage(stage)
+    except Exception:
+        return _finish_reconciliation(store, persisted.progress, plan, "ambiguous")
+
+    try:
         guard = load_live_apply_mutation_guard(store, intent.deployment_id, operation_index)
     except StateError:
-        _reject("live Apply mutation guard is invalid")
+        return _finish_reconciliation(store, persisted.progress, plan, "ambiguous")
     if guard is None:
-        _reject("live Apply mutation guard is missing")
+        return _finish_reconciliation(store, persisted.progress, plan, "ambiguous")
     if (
         guard.deployment_id,
         guard.operation_index,
@@ -98,27 +103,36 @@ def reconcile_live_apply_operation(
         persisted.operations_sha256,
         persisted.operation_path_sha256,
     ):
-        _reject("live Apply mutation guard binding mismatch")
+        return _finish_reconciliation(store, persisted.progress, plan, "ambiguous")
     outcome = _observe_outcome(Path(preconditions.root), operation, guard)
+    return _finish_reconciliation(store, persisted.progress, plan, outcome)
+
+
+def _finish_reconciliation(
+    store: StateStore,
+    progress: LiveApplyProgress,
+    plan: LiveApplyPlan,
+    outcome: str,
+) -> LiveApplyReconciliationResult:
     try:
         record_live_apply_reconciliation(
             store,
-            persisted.progress,
+            progress,
             plan=plan,
             outcome=outcome,
         )
         destination = "mutation_verified" if outcome == "applied" else "blocked"
         record_live_apply_progress(
             store,
-            transition_live_apply_progress(persisted.progress, destination),
+            transition_live_apply_progress(progress, destination),
             plan=plan,
         )
     except StateError:
         _reject("unable to persist live Apply reconciliation")
     return LiveApplyReconciliationResult(
         outcome,
-        operation_index,
-        persisted.operation_path_sha256,
+        progress.operation_index,
+        progress.operation_path_sha256,
     )
 
 
@@ -155,10 +169,6 @@ def _validate_chain(
         intent.operations_sha256,
     ):
         _reject("durable live Apply intent binding mismatch")
-    try:
-        verify_candidate_stage(stage)
-    except Exception:
-        _reject("candidate Stage integrity re-verification failed")
     _validate_stage_binding(stage_evidence, stage, plan)
     if (
         type(preconditions) is not LiveApplyPreconditionEvidence
