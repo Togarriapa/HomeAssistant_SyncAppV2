@@ -388,10 +388,15 @@ def _mutate_operation(
             except LiveApplyAtomicDeleteBaselineMismatch:
                 raise _PreMutationMismatch from None
         elif operation.status == "mode_changed":
-            if operation.baseline_object_id is None or operation.baseline_mode not in {
-                "100644",
-                "100755",
-            } or operation.candidate_mode not in {"100644", "100755"}:
+            if (
+                operation.baseline_object_id is None
+                or operation.baseline_mode
+                not in {
+                    "100644",
+                    "100755",
+                }
+                or operation.candidate_mode not in {"100644", "100755"}
+            ):
                 _reject("mode baseline identity is invalid")
             try:
                 commit_verified_mode_leaf(
