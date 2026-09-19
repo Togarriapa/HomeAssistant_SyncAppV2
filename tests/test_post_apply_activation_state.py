@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_current_schema_contains_post_apply_activation_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 14
+    assert SCHEMA_VERSION == 15
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"
@@ -28,7 +28,7 @@ def test_current_schema_contains_post_apply_activation_table(tmp_path: Path) -> 
             "authorized_at",
             "record_sha256",
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
 
 
 def test_schema_v10_migrates_activation_table_without_losing_work(tmp_path: Path) -> None:
@@ -44,4 +44,4 @@ def test_schema_v10_migrates_activation_table_without_losing_work(tmp_path: Path
         assert item is not None
         assert item.work_key == "preserve-me"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
