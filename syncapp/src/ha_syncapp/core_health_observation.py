@@ -142,6 +142,8 @@ def observe_core_api_once(
     requested = CoreHealthObservation.create(
         deployment_id, restart.record_sha256, _timestamp(observed_at)
     )
+    if requested.observed_at < restart.updated_at:
+        _invalid_state()
     return _record_observation(store, requested)
 
 
@@ -168,6 +170,7 @@ def load_core_health_observation(
             restart is None
             or restart.phase != "request_acknowledged"
             or restart.record_sha256 != result.restart_attempt_sha256
+            or result.observed_at < restart.updated_at
         ):
             _invalid_state()
         return result
@@ -182,7 +185,10 @@ def _record_observation(store: StateStore, requested: CoreHealthObservation) -> 
         with store._connection as db:
             db.execute("BEGIN IMMEDIATE")
             restart = _acknowledged_restart(store, requested.deployment_id)
-            if restart.record_sha256 != requested.restart_attempt_sha256:
+            if (
+                restart.record_sha256 != requested.restart_attempt_sha256
+                or requested.observed_at < restart.updated_at
+            ):
                 _invalid_state()
             existing = load_core_health_observation(store, requested.deployment_id)
             if existing is not None:
