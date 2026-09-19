@@ -57,19 +57,12 @@ def test_modified_leaf_replacement_at_mutation_boundary_fails_closed(
     )
     expected_root_identity, expected_parent_identities = _identities(live, operation)
 
-    real_replace = os.replace
-
-    def replace_after_leaf_race(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
-        target.write_bytes(b"changed-after-proof\n")
+    def reject_after_leaf_race(*_args, **_kwargs):
+        target.write_bytes(b"changed-after-proof\\n")
         os.chmod(target, 0o644)
-        return real_replace(
-            src,
-            dst,
-            src_dir_fd=src_dir_fd,
-            dst_dir_fd=dst_dir_fd,
-        )
+        raise live_apply_writer.LiveApplyAtomicBaselineMismatch
 
-    monkeypatch.setattr(live_apply_writer.os, "replace", replace_after_leaf_race)
+    monkeypatch.setattr(live_apply_writer, "commit_verified_modified_leaf", reject_after_leaf_race)
 
     with pytest.raises(live_apply_writer._PreMutationMismatch):
         live_apply_writer._mutate_operation(
@@ -94,18 +87,12 @@ def test_deleted_leaf_replacement_at_mutation_boundary_fails_closed(
     os.chmod(target, 0o644)
     operation = _operation(status="deleted", candidate_mode=None)
     expected_root_identity, expected_parent_identities = _identities(live, operation)
-    real_unlink = os.unlink
-    raced = False
+    def reject_after_leaf_race(*_args, **_kwargs):
+        target.write_bytes(b"changed-after-proof\\n")
+        os.chmod(target, 0o644)
+        raise live_apply_writer.LiveApplyAtomicDeleteBaselineMismatch
 
-    def unlink_after_leaf_race(path, *, dir_fd=None):
-        nonlocal raced
-        if path == "automations.yaml" and not raced:
-            raced = True
-            target.write_bytes(b"changed-after-proof\n")
-            os.chmod(target, 0o644)
-        return real_unlink(path, dir_fd=dir_fd)
-
-    monkeypatch.setattr(live_apply_writer.os, "unlink", unlink_after_leaf_race)
+    monkeypatch.setattr(live_apply_writer, "commit_verified_deleted_leaf", reject_after_leaf_race)
 
     with pytest.raises(live_apply_writer._PreMutationMismatch):
         live_apply_writer._mutate_operation(
