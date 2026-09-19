@@ -188,6 +188,35 @@ def test_modified_file_is_journaled_then_atomically_verified(tmp_path: Path, mon
         _close(store)
 
 
+def test_exact_retry_after_verified_is_idempotent(tmp_path: Path, monkeypatch) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+    live = Path(preconditions.root)
+    try:
+        first = apply_live_operation(
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+        )
+        assert first.replayed is False
+
+        def reject_second_mutation(*_args, **_kwargs):
+            raise AssertionError("verified replay must not mutate")
+
+        monkeypatch.setattr(
+            "ha_syncapp.live_apply_writer._mutate_operation", reject_second_mutation
+        )
+        replay = apply_live_operation(
+            store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+        )
+
+        assert replay.status == "mutation_verified"
+        assert replay.replayed is True
+        assert replay.operation_path_sha256 == first.operation_path_sha256
+        assert (live / "automations.yaml").read_bytes() == b"candidate\n"
+        progress = discover_live_apply_progress(store, plan.deployment_id)
+        assert [item.phase for item in progress] == ["mutation_verified"]
+    finally:
+        _close(store)
+
+
 def test_progress_persistence_failure_happens_before_any_mutation(
     tmp_path: Path, monkeypatch
 ) -> None:
