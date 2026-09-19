@@ -49,9 +49,7 @@ def advance_live_apply_once(
     if decision.action == "blocked":
         if decision.operation_index is None:
             raise StateError("Blocked live Apply recovery state has no operation")
-        record = load_live_apply_reconciliation(
-            store, plan.deployment_id, decision.operation_index
-        )
+        record = load_live_apply_reconciliation(store, plan.deployment_id, decision.operation_index)
         if record is None or record.outcome not in {"not_applied", "ambiguous"}:
             raise StateError("Blocked live Apply recovery state lacks reconciliation")
         return LiveApplyControllerResult(
@@ -112,9 +110,7 @@ def _validate_exact_intent(
     if type(store) is not StateStore:
         raise StateError("Invalid bounded live Apply state store")
     try:
-        intent = derive_live_apply_intent(
-            authorization, stage_evidence, plan, preconditions
-        )
+        intent = derive_live_apply_intent(authorization, stage_evidence, plan, preconditions)
         persisted = load_live_apply_intent(store, intent.deployment_id)
     except Exception:
         raise StateError("Bounded live Apply evidence chain is invalid") from None
