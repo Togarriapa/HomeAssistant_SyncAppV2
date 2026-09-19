@@ -313,3 +313,33 @@ def test_root_replacement_after_final_precondition_proof_is_rejected(
         assert progress[-1].phase == "blocked"
     finally:
         _close(store)
+
+
+def test_crash_after_write_before_verification_requires_reconciliation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+    live = Path(preconditions.root)
+
+    def crash_after_write(*_args, **_kwargs):
+        assert (live / "automations.yaml").read_bytes() == b"candidate\n"
+        raise SystemExit("simulated process interruption")
+
+    monkeypatch.setattr(
+        "ha_syncapp.live_apply_writer._verify_postcondition",
+        crash_after_write,
+    )
+    try:
+        with pytest.raises(SystemExit, match="simulated process interruption"):
+            apply_live_operation(
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+            )
+        assert (live / "automations.yaml").read_bytes() == b"candidate\n"
+        progress = discover_live_apply_progress(store, plan.deployment_id)
+        assert progress[-1].phase == "mutation_started"
+        with pytest.raises(LiveApplyWriterError, match="reconciliation"):
+            apply_live_operation(
+                store, authorization, stage_evidence, stage, plan, preconditions, operation_index=0
+            )
+    finally:
+        _close(store)
