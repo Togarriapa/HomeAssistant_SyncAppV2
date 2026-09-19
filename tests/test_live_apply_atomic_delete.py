@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.live_apply_atomic_delete import (
     LiveApplyAtomicDeleteBaselineMismatch,
     LiveApplyAtomicDeleteError,
