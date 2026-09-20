@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .deployment_rollback import DeploymentRollback
+from .deployment_rollback import execute_deployment_restore_once as execute_rollback_restore
 from .deployment_rollback import (
-    DeploymentRollback,
-    execute_deployment_restore_once as execute_rollback_restore,
     reconcile_deployment_restore_once as reconcile_pending_rollback,
 )
 from .state import StateStore
