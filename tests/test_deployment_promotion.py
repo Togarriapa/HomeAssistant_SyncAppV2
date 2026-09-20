@@ -39,8 +39,12 @@ class Remote:
 def _ready(tmp_path, monkeypatch):
     chain, plan = _successful(tmp_path, monkeypatch)
     store = chain[0]
-    finalize_deployment_once(store, plan, finalized_at=START + timedelta(seconds=308))
-    prepared = store.prepared_deployment(plan.automation_target.resource_target.deployment_id)
+    finalize_deployment_once(
+        store, plan, finalized_at=START + timedelta(seconds=308)
+    )
+    prepared = store.prepared_deployment(
+        plan.automation_target.resource_target.deployment_id
+    )
     assert prepared is not None
     baseline = prepared.evidence.baseline_sha
     candidate = prepared.evidence.candidate_sha
@@ -113,7 +117,9 @@ def test_crash_after_atomic_publication_is_reconciled_without_second_push(
             plan,
             token=TOKEN,
             remote_reader=remote.read,
-            publisher=lambda *_args: pytest.fail("reconciliation repeated publication"),
+            publisher=lambda *_args: pytest.fail(
+                "reconciliation repeated publication"
+            ),
             observed_at=START + timedelta(seconds=310),
         )
         assert recovered.status == "completed"
@@ -173,12 +179,16 @@ def test_safe_partial_remote_state_completes_only_missing_ref(
             observed_at=START + timedelta(seconds=309),
         )
         assert result.status == "completed"
-        assert remote.publications == [(load_deployment_promotion(store, plan).record_sha256, initial)]
+        promotion = load_deployment_promotion(store, plan)
+        assert promotion is not None
+        assert remote.publications == [(promotion.record_sha256, initial)]
     finally:
         store.__exit__(None, None, None)
 
 
-def test_persistence_failure_prevents_network_and_schema_22_migrates(tmp_path, monkeypatch):
+def test_persistence_failure_prevents_network_and_schema_22_migrates(
+    tmp_path, monkeypatch
+):
     store, plan, baseline, candidate = _ready(tmp_path, monkeypatch)
     root = store._root
     store._connection.execute(
