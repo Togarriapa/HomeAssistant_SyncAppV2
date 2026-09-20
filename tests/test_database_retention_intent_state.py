@@ -80,4 +80,4 @@ def test_schema_v5_migrates_retention_intent_without_losing_work(tmp_path: Path)
         assert migrated.database_retention_intent(WORK_KEY) is None
 
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 19
