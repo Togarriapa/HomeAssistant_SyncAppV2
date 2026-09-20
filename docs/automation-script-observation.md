@@ -9,8 +9,9 @@ This gate requires the preceding affected-entity state proof to be successful.
 For a non-empty relevant set it performs one bounded, authenticated, read-only
 Core WebSocket `get_states` request. Each expected entity must occur exactly
 once with exact state `on` or `off`. Other states are durably classified as a
-deterministic load failure. Missing or malformed entities remain an incomplete,
-retryable observation because the snapshot itself could not prove the result.
+deterministic load failure. Missing, duplicate, or malformed relevant entities
+also become durable deterministic load failures and are not retried unchanged.
+Transport and protocol failures remain incomplete and retryable.
 
 Schema-v20 evidence stores prerequisite and target digests, observation time,
 and expected/loaded/failed counts only. It excludes identifiers, states,
