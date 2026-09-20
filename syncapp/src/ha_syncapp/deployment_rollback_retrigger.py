@@ -25,12 +25,19 @@ class DeploymentRollbackRetriggerResult:
 
 
 def _validate_token(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value or len(value) > 512 or any(c.isspace() for c in value):
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 512
+        or any(c.isspace() for c in value)
+    ):
         raise DeploymentRollbackRetriggerError(f"invalid {name}")
     return value
 
 
-def list_retryable_rollbacks(store: StateStore, reference_time: datetime) -> list[DeploymentRollback]:
+def list_retryable_rollbacks(
+    store: StateStore, reference_time: datetime
+) -> list[DeploymentRollback]:
     """Return bounded retryable rollback records; wired to durable discovery in the next slice."""
     del store, reference_time
     return []
@@ -67,11 +74,15 @@ def run_deployment_rollback_retrigger_pass(
     considered = len(pending)
     for rollback in pending[:1]:
         if rollback_requires_reconciliation(rollback):
-            reconcile_pending_rollback(store, rollback, supervisor_token=core_token, observed_at=reference_time)  # type: ignore[arg-type]
+            reconcile_pending_rollback(
+                store, rollback, supervisor_token=core_token, observed_at=reference_time
+            )  # type: ignore[arg-type]
             return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
         if reference_time < next_retry_at(rollback):
             return DeploymentRollbackRetriggerResult(0, considered, None)
-        execute_rollback_restore(store, rollback, supervisor_token=core_token, attempted_at=reference_time)  # type: ignore[arg-type]
+        execute_rollback_restore(
+            store, rollback, supervisor_token=core_token, attempted_at=reference_time
+        )  # type: ignore[arg-type]
         return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
 
     return DeploymentRollbackRetriggerResult(0, considered, None)
