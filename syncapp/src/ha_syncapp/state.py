@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -524,6 +524,24 @@ class StateStore:
             "record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_deployment_finalization_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS deployment_finalization ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, candidate_sha TEXT NOT NULL, "
+            "backup_slug TEXT NOT NULL, prepared_deployment_sha256 TEXT NOT NULL, "
+            "target_sha256 TEXT NOT NULL, terminal_evidence_sha256 TEXT NOT NULL, "
+            "chain_sha256 TEXT NOT NULL, outcome TEXT NOT NULL "
+            "CHECK (outcome IN ('success', 'failure')), failure_stage TEXT NOT NULL "
+            "CHECK (failure_stage IN ('none', 'startup_errors', 'entity_states', "
+            "'automation_script_load', 'post_deployment_assertions')), "
+            "completed_predicate_count INTEGER NOT NULL "
+            "CHECK (completed_predicate_count >= 1 AND completed_predicate_count <= 5), "
+            "failed_predicate_count INTEGER NOT NULL "
+            "CHECK (failed_predicate_count IN (0, 1)), finalized_at TEXT NOT NULL, "
+            "record_sha256 TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -581,6 +599,7 @@ class StateStore:
                 self._create_entity_state_observation_table(db)
                 self._create_automation_script_observation_table(db)
                 self._create_post_deployment_assertion_observation_table(db)
+                self._create_deployment_finalization_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -609,6 +628,7 @@ class StateStore:
                 18,
                 19,
                 20,
+                21,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -731,6 +751,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_post_deployment_assertion_observation_table(db)
+                    db.execute("PRAGMA user_version = 21")
+                version = 21
+            if version == 21:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_deployment_finalization_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
