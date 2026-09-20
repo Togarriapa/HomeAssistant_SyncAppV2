@@ -234,9 +234,7 @@ def observe_automation_scripts_once(
             _unavailable()
         for entity in target.entity_ids:
             matches = [
-                item
-                for item in states
-                if type(item) is dict and item.get("entity_id") == entity
+                item for item in states if type(item) is dict and item.get("entity_id") == entity
             ]
             if len(matches) == 1 and matches[0].get("state") in _LOADED_STATES:
                 loaded += 1
