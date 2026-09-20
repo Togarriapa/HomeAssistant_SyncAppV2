@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.deployment_rollback import DeploymentRollback
 from ha_syncapp.deployment_rollback_retrigger import (
     DeploymentRollbackRetriggerError,
