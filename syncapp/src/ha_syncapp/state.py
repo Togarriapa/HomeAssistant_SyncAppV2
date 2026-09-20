@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -491,6 +491,19 @@ class StateStore:
             "valid_count + invalid_count = expected_count), record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_automation_script_observation_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS automation_script_observation ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, "
+            "entity_state_observation_sha256 TEXT NOT NULL, target_sha256 TEXT NOT NULL, "
+            "observed_at TEXT NOT NULL, expected_count INTEGER NOT NULL "
+            "CHECK (expected_count >= 0), loaded_count INTEGER NOT NULL "
+            "CHECK (loaded_count >= 0 AND loaded_count <= expected_count), "
+            "failed_count INTEGER NOT NULL CHECK (failed_count >= 0 AND "
+            "loaded_count + failed_count = expected_count), record_sha256 TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -546,6 +559,7 @@ class StateStore:
                 self._create_startup_error_observation_table(db)
                 self._create_resource_availability_observation_table(db)
                 self._create_entity_state_observation_table(db)
+                self._create_automation_script_observation_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -572,6 +586,7 @@ class StateStore:
                 16,
                 17,
                 18,
+                19,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -682,6 +697,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_entity_state_observation_table(db)
+                    db.execute("PRAGMA user_version = 19")
+                version = 19
+            if version == 19:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_automation_script_observation_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
