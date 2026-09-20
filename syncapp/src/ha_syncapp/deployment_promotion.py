@@ -1,10 +1,4 @@
-"""Guarded, idempotent publication of finalized successful deployments.
-
-This module deliberately separates durable authorization/evidence from the GitHub
-transport.  The transport receives an immutable intent plus the remote state it
-was derived from; it must implement compare-and-swap semantics and must never
-force refs or merge divergent configuration states.
-"""
+"""Crash-safe authority and orchestration for known-good Git promotion."""
 
 from __future__ import annotations
 
@@ -12,32 +6,38 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable, NoReturn
+from typing import NoReturn
 
 from .deployment_finalization import (
+    DeploymentFinalization,
     DeploymentFinalizationError,
-    candidate_finalization_authority,
     load_deployment_finalization,
 )
-from .post_deployment_assertion_observation import PostDeploymentAssertionPlan
-from .prepared_deployment import PreparedDeploymentError
+from .post_deployment_assertion_observation import (
+    PostDeploymentAssertionObservationError,
+    PostDeploymentAssertionPlan,
+)
+from .prepared_deployment import PreparedDeploymentError, validate_deployment_id
 from .state import StateError, StateStore
 
 _COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
-_PHASES = {"planned", "completed", "blocked"}
+_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$")
+_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_TAG = re.compile(r"^syncapp-known-good-[0-9a-f-]{36}$")
+_TOKEN = re.compile(r"^[!-~]{1,512}$")
+_MAX_DISCOVERABLE_PROMOTIONS = 64
 
 
 class DeploymentPromotionError(RuntimeError):
-    """Promotion is unavailable or deterministically unsafe."""
+    """A known-good promotion could not proceed safely."""
 
 
 @dataclass(frozen=True, slots=True)
 class PromotionRemoteState:
-    """Minimal content-free Repo B state needed for guarded publication."""
-
     candidate_sha: str
     main_sha: str
     tag_sha: str | None
@@ -48,7 +48,7 @@ class PromotionRemoteState:
             or _COMMIT.fullmatch(self.main_sha) is None
             or (self.tag_sha is not None and _COMMIT.fullmatch(self.tag_sha) is None)
         ):
-            _invalid()
+            _invalid_state()
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,62 +57,148 @@ class DeploymentPromotion:
     target: str
     repository_id: int
     candidate_sha: str
-    prior_main_sha: str
-    finalization_sha256: str
+    baseline_sha: str
     backup_slug: str
-    tag: str
+    finalization_sha256: str
+    known_good_tag: str
     phase: str
-    recorded_at: datetime
-    completed_at: datetime | None
+    block_reason: str
+    planned_at: datetime
+    terminal_at: datetime | None
     record_sha256: str
 
-    def values_without_digest(self) -> tuple[object, ...]:
-        return (
+    @classmethod
+    def create(
+        cls,
+        *,
+        deployment_id: str,
+        target: str,
+        repository_id: int,
+        candidate_sha: str,
+        baseline_sha: str,
+        backup_slug: str,
+        finalization_sha256: str,
+        known_good_tag: str,
+        phase: str,
+        block_reason: str,
+        planned_at: datetime,
+        terminal_at: datetime | None,
+    ) -> DeploymentPromotion:
+        planned = _timestamp(planned_at)
+        terminal = None if terminal_at is None else _timestamp(terminal_at)
+        values: tuple[object, ...] = (
+            deployment_id,
+            target,
+            repository_id,
+            candidate_sha,
+            baseline_sha,
+            backup_slug,
+            finalization_sha256,
+            known_good_tag,
+            phase,
+            block_reason,
+            planned.isoformat(),
+            None if terminal is None else terminal.isoformat(),
+        )
+        result = cls(
+            deployment_id,
+            target,
+            repository_id,
+            candidate_sha,
+            baseline_sha,
+            backup_slug,
+            finalization_sha256,
+            known_good_tag,
+            phase,
+            block_reason,
+            planned,
+            terminal,
+            _digest(values),
+        )
+        result.validate()
+        return result
+
+    @classmethod
+    def from_database_row(cls, row: tuple[object, ...]) -> DeploymentPromotion:
+        if len(row) != 13 or type(row[2]) is not int:
+            _invalid_state()
+        try:
+            planned = datetime.fromisoformat(_text(row[10]))
+            terminal = None if row[11] is None else datetime.fromisoformat(_text(row[11]))
+        except ValueError:
+            _invalid_state()
+        result = cls(
+            _text(row[0]),
+            _text(row[1]),
+            row[2],
+            _text(row[3]),
+            _text(row[4]),
+            _text(row[5]),
+            _text(row[6]),
+            _text(row[7]),
+            _text(row[8]),
+            _text(row[9]),
+            planned,
+            terminal,
+            _text(row[12]),
+        )
+        result.validate()
+        if result.database_values() != row:
+            _invalid_state()
+        return result
+
+    def database_values(self) -> tuple[object, ...]:
+        self.validate()
+        values: tuple[object, ...] = (
             self.deployment_id,
             self.target,
             self.repository_id,
             self.candidate_sha,
-            self.prior_main_sha,
-            self.finalization_sha256,
+            self.baseline_sha,
             self.backup_slug,
-            self.tag,
+            self.finalization_sha256,
+            self.known_good_tag,
             self.phase,
-            self.recorded_at.astimezone(UTC).isoformat(),
-            None if self.completed_at is None else self.completed_at.astimezone(UTC).isoformat(),
+            self.block_reason,
+            self.planned_at.astimezone(UTC).isoformat(),
+            None if self.terminal_at is None else self.terminal_at.astimezone(UTC).isoformat(),
         )
-
-    def database_values(self) -> tuple[object, ...]:
-        self.validate()
-        values = self.values_without_digest()
         return (*values, _digest(values))
 
     def validate(self) -> None:
+        try:
+            validate_deployment_id(self.deployment_id)
+        except PreparedDeploymentError:
+            _invalid_state()
+        terminal = self.phase in {"completed", "blocked"}
         if (
-            not self.deployment_id
-            or not self.target
+            _TARGET.fullmatch(self.target) is None
             or type(self.repository_id) is not int
             or self.repository_id <= 0
             or _COMMIT.fullmatch(self.candidate_sha) is None
-            or _COMMIT.fullmatch(self.prior_main_sha) is None
+            or _COMMIT.fullmatch(self.baseline_sha) is None
+            or self.candidate_sha == self.baseline_sha
+            or _SLUG.fullmatch(self.backup_slug) is None
             or _HASH.fullmatch(self.finalization_sha256) is None
-            or not self.backup_slug
-            or not self.tag.startswith("syncapp-known-good-")
-            or self.phase not in _PHASES
-            or self.recorded_at.tzinfo is None
-            or (self.completed_at is not None and self.completed_at.tzinfo is None)
-            or (self.phase == "completed") != (self.completed_at is not None)
+            or _TAG.fullmatch(self.known_good_tag) is None
+            or self.phase not in {"planned", "completed", "blocked"}
+            or self.block_reason not in {"none", "ref_divergence"}
+            or (self.phase == "blocked") != (self.block_reason == "ref_divergence")
+            or terminal != (self.terminal_at is not None)
+            or self.planned_at.tzinfo is None
+            or self.planned_at.utcoffset() is None
+            or (self.terminal_at is not None and self.terminal_at < self.planned_at)
             or _HASH.fullmatch(self.record_sha256) is None
-            or self.record_sha256 != _digest(self.values_without_digest())
         ):
-            _invalid()
+            _invalid_state()
 
 
 @dataclass(frozen=True, slots=True)
 class DeploymentPromotionResult:
     status: str
     replayed: bool
-    tag: str
-    promoted_sha: str
+    candidate_sha: str
+    known_good_tag: str
 
 
 RemoteReader = Callable[[str, str, int, str], PromotionRemoteState]
@@ -124,229 +210,284 @@ def promote_finalized_deployment_once(
     plan: PostDeploymentAssertionPlan,
     *,
     token: str | None,
-    remote_reader: RemoteReader,
-    publisher: Publisher,
+    remote_reader: RemoteReader | None = None,
+    publisher: Publisher | None = None,
     observed_at: datetime | None = None,
 ) -> DeploymentPromotionResult:
-    """Publish one exact finalized success or reconcile a prior publication.
-
-    Deterministic authority/ref conflicts are blocked.  Transport exceptions are
-    intentionally reported as retryable/unavailable without leaking their text.
-    """
+    """Plan durably, publish missing refs once, and reconcile uncertain outcomes."""
     try:
         existing = load_deployment_promotion(store, plan)
         if existing is not None and existing.phase == "completed":
             return _result(existing, True)
-
-        prepared, finalization = _authority(store, plan)
-        when = _timestamp(observed_at or datetime.now(UTC))
-        intended = existing or _new_intent(prepared, finalization.record_sha256, when)
+        if existing is not None and existing.phase == "blocked":
+            _blocked()
+        finalization = _successful_finalization(store, plan)
+        prepared = store.prepared_deployment(finalization.deployment_id)
+        if prepared is None:
+            _invalid_state()
+        prepared.validate()
+        now = _timestamp(observed_at or datetime.now(UTC))
+        if now < finalization.finalized_at:
+            _invalid_state()
         if existing is None:
-            _persist(store, intended)
-
-        if token is None or not isinstance(token, str) or not token:
-            _invalid()
-
-        try:
-            remote = remote_reader(
-                intended.target, token, intended.repository_id, intended.tag
+            requested = DeploymentPromotion.create(
+                deployment_id=finalization.deployment_id,
+                target=prepared.evidence.target,
+                repository_id=prepared.evidence.repository_id,
+                candidate_sha=finalization.candidate_sha,
+                baseline_sha=prepared.evidence.baseline_sha,
+                backup_slug=finalization.backup_slug,
+                finalization_sha256=finalization.record_sha256,
+                known_good_tag=f"syncapp-known-good-{finalization.deployment_id}",
+                phase="planned",
+                block_reason="none",
+                planned_at=now,
+                terminal_at=None,
             )
-        except Exception:
-            raise DeploymentPromotionError("Promotion transport is unavailable") from None
-        remote.validate()
-
-        # Crash reconciliation: both refs already equal the exact authorized SHA.
-        if remote.main_sha == intended.candidate_sha and remote.tag_sha == intended.candidate_sha:
-            return _complete(store, intended, when, replayed=True)
-
-        # Safe partial publication is allowed only when each ref is either its exact
-        # pre-state or its exact authorized post-state. Candidate must never move.
-        if (
-            remote.candidate_sha != intended.candidate_sha
-            or remote.main_sha not in {intended.prior_main_sha, intended.candidate_sha}
-            or remote.tag_sha not in {None, intended.candidate_sha}
-        ):
-            _block(store, intended)
-            raise DeploymentPromotionError("Promotion is blocked by remote divergence")
-
-        try:
-            publisher(intended, remote, token)
-            verified = remote_reader(
-                intended.target, token, intended.repository_id, intended.tag
+            existing = _insert_plan(store, plan, requested)
+        credential = _validate_token(token)
+        if remote_reader is None or publisher is None:
+            from .deployment_promotion_transport import (
+                publish_promotion_refs,
+                read_promotion_remote_state,
             )
+
+            remote_reader = remote_reader or read_promotion_remote_state
+            publisher = publisher or publish_promotion_refs
+        before = _read_remote(remote_reader, existing, credential)
+        disposition = _disposition(existing, before)
+        if disposition == "blocked":
+            _set_terminal(store, plan, existing, "blocked", now)
+            _blocked()
+        if disposition == "completed":
+            completed = _set_terminal(store, plan, existing, "completed", now)
+            return _result(completed, False)
+        try:
+            publisher(existing, before, credential)
         except Exception:
-            raise DeploymentPromotionError("Promotion transport is unavailable") from None
-        verified.validate()
-        if (
-            verified.candidate_sha != intended.candidate_sha
-            or verified.main_sha != intended.candidate_sha
-            or verified.tag_sha != intended.candidate_sha
-        ):
-            raise DeploymentPromotionError("Promotion transport is unavailable")
-        return _complete(store, intended, when, replayed=False)
+            _unavailable()
+        after = _read_remote(remote_reader, existing, credential)
+        if _disposition(existing, after) != "completed":
+            if _disposition(existing, after) == "blocked":
+                _set_terminal(store, plan, existing, "blocked", now)
+                _blocked()
+            _unavailable()
+        completed = _set_terminal(store, plan, existing, "completed", now)
+        return _result(completed, False)
     except DeploymentPromotionError:
         raise
-    except (DeploymentFinalizationError, PreparedDeploymentError, StateError, sqlite3.Error, AttributeError):
-        _invalid()
+    except (
+        DeploymentFinalizationError,
+        PostDeploymentAssertionObservationError,
+        PreparedDeploymentError,
+        StateError,
+        sqlite3.Error,
+        AttributeError,
+    ):
+        _invalid_state()
 
 
 def load_deployment_promotion(
     store: StateStore, plan: PostDeploymentAssertionPlan
 ) -> DeploymentPromotion | None:
-    """Load immutable publication evidence after re-proving success authority."""
     try:
-        prepared, finalization = _authority(store, plan)
-        _ensure_table(store)
+        plan._validate()
+        deployment_id = plan.automation_target.resource_target.deployment_id
         rows = store._connection.execute(
-            "SELECT deployment_id,target,repository_id,candidate_sha,prior_main_sha,"
-            "finalization_sha256,backup_slug,tag,phase,recorded_at,completed_at,record_sha256 "
-            "FROM deployment_promotion WHERE deployment_id = ?",
-            (prepared.deployment_id,),
+            "SELECT deployment_id, target, repository_id, candidate_sha, baseline_sha, "
+            "backup_slug, finalization_sha256, known_good_tag, phase, block_reason, "
+            "planned_at, terminal_at, record_sha256 FROM deployment_promotion "
+            "WHERE deployment_id = ?",
+            (deployment_id,),
         ).fetchall()
         if not rows:
             return None
-        if len(rows) != 1 or len(rows[0]) != 12:
-            _invalid()
-        row = rows[0]
-        recorded = _parse_time(row[9])
-        completed = None if row[10] is None else _parse_time(row[10])
-        value = DeploymentPromotion(
-            str(row[0]), str(row[1]), row[2], str(row[3]), str(row[4]), str(row[5]),
-            str(row[6]), str(row[7]), str(row[8]), recorded, completed, str(row[11])
-        )
-        value.validate()
+        if len(rows) != 1:
+            _invalid_state()
+        result = DeploymentPromotion.from_database_row(tuple(rows[0]))
+        finalization = _successful_finalization(store, plan)
+        prepared = store.prepared_deployment(deployment_id)
+        if prepared is None:
+            _invalid_state()
+        prepared.validate()
         if (
-            value.target != prepared.evidence.target
-            or value.repository_id != prepared.evidence.repository_id
-            or value.candidate_sha != prepared.evidence.candidate_sha
-            or value.prior_main_sha != prepared.evidence.baseline_sha
-            or value.backup_slug != prepared.evidence.backup_slug
-            or value.finalization_sha256 != finalization.record_sha256
-            or store.repository_id(value.target) != value.repository_id
+            result.target != prepared.evidence.target
+            or result.repository_id != prepared.evidence.repository_id
+            or result.candidate_sha != finalization.candidate_sha
+            or result.baseline_sha != prepared.evidence.baseline_sha
+            or result.backup_slug != finalization.backup_slug
+            or result.finalization_sha256 != finalization.record_sha256
+            or result.known_good_tag != f"syncapp-known-good-{deployment_id}"
+            or result.planned_at < finalization.finalized_at
         ):
-            _invalid()
+            _invalid_state()
+        return result
+    except DeploymentPromotionError:
+        raise
+    except (
+        DeploymentFinalizationError,
+        PostDeploymentAssertionObservationError,
+        PreparedDeploymentError,
+        StateError,
+        sqlite3.Error,
+        AttributeError,
+    ):
+        _invalid_state()
+
+
+def discover_pending_deployment_promotions(
+    store: StateStore,
+) -> tuple[DeploymentPromotion, ...]:
+    """Expose bounded planned work to Retrigger without executing Git mutation."""
+    try:
+        rows = store._connection.execute(
+            "SELECT deployment_id, target, repository_id, candidate_sha, baseline_sha, "
+            "backup_slug, finalization_sha256, known_good_tag, phase, block_reason, "
+            "planned_at, terminal_at, record_sha256 FROM deployment_promotion "
+            "WHERE phase = 'planned' ORDER BY planned_at, deployment_id LIMIT ?",
+            (_MAX_DISCOVERABLE_PROMOTIONS + 1,),
+        ).fetchall()
+        if len(rows) > _MAX_DISCOVERABLE_PROMOTIONS:
+            raise DeploymentPromotionError("deployment promotion discovery exceeds the limit")
+        return tuple(DeploymentPromotion.from_database_row(tuple(row)) for row in rows)
+    except DeploymentPromotionError:
+        raise
+    except (StateError, sqlite3.Error):
+        _invalid_state()
+
+
+def _successful_finalization(
+    store: StateStore, plan: PostDeploymentAssertionPlan
+) -> DeploymentFinalization:
+    finalization = load_deployment_finalization(store, plan)
+    if finalization is None or finalization.outcome != "success":
+        raise DeploymentPromotionError("successful deployment finalization is required")
+    return finalization
+
+
+def _insert_plan(
+    store: StateStore, plan: PostDeploymentAssertionPlan, requested: DeploymentPromotion
+) -> DeploymentPromotion:
+    try:
+        with store._connection as db:
+            db.execute("BEGIN IMMEDIATE")
+            _successful_finalization(store, plan)
+            existing = load_deployment_promotion(store, plan)
+            if existing is not None:
+                return existing
+            db.execute(
+                "INSERT INTO deployment_promotion VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                requested.database_values(),
+            )
+        loaded = load_deployment_promotion(store, plan)
+        if loaded != requested:
+            _invalid_state()
+        return requested
+    except DeploymentPromotionError:
+        raise
+    except (DeploymentFinalizationError, StateError, sqlite3.Error):
+        _invalid_state()
+
+
+def _set_terminal(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    current: DeploymentPromotion,
+    phase: str,
+    terminal_at: datetime,
+) -> DeploymentPromotion:
+    requested = DeploymentPromotion.create(
+        deployment_id=current.deployment_id,
+        target=current.target,
+        repository_id=current.repository_id,
+        candidate_sha=current.candidate_sha,
+        baseline_sha=current.baseline_sha,
+        backup_slug=current.backup_slug,
+        finalization_sha256=current.finalization_sha256,
+        known_good_tag=current.known_good_tag,
+        phase=phase,
+        block_reason="ref_divergence" if phase == "blocked" else "none",
+        planned_at=current.planned_at,
+        terminal_at=terminal_at,
+    )
+    try:
+        with store._connection as db:
+            db.execute("BEGIN IMMEDIATE")
+            loaded = load_deployment_promotion(store, plan)
+            if loaded is None:
+                _invalid_state()
+            if loaded.phase == phase:
+                return loaded
+            if loaded != current or loaded.phase != "planned":
+                _invalid_state()
+            changed = db.execute(
+                "UPDATE deployment_promotion SET phase = ?, block_reason = ?, "
+                "terminal_at = ?, record_sha256 = ? WHERE deployment_id = ? "
+                "AND record_sha256 = ?",
+                (
+                    requested.phase,
+                    requested.block_reason,
+                    requested.terminal_at.isoformat() if requested.terminal_at else None,
+                    requested.record_sha256,
+                    requested.deployment_id,
+                    current.record_sha256,
+                ),
+            ).rowcount
+            if changed != 1:
+                _invalid_state()
+        loaded = load_deployment_promotion(store, plan)
+        if loaded != requested:
+            _invalid_state()
+        return requested
+    except DeploymentPromotionError:
+        raise
+    except (StateError, sqlite3.Error):
+        _invalid_state()
+
+
+def _read_remote(
+    reader: RemoteReader, intent: DeploymentPromotion, token: str
+) -> PromotionRemoteState:
+    try:
+        value = reader(intent.target, token, intent.repository_id, intent.known_good_tag)
+        if type(value) is not PromotionRemoteState:
+            _invalid_state()
+        value.validate()
         return value
     except DeploymentPromotionError:
         raise
-    except (DeploymentFinalizationError, PreparedDeploymentError, StateError, sqlite3.Error, ValueError, AttributeError):
-        _invalid()
+    except Exception:
+        _unavailable()
 
 
-def _authority(store: StateStore, plan: PostDeploymentAssertionPlan):
-    plan._validate()
-    deployment_id = plan.automation_target.resource_target.deployment_id
-    prepared = store.prepared_deployment(deployment_id)
-    finalization = load_deployment_finalization(store, plan)
-    if (
-        prepared is None
-        or finalization is None
-        or finalization.outcome != "success"
-        or candidate_finalization_authority(store, plan) != "promote_and_tag"
-        or finalization.candidate_sha != prepared.evidence.candidate_sha
-        or finalization.backup_slug != prepared.evidence.backup_slug
-        or store.repository_id(prepared.evidence.target) != prepared.evidence.repository_id
-    ):
-        _invalid()
-    return prepared, finalization
+def _disposition(intent: DeploymentPromotion, state: PromotionRemoteState) -> str:
+    if state.candidate_sha != intent.candidate_sha:
+        return "blocked"
+    if state.main_sha not in {intent.baseline_sha, intent.candidate_sha}:
+        return "blocked"
+    if state.tag_sha not in {None, intent.candidate_sha}:
+        return "blocked"
+    if state.main_sha == intent.candidate_sha and state.tag_sha == intent.candidate_sha:
+        return "completed"
+    return "publish"
 
 
-def _new_intent(prepared, finalization_sha256: str, when: datetime) -> DeploymentPromotion:
-    tag = f"syncapp-known-good-{prepared.deployment_id}"
-    values = (
-        prepared.deployment_id,
-        prepared.evidence.target,
-        prepared.evidence.repository_id,
-        prepared.evidence.candidate_sha,
-        prepared.evidence.baseline_sha,
-        finalization_sha256,
-        prepared.evidence.backup_slug,
-        tag,
-        "planned",
-        when.isoformat(),
-        None,
-    )
-    return DeploymentPromotion(*values[:9], when, None, _digest(values))
-
-
-def _persist(store: StateStore, value: DeploymentPromotion) -> None:
-    try:
-        _ensure_table(store)
-        with store._connection as db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                "INSERT INTO deployment_promotion VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                value.database_values(),
-            )
-    except sqlite3.Error:
-        _invalid()
-
-
-def _complete(
-    store: StateStore, value: DeploymentPromotion, when: datetime, *, replayed: bool
-) -> DeploymentPromotionResult:
-    completed_values = (
-        value.deployment_id, value.target, value.repository_id, value.candidate_sha,
-        value.prior_main_sha, value.finalization_sha256, value.backup_slug, value.tag,
-        "completed", value.recorded_at.isoformat(), when.isoformat(),
-    )
-    completed = DeploymentPromotion(
-        value.deployment_id, value.target, value.repository_id, value.candidate_sha,
-        value.prior_main_sha, value.finalization_sha256, value.backup_slug, value.tag,
-        "completed", value.recorded_at, when, _digest(completed_values),
-    )
-    try:
-        with store._connection as db:
-            db.execute("BEGIN IMMEDIATE")
-            result = db.execute(
-                "UPDATE deployment_promotion SET phase='completed',completed_at=?,record_sha256=? "
-                "WHERE deployment_id=? AND phase='planned' AND record_sha256=?",
-                (when.isoformat(), completed.record_sha256, value.deployment_id, value.record_sha256),
-            )
-            if result.rowcount != 1:
-                _invalid()
-    except sqlite3.Error:
-        _invalid()
-    return _result(completed, replayed)
-
-
-def _block(store: StateStore, value: DeploymentPromotion) -> None:
-    blocked_values = (*value.values_without_digest()[:8], "blocked", value.recorded_at.isoformat(), None)
-    digest = _digest(blocked_values)
-    with store._connection as db:
-        db.execute("BEGIN IMMEDIATE")
-        db.execute(
-            "UPDATE deployment_promotion SET phase='blocked',record_sha256=? "
-            "WHERE deployment_id=? AND phase='planned' AND record_sha256=?",
-            (digest, value.deployment_id, value.record_sha256),
-        )
-
-
-def _ensure_table(store: StateStore) -> None:
-    store._connection.execute(
-        "CREATE TABLE IF NOT EXISTS deployment_promotion ("
-        "deployment_id TEXT PRIMARY KEY NOT NULL,target TEXT NOT NULL,"
-        "repository_id INTEGER NOT NULL CHECK(repository_id>0),candidate_sha TEXT NOT NULL,"
-        "prior_main_sha TEXT NOT NULL,finalization_sha256 TEXT NOT NULL,backup_slug TEXT NOT NULL,"
-        "tag TEXT NOT NULL,phase TEXT NOT NULL CHECK(phase IN ('planned','completed','blocked')),"
-        "recorded_at TEXT NOT NULL,completed_at TEXT,record_sha256 TEXT NOT NULL)"
-    )
+def _validate_token(token: str | None) -> str:
+    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
+        raise DeploymentPromotionError("GitHub authentication is unavailable")
+    return token
 
 
 def _result(value: DeploymentPromotion, replayed: bool) -> DeploymentPromotionResult:
-    return DeploymentPromotionResult("completed", replayed, value.tag, value.candidate_sha)
+    return DeploymentPromotionResult(
+        value.phase, replayed, value.candidate_sha, value.known_good_tag
+    )
 
 
 def _timestamp(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
-        _invalid()
+        _invalid_state()
     return value.astimezone(UTC)
-
-
-def _parse_time(value: object) -> datetime:
-    if not isinstance(value, str):
-        _invalid()
-    parsed = datetime.fromisoformat(value)
-    return _timestamp(parsed)
 
 
 def _digest(values: tuple[object, ...]) -> str:
@@ -355,5 +496,19 @@ def _digest(values: tuple[object, ...]) -> str:
     ).hexdigest()
 
 
-def _invalid() -> NoReturn:
-    raise DeploymentPromotionError("Promotion state is invalid or unauthorized")
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        _invalid_state()
+    return value
+
+
+def _invalid_state() -> NoReturn:
+    raise DeploymentPromotionError("deployment promotion state is invalid") from None
+
+
+def _blocked() -> NoReturn:
+    raise DeploymentPromotionError("deployment promotion is blocked") from None
+
+
+def _unavailable() -> NoReturn:
+    raise DeploymentPromotionError("deployment promotion transport is unavailable") from None

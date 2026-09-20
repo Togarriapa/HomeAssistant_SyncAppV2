@@ -7,6 +7,7 @@ from ha_syncapp.deployment_finalization import finalize_deployment_once
 from ha_syncapp.deployment_promotion import (
     DeploymentPromotionError,
     PromotionRemoteState,
+    discover_pending_deployment_promotions,
     load_deployment_promotion,
     promote_finalized_deployment_once,
 )
@@ -23,9 +24,9 @@ class Remote:
         self.publications: list[tuple[str, PromotionRemoteState]] = []
 
     def read(self, target, token, repository_id, tag):
-        assert target == "Owner/Home"
+        assert target == "owner/private-repo"
         assert token == TOKEN
-        assert repository_id == 42
+        assert repository_id == 12345
         assert tag.startswith("syncapp-known-good-")
         value = self.states[min(self.reads, len(self.states) - 1)]
         self.reads += 1
@@ -39,21 +40,15 @@ class Remote:
 def _ready(tmp_path, monkeypatch):
     chain, plan = _successful(tmp_path, monkeypatch)
     store = chain[0]
-    finalize_deployment_once(
-        store, plan, finalized_at=START + timedelta(seconds=308)
-    )
-    prepared = store.prepared_deployment(
-        plan.automation_target.resource_target.deployment_id
-    )
+    finalize_deployment_once(store, plan, finalized_at=START + timedelta(seconds=308))
+    prepared = store.prepared_deployment(plan.automation_target.resource_target.deployment_id)
     assert prepared is not None
     baseline = prepared.evidence.baseline_sha
     candidate = prepared.evidence.candidate_sha
     return store, plan, baseline, candidate
 
 
-def test_exact_success_is_published_completed_and_replayed_without_network(
-    tmp_path, monkeypatch
-):
+def test_exact_success_is_published_completed_and_replayed_without_network(tmp_path, monkeypatch):
     store, plan, baseline, candidate = _ready(tmp_path, monkeypatch)
     remote = Remote(
         [
@@ -86,9 +81,24 @@ def test_exact_success_is_published_completed_and_replayed_without_network(
         store.__exit__(None, None, None)
 
 
-def test_crash_after_atomic_publication_is_reconciled_without_second_push(
-    tmp_path, monkeypatch
-):
+def test_missing_success_authority_never_reaches_github(tmp_path, monkeypatch):
+    chain, plan = _successful(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(DeploymentPromotionError, match="successful.*required"):
+            promote_finalized_deployment_once(
+                store,
+                plan,
+                token=TOKEN,
+                remote_reader=lambda *_args: pytest.fail("unauthorized GitHub read"),
+                publisher=lambda *_args: pytest.fail("unauthorized GitHub write"),
+            )
+        assert load_deployment_promotion(store, plan) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_crash_after_atomic_publication_is_reconciled_without_second_push(tmp_path, monkeypatch):
     store, plan, baseline, candidate = _ready(tmp_path, monkeypatch)
     published = PromotionRemoteState(candidate, candidate, candidate)
     remote = Remote([PromotionRemoteState(candidate, baseline, None), published])
@@ -111,18 +121,18 @@ def test_crash_after_atomic_publication_is_reconciled_without_second_push(
         assert "secret crash detail" not in str(error.value)
         planned = load_deployment_promotion(store, plan)
         assert planned is not None and planned.phase == "planned"
+        assert discover_pending_deployment_promotions(store) == (planned,)
 
         recovered = promote_finalized_deployment_once(
             store,
             plan,
             token=TOKEN,
             remote_reader=remote.read,
-            publisher=lambda *_args: pytest.fail(
-                "reconciliation repeated publication"
-            ),
+            publisher=lambda *_args: pytest.fail("reconciliation repeated publication"),
             observed_at=START + timedelta(seconds=310),
         )
         assert recovered.status == "completed"
+        assert discover_pending_deployment_promotions(store) == ()
     finally:
         store.__exit__(None, None, None)
 
@@ -151,6 +161,36 @@ def test_candidate_main_or_tag_divergence_is_blocked_before_publication(
                 observed_at=START + timedelta(seconds=309),
             )
         assert remote.publications == []
+        assert discover_pending_deployment_promotions(store) == ()
+        with pytest.raises(DeploymentPromotionError, match="blocked"):
+            promote_finalized_deployment_once(
+                store,
+                plan,
+                token=None,
+                remote_reader=lambda *_args: pytest.fail("blocked replay read GitHub"),
+                publisher=lambda *_args: pytest.fail("blocked replay published"),
+            )
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_transient_remote_failure_remains_planned_and_retryable(tmp_path, monkeypatch):
+    store, plan, _baseline, _candidate = _ready(tmp_path, monkeypatch)
+    try:
+        with pytest.raises(DeploymentPromotionError, match="unavailable") as error:
+            promote_finalized_deployment_once(
+                store,
+                plan,
+                token=TOKEN,
+                remote_reader=lambda *_args: (_ for _ in ()).throw(
+                    OSError("secret transport detail")
+                ),
+                publisher=lambda *_args: pytest.fail("unproven refs were published"),
+                observed_at=START + timedelta(seconds=309),
+            )
+        assert "secret transport detail" not in str(error.value)
+        saved = load_deployment_promotion(store, plan)
+        assert saved is not None and saved.phase == "planned"
     finally:
         store.__exit__(None, None, None)
 
@@ -162,9 +202,7 @@ def test_candidate_main_or_tag_divergence_is_blocked_before_publication(
         lambda baseline, candidate: PromotionRemoteState(candidate, baseline, candidate),
     ],
 )
-def test_safe_partial_remote_state_completes_only_missing_ref(
-    tmp_path, monkeypatch, state
-):
+def test_safe_partial_remote_state_completes_only_missing_ref(tmp_path, monkeypatch, state):
     store, plan, baseline, candidate = _ready(tmp_path, monkeypatch)
     initial = state(baseline, candidate)
     complete = PromotionRemoteState(candidate, candidate, candidate)
@@ -179,16 +217,13 @@ def test_safe_partial_remote_state_completes_only_missing_ref(
             observed_at=START + timedelta(seconds=309),
         )
         assert result.status == "completed"
-        promotion = load_deployment_promotion(store, plan)
-        assert promotion is not None
-        assert remote.publications == [(promotion.record_sha256, initial)]
+        assert len(remote.publications) == 1
+        assert remote.publications[0][1] == initial
     finally:
         store.__exit__(None, None, None)
 
 
-def test_persistence_failure_prevents_network_and_schema_22_migrates(
-    tmp_path, monkeypatch
-):
+def test_persistence_failure_prevents_network_and_schema_22_migrates(tmp_path, monkeypatch):
     store, plan, baseline, candidate = _ready(tmp_path, monkeypatch)
     root = store._root
     store._connection.execute(
