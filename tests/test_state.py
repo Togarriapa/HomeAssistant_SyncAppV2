@@ -219,4 +219,4 @@ def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Pat
         assert store.repository_id("Owner/Home") == 123
         assert store.claim_work() is not None
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 16
