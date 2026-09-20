@@ -112,9 +112,7 @@ def test_pass_is_content_free_and_replays_without_credentials(tmp_path, monkeypa
             observed_at=START + timedelta(seconds=307),
             session_factory=_factory(
                 FakeSession(
-                    _responses(
-                        [{"entity_id": "light.kitchen", "state": "on", "attributes": {}}]
-                    )
+                    _responses([{"entity_id": "light.kitchen", "state": "on", "attributes": {}}])
                 )
             ),
         )
@@ -215,7 +213,9 @@ def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
         "BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
     )
     try:
-        with pytest.raises(PostDeploymentAssertionObservationError, match="state is invalid") as error:
+        with pytest.raises(
+            PostDeploymentAssertionObservationError, match="state is invalid"
+        ) as error:
             evaluate_post_deployment_assertions_once(
                 store,
                 plan,
@@ -262,6 +262,5 @@ def test_tampering_rebinding_temporal_order_and_schema_20_migration(tmp_path, mo
     with StateStore(root) as reopened:
         assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 21
         assert reopened._connection.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE name = 'post_deployment_assertion_observation'"
+            "SELECT name FROM sqlite_master WHERE name = 'post_deployment_assertion_observation'"
         ).fetchone() == ("post_deployment_assertion_observation",)
