@@ -88,7 +88,8 @@ def test_exact_failed_deployment_creates_bound_rollback_intent(tmp_path, monkeyp
         result = authorize_deployment_rollback_once(
             store,
             plan,
-            token=TOKEN,
+            github_token=TOKEN,
+            supervisor_token=TOKEN,
             repository_reader=repository_reader,
             backup_reader=backup_reader,
             observed_at=START + timedelta(seconds=309),
@@ -113,7 +114,8 @@ def test_exact_failed_deployment_creates_bound_rollback_intent(tmp_path, monkeyp
         replay = authorize_deployment_rollback_once(
             store,
             plan,
-            token=None,
+            github_token=None,
+            supervisor_token=None,
             repository_reader=lambda *_args: pytest.fail("replay read repository"),
             backup_reader=lambda *_args: pytest.fail("replay read backup"),
         )
@@ -132,7 +134,8 @@ def test_success_finalization_cannot_create_rollback_authority(tmp_path, monkeyp
             authorize_deployment_rollback_once(
                 store,
                 plan,
-                token=TOKEN,
+                github_token=TOKEN,
+                supervisor_token=TOKEN,
                 repository_reader=lambda *_args: pytest.fail("success read repository"),
                 backup_reader=lambda *_args: pytest.fail("success read backup"),
             )
@@ -161,7 +164,8 @@ def test_missing_changed_or_unrestorable_backup_never_creates_intent(tmp_path, m
             authorize_deployment_rollback_once(
                 store,
                 plan,
-                token=TOKEN,
+                github_token=TOKEN,
+                supervisor_token=TOKEN,
                 repository_reader=lambda *_args: RollbackRepositoryProof(
                     prepared.evidence.repository_id,
                     True,
@@ -193,7 +197,8 @@ def test_repository_identity_or_main_divergence_never_creates_intent(tmp_path, m
                 authorize_deployment_rollback_once(
                     store,
                     plan,
-                    token=TOKEN,
+                    github_token=TOKEN,
+                    supervisor_token=TOKEN,
                     repository_reader=lambda *_args, value=proof: value,
                     backup_reader=lambda *_args: pytest.fail("invalid repository read backup"),
                 )
@@ -217,7 +222,8 @@ def test_persistence_failure_is_sanitized_and_schema_23_migrates(tmp_path, monke
             authorize_deployment_rollback_once(
                 store,
                 plan,
-                token=TOKEN,
+                github_token=TOKEN,
+                supervisor_token=TOKEN,
                 repository_reader=lambda *_args: RollbackRepositoryProof(
                     prepared.evidence.repository_id,
                     True,

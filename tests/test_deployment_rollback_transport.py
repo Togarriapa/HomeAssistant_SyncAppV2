@@ -42,7 +42,8 @@ def _authorized(tmp_path, monkeypatch):
     authorize_deployment_rollback_once(
         store,
         plan,
-        token=TOKEN,
+        github_token=TOKEN,
+        supervisor_token=TOKEN,
         repository_reader=repository_reader,
         backup_reader=backup_reader,
         observed_at=START + timedelta(seconds=309),
@@ -71,7 +72,8 @@ def test_restore_is_journaled_before_exact_bounded_supervisor_request(tmp_path, 
         result = request_deployment_restore_once(
             store,
             plan,
-            token=TOKEN,
+            github_token=TOKEN,
+            supervisor_token=TOKEN,
             repository_reader=repository_reader,
             backup_reader=backup_reader,
             transport=transport,
@@ -119,15 +121,18 @@ def test_acknowledged_replay_is_credential_and_mutation_free(tmp_path, monkeypat
         request_deployment_restore_once(
             store,
             plan,
-            token=TOKEN,
+            github_token=TOKEN,
+            supervisor_token=TOKEN,
             repository_reader=repository_reader,
             backup_reader=backup_reader,
             transport=transport,
+            requested_at=START + timedelta(seconds=310),
         )
         replay = request_deployment_restore_once(
             store,
             plan,
-            token=None,
+            github_token=None,
+            supervisor_token=None,
             repository_reader=lambda *_args: pytest.fail("replay read repository"),
             backup_reader=lambda *_args: pytest.fail("replay read backup"),
             transport=lambda *_args: pytest.fail("replay restored twice"),
@@ -151,10 +156,12 @@ def test_timeout_becomes_uncertain_and_never_blindly_restores_again(tmp_path, mo
             request_deployment_restore_once(
                 store,
                 plan,
-                token=TOKEN,
+                github_token=TOKEN,
+                supervisor_token=TOKEN,
                 repository_reader=repository_reader,
                 backup_reader=backup_reader,
                 transport=timeout,
+                requested_at=START + timedelta(seconds=310),
             )
         assert "secret transport detail" not in str(error.value)
         saved = load_deployment_rollback(store, plan)
@@ -163,7 +170,8 @@ def test_timeout_becomes_uncertain_and_never_blindly_restores_again(tmp_path, mo
         replay = request_deployment_restore_once(
             store,
             plan,
-            token=TOKEN,
+            github_token=TOKEN,
+            supervisor_token=TOKEN,
             repository_reader=lambda *_args: pytest.fail("uncertain replay read repository"),
             backup_reader=lambda *_args: pytest.fail("uncertain replay read backup"),
             transport=lambda *_args: pytest.fail("uncertain replay restored twice"),
@@ -181,7 +189,8 @@ def test_definite_pre_mutation_rejection_is_durably_blocked(tmp_path, monkeypatc
         result = request_deployment_restore_once(
             store,
             plan,
-            token=TOKEN,
+            github_token=TOKEN,
+            supervisor_token=TOKEN,
             repository_reader=repository_reader,
             backup_reader=backup_reader,
             transport=lambda *_args: SupervisorRestoreResponse(
@@ -189,6 +198,7 @@ def test_definite_pre_mutation_rejection_is_durably_blocked(tmp_path, monkeypatc
                 "application/json",
                 b'{"result":"error","message":"private server detail"}',
             ),
+            requested_at=START + timedelta(seconds=310),
         )
         assert result.status == "blocked"
         saved = load_deployment_rollback(store, plan)
@@ -198,7 +208,8 @@ def test_definite_pre_mutation_rejection_is_durably_blocked(tmp_path, monkeypatc
         replay = request_deployment_restore_once(
             store,
             plan,
-            token=None,
+            github_token=None,
+            supervisor_token=None,
             repository_reader=lambda *_args: pytest.fail("blocked replay read repository"),
             backup_reader=lambda *_args: pytest.fail("blocked replay read backup"),
             transport=lambda *_args: pytest.fail("blocked replay restored"),
@@ -221,10 +232,12 @@ def test_journal_persistence_failure_prevents_restore(tmp_path, monkeypatch):
             request_deployment_restore_once(
                 store,
                 plan,
-                token=TOKEN,
+                github_token=TOKEN,
+                supervisor_token=TOKEN,
                 repository_reader=repository_reader,
                 backup_reader=backup_reader,
                 transport=lambda *_args: pytest.fail("restore preceded durable journal"),
+                requested_at=START + timedelta(seconds=310),
             )
         assert "secret-storage-detail" not in str(error.value)
         saved = load_deployment_rollback(store, plan)

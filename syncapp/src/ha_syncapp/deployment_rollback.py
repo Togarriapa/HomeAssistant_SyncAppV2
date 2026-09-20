@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
+import os
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NoReturn
+from typing import Final, NoReturn
 
 from .deployment_finalization import (
     DeploymentFinalization,
@@ -30,6 +32,11 @@ _TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$")
 _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _CORE = re.compile(r"^20[0-9]{2}\.(?:[1-9]|1[0-2])\.(?:0|[1-9][0-9]*)$")
 _TOKEN = re.compile(r"^[!-~]{1,512}$")
+_JOB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_SUPERVISOR_ROOT: Final = "http://supervisor"
+_RESTORE_BODY: Final = json.dumps({"background": True}, separators=(",", ":")).encode("ascii")
+_DEFAULT_TIMEOUT_SECONDS: Final = 60.0
+_DEFAULT_MAX_RESPONSE_BYTES: Final = 64 * 1024
 
 
 class DeploymentRollbackError(RuntimeError):
@@ -72,6 +79,13 @@ class RollbackBackupProof:
 
 
 @dataclass(frozen=True, slots=True)
+class SupervisorRestoreResponse:
+    status: int
+    content_type: str
+    body: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentRollback:
     deployment_id: str
     target: str
@@ -86,6 +100,7 @@ class DeploymentRollback:
     reconciliation_state: str
     block_reason: str
     attempt_count: int
+    restore_job_id: str | None
     authorized_at: datetime
     updated_at: datetime
     record_sha256: str
@@ -115,6 +130,7 @@ class DeploymentRollback:
             "none",
             "none",
             0,
+            None,
             when.isoformat(),
             when.isoformat(),
         )
@@ -132,6 +148,7 @@ class DeploymentRollback:
             "none",
             "none",
             0,
+            None,
             when,
             when,
             _digest(values),
@@ -141,11 +158,11 @@ class DeploymentRollback:
 
     @classmethod
     def from_database_row(cls, row: tuple[object, ...]) -> DeploymentRollback:
-        if len(row) != 16 or type(row[2]) is not int or type(row[12]) is not int:
+        if len(row) != 17 or type(row[2]) is not int or type(row[12]) is not int:
             _invalid_state()
         try:
-            authorized = datetime.fromisoformat(_text(row[13]))
-            updated = datetime.fromisoformat(_text(row[14]))
+            authorized = datetime.fromisoformat(_text(row[14]))
+            updated = datetime.fromisoformat(_text(row[15]))
         except ValueError:
             _invalid_state()
         result = cls(
@@ -162,9 +179,10 @@ class DeploymentRollback:
             _text(row[10]),
             _text(row[11]),
             row[12],
+            None if row[13] is None else _text(row[13]),
             authorized,
             updated,
-            _text(row[15]),
+            _text(row[16]),
         )
         result.validate()
         if result.database_values() != row:
@@ -187,6 +205,7 @@ class DeploymentRollback:
             self.reconciliation_state,
             self.block_reason,
             self.attempt_count,
+            self.restore_job_id,
             self.authorized_at.astimezone(UTC).isoformat(),
             self.updated_at.astimezone(UTC).isoformat(),
         )
@@ -237,6 +256,12 @@ class DeploymentRollback:
             }
             or type(self.attempt_count) is not int
             or not 0 <= self.attempt_count <= 8
+            or (self.restore_job_id is not None and _JOB_ID.fullmatch(self.restore_job_id) is None)
+            or (self.phase == "restore_acknowledged" and self.restore_job_id is None)
+            or (
+                self.phase in {"planned", "restore_started", "uncertain", "blocked"}
+                and self.restore_job_id is not None
+            )
             or not _aware(self.authorized_at)
             or not _aware(self.updated_at)
             or self.updated_at < self.authorized_at
@@ -253,13 +278,142 @@ class RollbackAuthorizationResult:
 
 RepositoryReader = Callable[[str, str, int], RollbackRepositoryProof]
 BackupReader = Callable[[str, str], RollbackBackupProof]
+SupervisorRestoreTransport = Callable[
+    [str, str, Mapping[str, str], bytes, float, int], SupervisorRestoreResponse
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RollbackRestoreResult:
+    status: str
+    replayed: bool
+
+
+def request_deployment_restore_once(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    *,
+    github_token: str | None,
+    supervisor_token: str | None,
+    repository_reader: RepositoryReader,
+    backup_reader: BackupReader,
+    transport: SupervisorRestoreTransport | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    requested_at: datetime | None = None,
+) -> RollbackRestoreResult:
+    """Journal before one exact restore request and never blindly replay it."""
+    current = load_deployment_rollback(store, plan)
+    if current is None:
+        raise DeploymentRollbackError("rollback intent is required")
+    if current.phase == "restore_acknowledged":
+        return RollbackRestoreResult("restore_acknowledged", True)
+    if current.phase in {"restore_started", "uncertain"}:
+        return RollbackRestoreResult("reconciliation_required", True)
+    if current.phase == "blocked":
+        return RollbackRestoreResult("blocked", True)
+    if current.phase != "planned":
+        raise DeploymentRollbackError("rollback restore is not requestable")
+
+    repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
+    supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
+    _validate_limits(timeout_seconds, max_response_bytes)
+    _reprove_external_inputs(
+        current,
+        repository_credential,
+        supervisor_credential,
+        repository_reader,
+        backup_reader,
+    )
+    when = _timestamp(requested_at or datetime.now(UTC))
+    started = _transition(
+        store,
+        plan,
+        current,
+        phase="restore_started",
+        reconciliation_state="none",
+        block_reason="none",
+        attempt_count=current.attempt_count + 1,
+        restore_job_id=None,
+        when=when,
+    )
+    sender = transport or _default_restore_transport
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {supervisor_credential}",
+        "Content-Type": "application/json",
+    }
+    url = f"{_SUPERVISOR_ROOT}/backups/{started.backup_slug}/restore/full"
+    try:
+        response = sender(
+            "POST",
+            url,
+            headers,
+            _RESTORE_BODY,
+            timeout_seconds,
+            max_response_bytes,
+        )
+    except Exception:
+        _transition(
+            store,
+            plan,
+            started,
+            phase="uncertain",
+            reconciliation_state="ambiguous",
+            block_reason="none",
+            attempt_count=started.attempt_count,
+            restore_job_id=None,
+            when=when,
+        )
+        raise DeploymentRollbackError("rollback restore outcome is uncertain") from None
+    if _definitely_rejected(response):
+        _transition(
+            store,
+            plan,
+            started,
+            phase="blocked",
+            reconciliation_state="none",
+            block_reason="restore_rejected",
+            attempt_count=started.attempt_count,
+            restore_job_id=None,
+            when=when,
+        )
+        return RollbackRestoreResult("blocked", False)
+    try:
+        job_id = _restore_job_id(response, max_response_bytes)
+    except DeploymentRollbackError:
+        _transition(
+            store,
+            plan,
+            started,
+            phase="uncertain",
+            reconciliation_state="ambiguous",
+            block_reason="none",
+            attempt_count=started.attempt_count,
+            restore_job_id=None,
+            when=when,
+        )
+        raise DeploymentRollbackError("rollback restore outcome is uncertain") from None
+    _transition(
+        store,
+        plan,
+        started,
+        phase="restore_acknowledged",
+        reconciliation_state="in_progress",
+        block_reason="none",
+        attempt_count=started.attempt_count,
+        restore_job_id=job_id,
+        when=when,
+    )
+    return RollbackRestoreResult("restore_acknowledged", False)
 
 
 def authorize_deployment_rollback_once(
     store: StateStore,
     plan: PostDeploymentAssertionPlan,
     *,
-    token: str | None,
+    github_token: str | None,
+    supervisor_token: str | None,
     repository_reader: RepositoryReader,
     backup_reader: BackupReader,
     observed_at: datetime | None = None,
@@ -270,11 +424,12 @@ def authorize_deployment_rollback_once(
         if existing is not None:
             return RollbackAuthorizationResult(existing.phase, True, existing)
         prepared, finalization = _failure_authority(store, plan)
-        credential = _validate_token(token)
+        repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
+        supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
         repository = _read_repository(
             repository_reader,
             prepared.evidence.target,
-            credential,
+            repository_credential,
             prepared.evidence.repository_id,
         )
         if (
@@ -283,7 +438,7 @@ def authorize_deployment_rollback_once(
             or repository.main_sha != prepared.evidence.baseline_sha
         ):
             _invalid_proof("repository")
-        backup = _read_backup(backup_reader, prepared.evidence.backup_slug, credential)
+        backup = _read_backup(backup_reader, prepared.evidence.backup_slug, supervisor_credential)
         if (
             backup.slug != prepared.evidence.backup_slug
             or backup.backup_type != "full"
@@ -327,7 +482,7 @@ def load_deployment_rollback(
             "SELECT deployment_id, target, repository_id, baseline_sha, candidate_sha, "
             "backup_slug, finalization_sha256, repository_proof_sha256, "
             "backup_proof_sha256, phase, reconciliation_state, block_reason, "
-            "attempt_count, authorized_at, updated_at, record_sha256 "
+            "attempt_count, restore_job_id, authorized_at, updated_at, record_sha256 "
             "FROM deployment_rollback WHERE deployment_id = ?",
             (deployment_id,),
         ).fetchall()
@@ -394,7 +549,7 @@ def _insert_intent(
                 return existing, True
             db.execute(
                 "INSERT INTO deployment_rollback VALUES "
-                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 requested.database_values(),
             )
         loaded = load_deployment_rollback(store, plan)
@@ -405,6 +560,192 @@ def _insert_intent(
         raise
     except (DeploymentFinalizationError, StateError, sqlite3.Error):
         _invalid_state()
+
+
+def _reprove_external_inputs(
+    intent: DeploymentRollback,
+    github_token: str,
+    supervisor_token: str,
+    repository_reader: RepositoryReader,
+    backup_reader: BackupReader,
+) -> None:
+    repository = _read_repository(
+        repository_reader,
+        intent.target,
+        github_token,
+        intent.repository_id,
+    )
+    if (
+        repository.repository_id != intent.repository_id
+        or repository.private is not True
+        or repository.main_sha != intent.baseline_sha
+        or _repository_proof_digest(repository) != intent.repository_proof_sha256
+    ):
+        _invalid_proof("repository")
+    backup = _read_backup(backup_reader, intent.backup_slug, supervisor_token)
+    if (
+        backup.slug != intent.backup_slug
+        or backup.backup_type != "full"
+        or backup.includes_homeassistant is not True
+        or backup.restorable is not True
+        or _backup_proof_digest(backup) != intent.backup_proof_sha256
+    ):
+        _invalid_proof("backup")
+
+
+def _transition(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    current: DeploymentRollback,
+    *,
+    phase: str,
+    reconciliation_state: str,
+    block_reason: str,
+    attempt_count: int,
+    restore_job_id: str | None,
+    when: datetime,
+) -> DeploymentRollback:
+    updated = _timestamp(when)
+    values: tuple[object, ...] = (
+        current.deployment_id,
+        current.target,
+        current.repository_id,
+        current.baseline_sha,
+        current.candidate_sha,
+        current.backup_slug,
+        current.finalization_sha256,
+        current.repository_proof_sha256,
+        current.backup_proof_sha256,
+        phase,
+        reconciliation_state,
+        block_reason,
+        attempt_count,
+        restore_job_id,
+        current.authorized_at.astimezone(UTC).isoformat(),
+        updated.isoformat(),
+    )
+    replacement = DeploymentRollback(
+        current.deployment_id,
+        current.target,
+        current.repository_id,
+        current.baseline_sha,
+        current.candidate_sha,
+        current.backup_slug,
+        current.finalization_sha256,
+        current.repository_proof_sha256,
+        current.backup_proof_sha256,
+        phase,
+        reconciliation_state,
+        block_reason,
+        attempt_count,
+        restore_job_id,
+        current.authorized_at,
+        updated,
+        _digest(values),
+    )
+    replacement.validate()
+    try:
+        with store._connection as db:
+            db.execute("BEGIN IMMEDIATE")
+            loaded = load_deployment_rollback(store, plan)
+            if loaded != current:
+                _invalid_state()
+            changed = db.execute(
+                "UPDATE deployment_rollback SET phase = ?, reconciliation_state = ?, "
+                "block_reason = ?, attempt_count = ?, restore_job_id = ?, updated_at = ?, "
+                "record_sha256 = ? WHERE deployment_id = ? AND record_sha256 = ?",
+                (
+                    replacement.phase,
+                    replacement.reconciliation_state,
+                    replacement.block_reason,
+                    replacement.attempt_count,
+                    replacement.restore_job_id,
+                    replacement.updated_at.isoformat(),
+                    replacement.record_sha256,
+                    replacement.deployment_id,
+                    current.record_sha256,
+                ),
+            ).rowcount
+            if changed != 1:
+                _invalid_state()
+        loaded = load_deployment_rollback(store, plan)
+        if loaded != replacement:
+            _invalid_state()
+        return replacement
+    except DeploymentRollbackError:
+        raise
+    except (StateError, sqlite3.Error):
+        _invalid_state()
+
+
+def _definitely_rejected(response: SupervisorRestoreResponse) -> bool:
+    if type(response) is not SupervisorRestoreResponse:
+        return False
+    return response.status in {400, 401, 403, 404, 409, 422}
+
+
+def _restore_job_id(response: SupervisorRestoreResponse, max_response_bytes: int) -> str:
+    if (
+        type(response) is not SupervisorRestoreResponse
+        or response.status != 200
+        or _media_type(response.content_type) != "application/json"
+        or len(response.body) > max_response_bytes
+    ):
+        raise DeploymentRollbackError("rollback restore response is invalid")
+    try:
+        payload = json.loads(response.body.decode("utf-8"), object_pairs_hook=_unique_object)
+    except (UnicodeError, ValueError, RecursionError):
+        raise DeploymentRollbackError("rollback restore response is invalid") from None
+    if not isinstance(payload, dict) or set(payload) != {"result", "data"}:
+        raise DeploymentRollbackError("rollback restore response is invalid")
+    data = payload.get("data")
+    if payload.get("result") != "ok" or not isinstance(data, dict):
+        raise DeploymentRollbackError("rollback restore response is invalid")
+    if set(data) != {"job_id"}:
+        raise DeploymentRollbackError("rollback restore response is invalid")
+    job_id = data.get("job_id")
+    if not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None:
+        raise DeploymentRollbackError("rollback restore response is invalid")
+    return job_id
+
+
+def _default_restore_transport(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    body: bytes,
+    timeout_seconds: float,
+    max_response_bytes: int,
+) -> SupervisorRestoreResponse:
+    prefix = f"{_SUPERVISOR_ROOT}/backups/"
+    if method != "POST" or not url.startswith(prefix) or body != _RESTORE_BODY:
+        raise DeploymentRollbackError("rollback restore request boundary is invalid")
+    suffix = url.removeprefix(_SUPERVISOR_ROOT)
+    parts = suffix.split("/")
+    if (
+        len(parts) != 5
+        or parts[1] != "backups"
+        or _SLUG.fullmatch(parts[2]) is None
+        or parts[3:] != ["restore", "full"]
+    ):
+        raise DeploymentRollbackError("rollback restore request boundary is invalid")
+    connection = http.client.HTTPConnection("supervisor", 80, timeout=timeout_seconds)
+    try:
+        connection.request("POST", suffix, body=body, headers=dict(headers))
+        response = connection.getresponse()
+        content_type = response.getheader("Content-Type", "") or ""
+        content_length = response.getheader("Content-Length")
+        if content_length is not None and int(content_length) > max_response_bytes:
+            raise DeploymentRollbackError("rollback restore response exceeds limit")
+        response_body = response.read(max_response_bytes + 1)
+        status = int(response.status)
+    except DeploymentRollbackError:
+        raise
+    except (http.client.HTTPException, TimeoutError, OSError, ValueError):
+        raise DeploymentRollbackError("rollback restore request failed") from None
+    finally:
+        connection.close()
+    return SupervisorRestoreResponse(status, content_type, response_body)
 
 
 def _read_repository(
@@ -438,10 +779,36 @@ def _read_backup(reader: BackupReader, slug: str, token: str) -> RollbackBackupP
         raise DeploymentRollbackError("backup proof is unavailable") from None
 
 
-def _validate_token(token: str | None) -> str:
-    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
+def _validate_token(token: str | None, environment_name: str) -> str:
+    candidate = token if token is not None else os.environ.get(environment_name)
+    if not isinstance(candidate, str) or _TOKEN.fullmatch(candidate) is None:
         raise DeploymentRollbackError("rollback proof credential is unavailable")
-    return token
+    return candidate
+
+
+def _validate_limits(timeout_seconds: float, max_response_bytes: int) -> None:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int | float)
+        or timeout_seconds <= 0
+        or timeout_seconds > 60
+        or type(max_response_bytes) is not int
+        or not 0 < max_response_bytes <= 1024 * 1024
+    ):
+        raise DeploymentRollbackError("rollback restore transport limits are invalid")
+
+
+def _media_type(value: str) -> str:
+    return value.split(";", 1)[0].strip().lower()
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
 
 
 def _repository_proof_digest(proof: RollbackRepositoryProof) -> str:

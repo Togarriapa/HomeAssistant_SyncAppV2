@@ -573,8 +573,9 @@ class StateStore:
             "block_reason TEXT NOT NULL CHECK (block_reason IN ('none', "
             "'invalid_authority', 'backup_invalid', 'repository_divergence', "
             "'restore_rejected', 'ambiguous')), attempt_count INTEGER NOT NULL "
-            "CHECK (attempt_count >= 0 AND attempt_count <= 8), authorized_at TEXT NOT NULL, "
-            "updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+            "CHECK (attempt_count >= 0 AND attempt_count <= 8), restore_job_id TEXT, "
+            "authorized_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "record_sha256 TEXT NOT NULL)"
         )
 
     def _open_database(self) -> None:
