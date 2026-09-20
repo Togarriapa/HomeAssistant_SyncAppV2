@@ -131,7 +131,7 @@ def observe_supervisor_health_once(
     if existing is not None:
         return SupervisorHealthResult("healthy", replayed=True)
 
-    _probe_supervisor_health(
+    probe_supervisor_health(
         token=token,
         timeout_seconds=timeout_seconds,
         max_response_bytes=max_response_bytes,
@@ -219,13 +219,14 @@ def _completed_window(store: StateStore, deployment_id: str) -> CoreHealthWindow
     return window
 
 
-def _probe_supervisor_health(
+def probe_supervisor_health(
     *,
     token: str | None,
     timeout_seconds: float,
     max_response_bytes: int,
     transport: SupervisorHealthTransport | None,
 ) -> None:
+    """Perform one bounded exact Supervisor health probe without persisting authority."""
     bearer = _resolve_token(token)
     _validate_limits(timeout_seconds, max_response_bytes)
     headers = {"Accept": "application/json", "Authorization": f"Bearer {bearer}"}

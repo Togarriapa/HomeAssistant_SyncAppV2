@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, NoReturn
 
+from .core_health_observation import (
+    CoreHealthError,
+    CoreHealthTransport,
+    probe_core_api_health,
+)
 from .deployment_finalization import (
     DeploymentFinalization,
     DeploymentFinalizationError,
@@ -25,6 +30,11 @@ from .post_deployment_assertion_observation import (
 )
 from .prepared_deployment import PreparedDeployment, PreparedDeploymentError, validate_deployment_id
 from .state import StateError, StateStore
+from .supervisor_health_observation import (
+    SupervisorHealthError,
+    SupervisorHealthTransport,
+    probe_supervisor_health,
+)
 
 _COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -391,6 +401,96 @@ def reconcile_deployment_restore_once(
         when=when,
     )
     return RollbackRestoreResult("restored", False)
+
+
+def complete_deployment_rollback_once(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    *,
+    github_token: str | None,
+    supervisor_token: str | None,
+    repository_reader: RepositoryReader,
+    core_transport: CoreHealthTransport | None = None,
+    supervisor_transport: SupervisorHealthTransport | None = None,
+    timeout_seconds: float = 10.0,
+    max_response_bytes: int = 16 * 1024,
+    observed_at: datetime | None = None,
+) -> RollbackRestoreResult:
+    """Complete rollback only after exact baseline and bounded health proofs."""
+    current = load_deployment_rollback(store, plan)
+    if current is None:
+        raise DeploymentRollbackError("rollback intent is required")
+    if current.phase == "completed":
+        return RollbackRestoreResult("completed", True)
+    if current.phase == "blocked":
+        return RollbackRestoreResult("blocked", True)
+    if (
+        current.phase != "observing"
+        or current.reconciliation_state != "restored"
+        or current.restore_job_id is None
+    ):
+        raise DeploymentRollbackError("rollback restore is not ready for health proof")
+
+    repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
+    supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
+    repository = _read_repository(
+        repository_reader,
+        current.target,
+        repository_credential,
+        current.repository_id,
+    )
+    if (
+        repository.repository_id != current.repository_id
+        or repository.private is not True
+        or repository.main_sha != current.baseline_sha
+        or _repository_proof_digest(repository) != current.repository_proof_sha256
+    ):
+        when = _timestamp(observed_at or datetime.now(UTC))
+        if when < current.updated_at:
+            _invalid_state()
+        _transition(
+            store,
+            plan,
+            current,
+            phase="blocked",
+            reconciliation_state="restored",
+            block_reason="repository_divergence",
+            attempt_count=current.attempt_count,
+            restore_job_id=None,
+            when=when,
+        )
+        return RollbackRestoreResult("blocked", False)
+    try:
+        probe_core_api_health(
+            token=supervisor_credential,
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+            transport=core_transport,
+        )
+        probe_supervisor_health(
+            token=supervisor_credential,
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+            transport=supervisor_transport,
+        )
+    except (CoreHealthError, SupervisorHealthError):
+        raise DeploymentRollbackError("rollback post-restore health is unavailable") from None
+
+    when = _timestamp(observed_at or datetime.now(UTC))
+    if when < current.updated_at:
+        _invalid_state()
+    _transition(
+        store,
+        plan,
+        current,
+        phase="completed",
+        reconciliation_state="restored",
+        block_reason="none",
+        attempt_count=current.attempt_count,
+        restore_job_id=current.restore_job_id,
+        when=when,
+    )
+    return RollbackRestoreResult("completed", False)
 
 
 def request_deployment_restore_once(
