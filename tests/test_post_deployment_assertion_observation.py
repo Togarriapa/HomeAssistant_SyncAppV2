@@ -7,6 +7,7 @@ import pytest
 from ha_syncapp.automation_script_observation import observe_automation_scripts_once
 from ha_syncapp.post_deployment_assertion_observation import (
     MAX_ASSERTIONS,
+    PostDeploymentAssertion,
     PostDeploymentAssertionObservationError,
     derive_post_deployment_assertion_plan,
     evaluate_post_deployment_assertions_once,
@@ -192,6 +193,17 @@ def test_plan_tampering_and_bounds_fail_before_network(tmp_path, monkeypatch):
     chain, plan = _ready(tmp_path, monkeypatch, ("light.kitchen",))
     store = chain[0]
     try:
+        with pytest.raises(TypeError):
+            PostDeploymentAssertion(kind="entity_available", entity_id="switch.intruder")
+        original = plan.assertions
+        object.__setattr__(plan, "assertions", original + original)
+        with pytest.raises(PostDeploymentAssertionObservationError, match="state is invalid"):
+            evaluate_post_deployment_assertions_once(
+                store,
+                plan,
+                session_factory=lambda *_args: pytest.fail("duplicate plan opened session"),
+            )
+        object.__setattr__(plan, "assertions", original)
         object.__setattr__(plan, "schema_version", 2)
         with pytest.raises(PostDeploymentAssertionObservationError, match="state is invalid"):
             evaluate_post_deployment_assertions_once(
@@ -200,6 +212,23 @@ def test_plan_tampering_and_bounds_fail_before_network(tmp_path, monkeypatch):
                 session_factory=lambda *_args: pytest.fail("invalid plan opened session"),
             )
         assert MAX_ASSERTIONS >= 1
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_oversized_protocol_data_is_incomplete_and_retryable(tmp_path, monkeypatch):
+    chain, plan = _ready(tmp_path, monkeypatch, ("light.kitchen",))
+    store = chain[0]
+    try:
+        with pytest.raises(PostDeploymentAssertionObservationError, match="unavailable"):
+            evaluate_post_deployment_assertions_once(
+                store,
+                plan,
+                token=TOKEN,
+                max_message_bytes=16,
+                session_factory=_factory(FakeSession(_responses([]))),
+            )
+        assert load_post_deployment_assertion_observation(store, plan) is None
     finally:
         store.__exit__(None, None, None)
 
