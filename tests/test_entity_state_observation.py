@@ -22,10 +22,7 @@ def _available(tmp_path: Path, monkeypatch, entity_ids=("light.kitchen",)):
     chain, authorization, prepared = _ready(tmp_path, monkeypatch)
     store = chain[0]
     target = ResourceAvailabilityTarget.create(prepared, entity_ids)
-    states = [
-        {"entity_id": entity_id, "state": "on", "attributes": {}}
-        for entity_id in entity_ids
-    ]
+    states = [{"entity_id": entity_id, "state": "on", "attributes": {}} for entity_id in entity_ids]
     observe_changed_resources_once(
         store,
         target,
@@ -83,9 +80,7 @@ def test_invalid_expected_state_is_durable_and_not_retried(tmp_path, monkeypatch
             observed_at=START + timedelta(seconds=305),
             session_factory=_factory(
                 FakeSession(
-                    _responses(
-                        [{"entity_id": "light.kitchen", "state": invalid, "attributes": {}}]
-                    )
+                    _responses([{"entity_id": "light.kitchen", "state": invalid, "attributes": {}}])
                 )
             ),
         )
@@ -122,7 +117,9 @@ def test_empty_target_and_success_replay_are_credential_and_network_free(tmp_pat
         store.__exit__(None, None, None)
 
 
-def test_missing_or_malformed_expected_state_is_transport_failure_not_durable(tmp_path, monkeypatch):
+def test_missing_or_malformed_expected_state_is_transport_failure_not_durable(
+    tmp_path, monkeypatch
+):
     chain, authorization, target = _available(tmp_path, monkeypatch)
     store = chain[0]
     try:
@@ -158,15 +155,40 @@ def test_rebinding_tampering_and_temporal_drift_fail_closed(tmp_path, monkeypatc
     chain, authorization, target = _available(tmp_path, monkeypatch, ())
     store = chain[0]
     try:
-        observe_entity_states_once(
-            store, target, observed_at=START + timedelta(seconds=305)
-        )
+        observe_entity_states_once(store, target, observed_at=START + timedelta(seconds=305))
         store._connection.execute(
             "UPDATE entity_state_observation SET target_sha256 = ?", ("f" * 64,)
         )
         store._connection.commit()
         with pytest.raises(EntityStateObservationError, match="state is invalid"):
             load_entity_state_observation(store, target)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_observation_cannot_predate_availability_proof(tmp_path, monkeypatch):
+    chain, authorization, target = _available(tmp_path, monkeypatch, ())
+    store = chain[0]
+    try:
+        with pytest.raises(EntityStateObservationError, match="state is invalid"):
+            observe_entity_states_once(store, target, observed_at=START + timedelta(seconds=303))
+        assert load_entity_state_observation(store, target) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
+    chain, authorization, target = _available(tmp_path, monkeypatch, ())
+    store = chain[0]
+    store._connection.execute(
+        "CREATE TRIGGER reject_entity_state BEFORE INSERT ON entity_state_observation "
+        "BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
+    )
+    try:
+        with pytest.raises(EntityStateObservationError, match="state is invalid") as error:
+            observe_entity_states_once(store, target, observed_at=START + timedelta(seconds=305))
+        assert "secret-storage-detail" not in str(error.value)
+        assert load_entity_state_observation(store, target) is None
     finally:
         store.__exit__(None, None, None)
 
