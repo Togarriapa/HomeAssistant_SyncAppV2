@@ -126,4 +126,4 @@ def test_schema_v6_migrates_log_retention_intent_without_losing_existing_state(
         assert baseline.commit_sha == EXPECTED
 
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 24

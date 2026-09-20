@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_v17_contains_startup_error_observation_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 23
+    assert SCHEMA_VERSION == 24
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"
@@ -24,7 +24,7 @@ def test_schema_v17_contains_startup_error_observation_table(tmp_path: Path) -> 
             "significant_error_count",
             "record_sha256",
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 24
 
 
 def test_schema_v16_migrates_without_losing_work(tmp_path: Path) -> None:
@@ -38,4 +38,4 @@ def test_schema_v16_migrates_without_losing_work(tmp_path: Path) -> None:
     with StateStore(tmp_path) as store:
         assert store.claim_work_kind("deployment").work_key == "preserve-me"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 24

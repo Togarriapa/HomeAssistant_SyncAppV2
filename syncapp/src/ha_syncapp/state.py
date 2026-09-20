@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -557,6 +557,26 @@ class StateStore:
             "planned_at TEXT NOT NULL, terminal_at TEXT, record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_deployment_rollback_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS deployment_rollback ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, "
+            "backup_slug TEXT NOT NULL, finalization_sha256 TEXT NOT NULL, "
+            "repository_proof_sha256 TEXT NOT NULL, backup_proof_sha256 TEXT NOT NULL, "
+            "phase TEXT NOT NULL CHECK (phase IN ('planned', 'restore_started', "
+            "'restore_acknowledged', 'uncertain', 'observing', 'completed', 'blocked')), "
+            "reconciliation_state TEXT NOT NULL CHECK (reconciliation_state IN "
+            "('none', 'not_started', 'in_progress', 'restored', 'ambiguous')), "
+            "block_reason TEXT NOT NULL CHECK (block_reason IN ('none', "
+            "'invalid_authority', 'backup_invalid', 'repository_divergence', "
+            "'restore_rejected', 'ambiguous')), attempt_count INTEGER NOT NULL "
+            "CHECK (attempt_count >= 0 AND attempt_count <= 8), authorized_at TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -616,6 +636,7 @@ class StateStore:
                 self._create_post_deployment_assertion_observation_table(db)
                 self._create_deployment_finalization_table(db)
                 self._create_deployment_promotion_table(db)
+                self._create_deployment_rollback_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -646,6 +667,7 @@ class StateStore:
                 20,
                 21,
                 22,
+                23,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -780,6 +802,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_deployment_promotion_table(db)
+                    db.execute("PRAGMA user_version = 23")
+                version = 23
+            if version == 23:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_deployment_rollback_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 

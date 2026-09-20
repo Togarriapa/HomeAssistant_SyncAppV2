@@ -6,6 +6,7 @@ import pytest
 from ha_syncapp.deployment_finalization import (
     finalize_deployment_once,
     is_candidate_blocked_by_finalization,
+    load_deployment_finalization,
 )
 from ha_syncapp.deployment_rollback import (
     DeploymentRollbackError,
@@ -46,12 +47,14 @@ def _failed(tmp_path, monkeypatch):
             )
         ),
     )
-    finalization = finalize_deployment_once(
+    result = finalize_deployment_once(
         store,
         plan,
         finalized_at=START + timedelta(seconds=308),
     )
-    assert finalization.outcome == "failure"
+    assert result.outcome == "failure"
+    finalization = load_deployment_finalization(store, plan)
+    assert finalization is not None
     return chain, plan, finalization
 
 
