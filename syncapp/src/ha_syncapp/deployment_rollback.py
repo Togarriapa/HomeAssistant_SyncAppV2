@@ -289,6 +289,110 @@ class RollbackRestoreResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _SupervisorRestoreJob:
+    job_id: str
+    name: str
+    reference: str
+    done: bool | None
+    errors_present: bool
+    created_at: datetime
+
+
+def reconcile_deployment_restore_once(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    *,
+    supervisor_token: str | None,
+    transport: SupervisorRestoreTransport | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    observed_at: datetime | None = None,
+) -> RollbackRestoreResult:
+    """Read authoritative Supervisor job evidence without repeating a restore."""
+    current = load_deployment_rollback(store, plan)
+    if current is None:
+        raise DeploymentRollbackError("rollback intent is required")
+    if current.phase in {"observing", "completed"}:
+        return RollbackRestoreResult("restored", True)
+    if current.phase == "blocked":
+        status = "ambiguous" if current.block_reason == "ambiguous" else "blocked"
+        return RollbackRestoreResult(status, True)
+    if current.phase not in {"restore_acknowledged", "restore_started", "uncertain"}:
+        raise DeploymentRollbackError("rollback restore is not reconcilable")
+
+    credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
+    _validate_limits(timeout_seconds, max_response_bytes)
+    sender = transport or _default_reconciliation_transport
+    job_id = current.restore_job_id
+    url = (
+        f"{_SUPERVISOR_ROOT}/jobs/{job_id}"
+        if job_id is not None
+        else f"{_SUPERVISOR_ROOT}/jobs/info"
+    )
+    try:
+        response = sender(
+            "GET",
+            url,
+            {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {credential}",
+            },
+            b"",
+            timeout_seconds,
+            max_response_bytes,
+        )
+    except Exception:
+        raise DeploymentRollbackError(
+            "rollback reconciliation is temporarily unavailable"
+        ) from None
+
+    job = _reconciled_restore_job(response, current, max_response_bytes)
+    when = _timestamp(observed_at or datetime.now(UTC))
+    if when < current.updated_at:
+        _invalid_state()
+    if job is None or job.done is False or job.errors_present:
+        _transition(
+            store,
+            plan,
+            current,
+            phase="blocked",
+            reconciliation_state="ambiguous",
+            block_reason="ambiguous",
+            attempt_count=current.attempt_count,
+            restore_job_id=None,
+            when=when,
+        )
+        return RollbackRestoreResult("ambiguous", False)
+    if job.done is None:
+        if current.restore_job_id == job.job_id:
+            return RollbackRestoreResult("in_progress", False)
+        _transition(
+            store,
+            plan,
+            current,
+            phase="restore_acknowledged",
+            reconciliation_state="in_progress",
+            block_reason="none",
+            attempt_count=current.attempt_count,
+            restore_job_id=job.job_id,
+            when=when,
+        )
+        return RollbackRestoreResult("in_progress", False)
+    _transition(
+        store,
+        plan,
+        current,
+        phase="observing",
+        reconciliation_state="restored",
+        block_reason="none",
+        attempt_count=current.attempt_count,
+        restore_job_id=job.job_id,
+        when=when,
+    )
+    return RollbackRestoreResult("restored", False)
+
+
 def request_deployment_restore_once(
     store: StateStore,
     plan: PostDeploymentAssertionPlan,
@@ -709,6 +813,101 @@ def _restore_job_id(response: SupervisorRestoreResponse, max_response_bytes: int
     return job_id
 
 
+def _reconciled_restore_job(
+    response: SupervisorRestoreResponse,
+    intent: DeploymentRollback,
+    max_response_bytes: int,
+) -> _SupervisorRestoreJob | None:
+    if (
+        type(response) is not SupervisorRestoreResponse
+        or response.status != 200
+        or _media_type(response.content_type) != "application/json"
+        or len(response.body) > max_response_bytes
+    ):
+        return None
+    try:
+        payload = json.loads(response.body.decode("utf-8"), object_pairs_hook=_unique_object)
+    except (UnicodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(payload, dict) or set(payload) != {"result", "data"}:
+        return None
+    data = payload.get("data")
+    if payload.get("result") != "ok" or not isinstance(data, dict):
+        return None
+    if intent.restore_job_id is not None:
+        job = _parse_restore_job(data, intent)
+        if job is None or job.job_id != intent.restore_job_id:
+            return None
+        return job
+    if set(data) != {"ignore_conditions", "jobs"} or not isinstance(data.get("jobs"), list):
+        return None
+    matching: list[_SupervisorRestoreJob | None] = []
+    for candidate in data["jobs"]:
+        if not isinstance(candidate, dict):
+            continue
+        if (
+            candidate.get("name") == "backup_manager_full_restore"
+            and candidate.get("reference") == intent.backup_slug
+        ):
+            matching.append(_parse_restore_job(candidate, intent))
+    if len(matching) != 1:
+        return None
+    job = matching[0]
+    if job is None or job.created_at < intent.updated_at:
+        return None
+    return job
+
+
+def _parse_restore_job(
+    value: dict[object, object], intent: DeploymentRollback
+) -> _SupervisorRestoreJob | None:
+    required = {
+        "name",
+        "reference",
+        "uuid",
+        "progress",
+        "stage",
+        "done",
+        "errors",
+        "created",
+        "extra",
+        "child_jobs",
+    }
+    if set(value) != required:
+        return None
+    job_id = value.get("uuid")
+    name = value.get("name")
+    reference = value.get("reference")
+    done = value.get("done")
+    errors = value.get("errors")
+    created = value.get("created")
+    if (
+        not isinstance(job_id, str)
+        or _JOB_ID.fullmatch(job_id) is None
+        or name != "backup_manager_full_restore"
+        or reference != intent.backup_slug
+        or (done is not None and type(done) is not bool)
+        or not isinstance(errors, list)
+        or not isinstance(created, str)
+        or not isinstance(value.get("child_jobs"), list)
+    ):
+        return None
+    try:
+        created_at = datetime.fromisoformat(created)
+    except ValueError:
+        return None
+    if not _aware(created_at) or created_at < intent.authorized_at:
+        return None
+    return _SupervisorRestoreJob(
+        job_id,
+        name,
+        reference,
+        done,
+        bool(errors),
+        created_at.astimezone(UTC),
+    )
+
+
 def _default_restore_transport(
     method: str,
     url: str,
@@ -743,6 +942,44 @@ def _default_restore_transport(
         raise
     except (http.client.HTTPException, TimeoutError, OSError, ValueError):
         raise DeploymentRollbackError("rollback restore request failed") from None
+    finally:
+        connection.close()
+    return SupervisorRestoreResponse(status, content_type, response_body)
+
+
+def _default_reconciliation_transport(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    body: bytes,
+    timeout_seconds: float,
+    max_response_bytes: int,
+) -> SupervisorRestoreResponse:
+    prefix = f"{_SUPERVISOR_ROOT}/jobs/"
+    if method != "GET" or body or not url.startswith(prefix):
+        raise DeploymentRollbackError("rollback reconciliation boundary is invalid")
+    suffix = url.removeprefix(_SUPERVISOR_ROOT)
+    parts = suffix.split("/")
+    if (
+        len(parts) != 3
+        or parts[1] != "jobs"
+        or (parts[2] != "info" and _JOB_ID.fullmatch(parts[2]) is None)
+    ):
+        raise DeploymentRollbackError("rollback reconciliation boundary is invalid")
+    connection = http.client.HTTPConnection("supervisor", 80, timeout=timeout_seconds)
+    try:
+        connection.request("GET", suffix, headers=dict(headers))
+        response = connection.getresponse()
+        content_type = response.getheader("Content-Type", "") or ""
+        content_length = response.getheader("Content-Length")
+        if content_length is not None and int(content_length) > max_response_bytes:
+            raise DeploymentRollbackError("rollback reconciliation response exceeds limit")
+        response_body = response.read(max_response_bytes + 1)
+        status = int(response.status)
+    except DeploymentRollbackError:
+        raise
+    except (http.client.HTTPException, TimeoutError, OSError, ValueError):
+        raise DeploymentRollbackError("rollback reconciliation request failed") from None
     finally:
         connection.close()
     return SupervisorRestoreResponse(status, content_type, response_body)

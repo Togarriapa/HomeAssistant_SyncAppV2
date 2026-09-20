@@ -35,10 +35,10 @@ def _acknowledged(tmp_path, monkeypatch):
     return chain, plan, prepared
 
 
-def _job(*, created, uuid="job-123", done=None, errors=None):
+def _job(*, created, reference="backup-1", uuid="job-123", done=None, errors=None):
     return {
         "name": "backup_manager_full_restore",
-        "reference": "backup-1",
+        "reference": reference,
         "uuid": uuid,
         "progress": 50.0 if done is None else 100.0,
         "stage": "restore_home_assistant",
@@ -65,7 +65,12 @@ def test_acknowledged_restore_job_in_progress_is_reconciled_read_only(tmp_path, 
 
     def transport(method, url, headers, body, timeout, limit):
         calls.append((method, url, headers, body, timeout, limit))
-        return _response(_job(created=START + timedelta(seconds=310)))
+        return _response(
+            _job(
+                created=START + timedelta(seconds=310),
+                reference=prepared.evidence.backup_slug,
+            )
+        )
 
     try:
         result = reconcile_deployment_restore_once(
@@ -98,7 +103,7 @@ def test_acknowledged_restore_job_in_progress_is_reconciled_read_only(tmp_path, 
 
 
 def test_successful_exact_job_advances_to_observation_and_replays_offline(tmp_path, monkeypatch):
-    chain, plan, _prepared = _acknowledged(tmp_path, monkeypatch)
+    chain, plan, prepared = _acknowledged(tmp_path, monkeypatch)
     store = chain[0]
     try:
         result = reconcile_deployment_restore_once(
@@ -106,7 +111,11 @@ def test_successful_exact_job_advances_to_observation_and_replays_offline(tmp_pa
             plan,
             supervisor_token=TOKEN,
             transport=lambda *_args: _response(
-                _job(created=START + timedelta(seconds=310), done=True)
+                _job(
+                    created=START + timedelta(seconds=310),
+                    reference=prepared.evidence.backup_slug,
+                    done=True,
+                )
             ),
             observed_at=START + timedelta(seconds=311),
         )
