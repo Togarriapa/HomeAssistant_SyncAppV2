@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
-from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -127,7 +124,11 @@ def test_significant_error_is_durable_deterministic_failure(
             session_factory=_factory(
                 StartupSession(
                     _startup_responses(
-                        [_entry(level=level, timestamp=(START + timedelta(seconds=302)).timestamp())]
+                        [
+                            _entry(
+                                level=level, timestamp=(START + timedelta(seconds=302)).timestamp()
+                            )
+                        ]
                     )
                 )
             ),
@@ -220,9 +221,7 @@ def test_invalid_protocol_is_sanitized(tmp_path: Path, monkeypatch, third: objec
                 authorization.deployment_id,
                 token=TOKEN,
                 observed_at=START + timedelta(seconds=303),
-                session_factory=_factory(
-                    StartupSession(_startup_responses([])[:2] + [third])
-                ),
+                session_factory=_factory(StartupSession(_startup_responses([])[:2] + [third])),
             )
         assert "secret" not in str(error.value)
     finally:
@@ -283,5 +282,56 @@ def test_persistence_failure_is_sanitized(tmp_path: Path, monkeypatch) -> None:
                 session_factory=_factory(StartupSession(_startup_responses([]))),
             )
         assert "secret" not in str(error.value)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_duplicate_entries_are_rejected(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _prepared(tmp_path, monkeypatch)
+    store = chain[0]
+    entry = _entry(timestamp=(START + timedelta(seconds=302)).timestamp())
+    try:
+        with pytest.raises(StartupErrorObservationError, match="unavailable"):
+            observe_startup_errors_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=303),
+                session_factory=_factory(StartupSession(_startup_responses([entry, entry]))),
+            )
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_observation_cannot_predate_integration_proof(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _prepared(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(StartupErrorObservationError, match="state is invalid"):
+            observe_startup_errors_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=301),
+                session_factory=_factory(StartupSession(_startup_responses([]))),
+            )
+        assert load_startup_error_observation(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_oversized_message_is_rejected_without_persisting(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _prepared(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(StartupErrorObservationError, match="unavailable"):
+            observe_startup_errors_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                max_message_bytes=16,
+                session_factory=_factory(StartupSession(["x" * 17])),
+            )
+        assert load_startup_error_observation(store, authorization.deployment_id) is None
     finally:
         store.__exit__(None, None, None)
