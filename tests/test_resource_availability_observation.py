@@ -4,13 +4,17 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp.candidate_backup import CandidateBackupEvidence
+from ha_syncapp.prepared_deployment import PreparedDeployment
 from ha_syncapp.resource_availability_observation import (
     ResourceAvailabilityError,
     ResourceAvailabilityTarget,
+    derive_resource_availability_target,
     load_resource_availability_observation,
     observe_changed_resources_once,
 )
 from ha_syncapp.startup_error_observation import observe_startup_errors_once
+from semantic_fixtures import candidate_inputs
 from test_core_health_window import START, TOKEN
 from test_integration_observation import FakeSession, _factory
 from test_startup_error_observation import _prepared, _startup_responses
@@ -66,7 +70,9 @@ def test_records_one_bounded_get_states_and_content_free_proof(tmp_path, monkeyp
             {"access_token": TOKEN, "type": "auth"},
             {"id": 1, "type": "get_states"},
         ]
-        row = store._connection.execute("SELECT * FROM resource_availability_observation").fetchone()
+        row = store._connection.execute(
+            "SELECT * FROM resource_availability_observation"
+        ).fetchone()
         assert row is not None
         assert "light.kitchen" not in repr(row)
         assert "sensor.outside" not in repr(row)
@@ -101,7 +107,10 @@ def test_empty_target_and_completed_replay_need_no_credentials_or_network(tmp_pa
     "states",
     [
         [],
-        [{"entity_id": "light.kitchen", "state": "on", "attributes": {}}, {"entity_id": "light.kitchen", "state": "off", "attributes": {}}],
+        [
+            {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
+            {"entity_id": "light.kitchen", "state": "off", "attributes": {}},
+        ],
         [{"entity_id": True, "state": "on", "attributes": {}}],
         [{"entity_id": "light.kitchen", "state": "on"}],
     ],
@@ -136,7 +145,13 @@ def test_significant_startup_errors_block_resource_probe(tmp_path, monkeypatch):
         authorization.deployment_id,
         token=TOKEN,
         observed_at=START + timedelta(seconds=303),
-        session_factory=_factory(FakeSession(_startup_responses([_entry(level="ERROR", timestamp=(START + timedelta(seconds=302)).timestamp())]))),
+        session_factory=_factory(
+            FakeSession(
+                _startup_responses(
+                    [_entry(level="ERROR", timestamp=(START + timedelta(seconds=302)).timestamp())]
+                )
+            )
+        ),
     )
     try:
         with pytest.raises(ResourceAvailabilityError, match="clear"):
@@ -158,9 +173,7 @@ def test_target_rebinding_and_persisted_tampering_fail_closed(tmp_path, monkeypa
         changed = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
         with pytest.raises(ResourceAvailabilityError, match="state is invalid"):
             load_resource_availability_observation(store, changed)
-        store._connection.execute(
-            "UPDATE resource_availability_observation SET expected_count = 1"
-        )
+        store._connection.execute("UPDATE resource_availability_observation SET expected_count = 1")
         store._connection.commit()
         with pytest.raises(ResourceAvailabilityError, match="state is invalid"):
             load_resource_availability_observation(store, target)
@@ -183,3 +196,29 @@ def test_schema_17_migrates_to_18(tmp_path, monkeypatch):
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'resource_availability_observation'"
         ).fetchone() == ("resource_availability_observation",)
+
+
+def test_target_is_derived_only_from_reverified_candidate_evidence(tmp_path):
+    inputs = candidate_inputs(tmp_path, {"automations.yaml": b"alias: safe\n"})
+    _, _, _, dependencies, impact, risk, runtime, version = inputs
+    evidence = CandidateBackupEvidence(
+        risk.target,
+        risk.repository_id,
+        risk.baseline_sha,
+        risk.candidate_sha,
+        risk.stage_manifest_sha256,
+        risk.runtime_sha256,
+        risk.level,
+        version.version,
+        "backup_123",
+    )
+    prepared = PreparedDeployment("12345678-1234-5678-9234-567812345678", evidence, START)
+    target = derive_resource_availability_target(prepared, dependencies, impact, risk, runtime)
+    assert target.entity_ids == risk.affected_entities
+
+    from dataclasses import replace
+
+    with pytest.raises(ResourceAvailabilityError, match="state is invalid"):
+        derive_resource_availability_target(
+            prepared, dependencies, impact, replace(risk, candidate_sha="c" * 40), runtime
+        )
