@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from ha_syncapp.automation_script_observation import (
     AutomationScriptObservationError,
-    AutomationScriptTarget,
     derive_automation_script_target,
     load_automation_script_observation,
     observe_automation_scripts_once,
@@ -21,10 +20,7 @@ from test_resource_availability_observation import _responses
 def _valid(tmp_path: Path, monkeypatch, entity_ids):
     chain, authorization, resource_target = _available(tmp_path, monkeypatch, entity_ids)
     store = chain[0]
-    states = [
-        {"entity_id": entity, "state": "off", "attributes": {}}
-        for entity in entity_ids
-    ]
+    states = [{"entity_id": entity, "state": "off", "attributes": {}} for entity in entity_ids]
     observe_entity_states_once(
         store,
         resource_target,
@@ -156,14 +152,33 @@ def test_missing_entity_is_incomplete_and_retryable(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
+def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
+    chain, target = _valid(tmp_path, monkeypatch, ("light.kitchen",))
+    store = chain[0]
+    store._connection.execute(
+        "CREATE TRIGGER reject_automation_script BEFORE INSERT ON "
+        "automation_script_observation "
+        "BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
+    )
+    try:
+        with pytest.raises(AutomationScriptObservationError, match="state is invalid") as error:
+            observe_automation_scripts_once(
+                store,
+                target,
+                observed_at=START + timedelta(seconds=306),
+            )
+        assert "secret-storage-detail" not in str(error.value)
+        assert load_automation_script_observation(store, target) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_tampering_and_schema_19_migration_fail_safe(tmp_path, monkeypatch):
     chain, target = _valid(tmp_path, monkeypatch, ("light.kitchen",))
     store = chain[0]
     root = store._root
     try:
-        observe_automation_scripts_once(
-            store, target, observed_at=START + timedelta(seconds=306)
-        )
+        observe_automation_scripts_once(store, target, observed_at=START + timedelta(seconds=306))
         store._connection.execute(
             "UPDATE automation_script_observation SET target_sha256 = ?", ("f" * 64,)
         )
