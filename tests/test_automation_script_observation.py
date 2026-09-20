@@ -135,19 +135,37 @@ def test_successful_entity_state_proof_is_required(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
-def test_missing_entity_is_incomplete_and_retryable(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "states",
+    [
+        [],
+        [
+            {"entity_id": "script.notify", "state": "off", "attributes": {}},
+            {"entity_id": "script.notify", "state": "on", "attributes": {}},
+        ],
+        [{"entity_id": "script.notify", "state": None, "attributes": {}}],
+    ],
+    ids=("missing", "duplicate", "malformed"),
+)
+def test_invalid_relevant_entity_is_durable_and_not_retried(tmp_path, monkeypatch, states):
     chain, target = _valid(tmp_path, monkeypatch, ("script.notify",))
     store = chain[0]
     try:
-        with pytest.raises(AutomationScriptObservationError, match="unavailable"):
-            observe_automation_scripts_once(
-                store,
-                target,
-                token=TOKEN,
-                observed_at=START + timedelta(seconds=306),
-                session_factory=_factory(FakeSession(_responses([]))),
-            )
-        assert load_automation_script_observation(store, target) is None
+        first = observe_automation_scripts_once(
+            store,
+            target,
+            token=TOKEN,
+            observed_at=START + timedelta(seconds=306),
+            session_factory=_factory(FakeSession(_responses(states))),
+        )
+        replay = observe_automation_scripts_once(
+            store,
+            target,
+            session_factory=lambda *_args: pytest.fail("deterministic failure retried"),
+        )
+        assert first.status == replay.status == "load_failed"
+        assert first.failed_count == replay.failed_count == 1
+        assert replay.replayed is True
     finally:
         store.__exit__(None, None, None)
 
