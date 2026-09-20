@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-
 from ha_syncapp.deployment_rollback import DeploymentRollback, DeploymentRollbackError
 from ha_syncapp.deployment_rollback_reconciliation import (
     RollbackReconciliationProof,
     reconcile_deployment_rollback_once,
 )
+import pytest
 
 
 def _uncertain() -> DeploymentRollback:
