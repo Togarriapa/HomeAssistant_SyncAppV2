@@ -232,18 +232,13 @@ def observe_automation_scripts_once(
             states = _probe_states(token, timeout_seconds, max_message_bytes, session_factory)
         except ResourceAvailabilityError:
             _unavailable()
-        by_entity = {
-            item.get("entity_id"): item
-            for item in states
-            if type(item) is dict and isinstance(item.get("entity_id"), str)
-        }
-        if any(entity not in by_entity for entity in target.entity_ids):
-            _unavailable()
         for entity in target.entity_ids:
-            state = by_entity[entity].get("state")
-            if type(state) is not str or not state:
-                _unavailable()
-            if state in _LOADED_STATES:
+            matches = [
+                item
+                for item in states
+                if type(item) is dict and item.get("entity_id") == entity
+            ]
+            if len(matches) == 1 and matches[0].get("state") in _LOADED_STATES:
                 loaded += 1
             else:
                 failed += 1
