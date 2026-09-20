@@ -121,7 +121,7 @@ jobs:
           sudo journalctl -k --since "-2 minutes" --no-pager \
             | grep -E 'apparmor="DENIED".*profile="ci_homeassistant_syncapp_v2//validator"' \
             > validator-diagnostics/apparmor-denials.txt || true
-          python3 scripts/semantic_container_smoke.py core_fixture_probe.py \
+          python3 scripts/semantic_container_smoke.py semantic_image_check.py valid \
             > validator-diagnostics/core-fixture-probe.txt 2>&1 || true
       - name: Upload validator diagnostics
         if: failure()
