@@ -101,9 +101,7 @@ def test_records_one_bounded_command_and_aggregate_only(tmp_path: Path, monkeypa
             {"access_token": TOKEN, "type": "auth"},
             {"id": 1, "type": "config_entries/get"},
         ]
-        row = store._connection.execute(
-            "SELECT * FROM integration_observation"
-        ).fetchone()
+        row = store._connection.execute("SELECT * FROM integration_observation").fetchone()
         assert row is not None
         assert "secret" not in repr(row)
     finally:
@@ -169,10 +167,15 @@ def test_enabled_uninitialized_or_malformed_entry_persists_no_authority(
         {"id": 2, "type": "result", "success": True, "result": []},
         {"id": 1, "type": "result", "success": False, "error": {"message": "secret"}},
         {"id": 1, "type": "result", "success": True, "result": {}},
-        {"id": 1, "type": "result", "success": True, "result": [
-            {"entry_id": "same", "state": "loaded", "disabled_by": None},
-            {"entry_id": "same", "state": "loaded", "disabled_by": None},
-        ]},
+        {
+            "id": 1,
+            "type": "result",
+            "success": True,
+            "result": [
+                {"entry_id": "same", "state": "loaded", "disabled_by": None},
+                {"entry_id": "same", "state": "loaded", "disabled_by": None},
+            ],
+        },
         '{"id":1,"type":"result","success":true,"success":true,"result":[]}',
     ],
 )
@@ -185,9 +188,7 @@ def test_invalid_protocol_is_sanitized(tmp_path: Path, monkeypatch, third: objec
                 store,
                 authorization.deployment_id,
                 token=TOKEN,
-                session_factory=_factory(
-                    FakeSession(_responses([])[:2] + [third])
-                ),
+                session_factory=_factory(FakeSession(_responses([])[:2] + [third])),
             )
         assert "secret" not in str(error.value)
     finally:
@@ -227,5 +228,61 @@ def test_tampering_fails_closed(tmp_path: Path, monkeypatch) -> None:
         store._connection.commit()
         with pytest.raises(IntegrationObservationError, match="state is invalid"):
             load_integration_observation(store, authorization.deployment_id)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_observation_cannot_predate_supervisor_proof(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _authorized(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(IntegrationObservationError, match="state is invalid"):
+            observe_integrations_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=300),
+                session_factory=_factory(FakeSession(_responses([]))),
+            )
+        assert load_integration_observation(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_persistence_failure_is_sanitized(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _authorized(tmp_path, monkeypatch)
+    store = chain[0]
+    store._connection.execute(
+        "CREATE TRIGGER reject_integration_observation BEFORE INSERT ON "
+        "integration_observation BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
+    )
+    try:
+        with pytest.raises(IntegrationObservationError, match="state is invalid") as error:
+            observe_integrations_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                observed_at=START + timedelta(seconds=302),
+                session_factory=_factory(FakeSession(_responses([]))),
+            )
+        assert "secret" not in str(error.value)
+        assert load_integration_observation(store, authorization.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_oversized_message_is_rejected_without_persisting(tmp_path: Path, monkeypatch) -> None:
+    chain, authorization = _authorized(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(IntegrationObservationError, match="unavailable"):
+            observe_integrations_once(
+                store,
+                authorization.deployment_id,
+                token=TOKEN,
+                max_message_bytes=16,
+                session_factory=_factory(FakeSession(["x" * 17])),
+            )
+        assert load_integration_observation(store, authorization.deployment_id) is None
     finally:
         store.__exit__(None, None, None)
