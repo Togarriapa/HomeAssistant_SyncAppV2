@@ -19,6 +19,12 @@ def _store(tmp_path: Path) -> StateStore:
     return store
 
 
+def _rollback_stub(deployment_id: str = "rollback-retrigger-test") -> DeploymentRollback:
+    rollback = DeploymentRollback.__new__(DeploymentRollback)
+    object.__setattr__(rollback, "deployment_id", deployment_id)
+    return rollback
+
+
 def test_retrigger_pass_is_bounded_and_noops_without_pending_rollback(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:
@@ -49,9 +55,7 @@ def test_retrigger_never_replays_restore_for_uncertain_or_acknowledged_state(
 
     monkeypatch.setattr(
         "ha_syncapp.deployment_rollback_retrigger.list_retryable_rollbacks",
-        lambda *_args, **_kwargs: [
-            DeploymentRollback.__new__(DeploymentRollback),
-        ],
+        lambda *_args, **_kwargs: [_rollback_stub()],
     )
     monkeypatch.setattr(
         "ha_syncapp.deployment_rollback_retrigger.rollback_requires_reconciliation",
@@ -67,7 +71,7 @@ def test_retrigger_never_replays_restore_for_uncertain_or_acknowledged_state(
     )
 
     try:
-        run_deployment_rollback_retrigger_pass(
+        result = run_deployment_rollback_retrigger_pass(
             store,
             "Owner/Private-Home",
             "github-token",
@@ -77,6 +81,7 @@ def test_retrigger_never_replays_restore_for_uncertain_or_acknowledged_state(
     finally:
         store.__exit__(None, None, None)
 
+    assert result.processed == "rollback-retrigger-test"
     assert reconcile_calls == ["reconcile"]
     assert restore_calls == []
 
