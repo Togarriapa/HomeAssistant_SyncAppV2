@@ -18,7 +18,7 @@ from ha_syncapp.post_deployment_assertion_observation import (
 )
 from test_core_health_window import START, TOKEN
 from test_deployment_finalization import _failed as _failed_finalization
-from test_integration_observation import FakeSession, _factory
+from test_integration_observation import _factory, FakeSession
 from test_resource_availability_observation import _responses
 
 
