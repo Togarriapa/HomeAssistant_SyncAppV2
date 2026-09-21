@@ -63,23 +63,19 @@ def _recover_interrupted_rollback_work(
     """Recover only running work still backed by a retryable rollback record."""
     if not deployment_ids:
         return 0
-    placeholders = ",".join("?" for _ in deployment_ids)
-    parameters: tuple[object, ...] = (
-        reference_time.astimezone(UTC).isoformat(),
-        reference_time.astimezone(UTC).isoformat(),
-        _WORK_KIND,
-        *sorted(deployment_ids),
-    )
+    when = reference_time.astimezone(UTC).isoformat()
+    recovered = 0
     try:
         with store._connection as db:
             db.execute("BEGIN IMMEDIATE")
-            result = db.execute(
-                "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? "
-                "WHERE work_kind = ? AND status = 'running' AND work_key IN ("
-                f"{placeholders})",
-                parameters,
-            )
-        return result.rowcount
+            for deployment_id in sorted(deployment_ids):
+                result = db.execute(
+                    "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? "
+                    "WHERE work_kind = ? AND status = 'running' AND work_key = ?",
+                    (when, when, _WORK_KIND, deployment_id),
+                )
+                recovered += result.rowcount
+        return recovered
     except sqlite3.Error:
         raise DeploymentRollbackRetriggerError("rollback work recovery is unavailable") from None
 
