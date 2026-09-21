@@ -72,7 +72,10 @@ def test_authorization_persists_exact_reconstructable_plan(tmp_path, monkeypatch
         recovered = load_rollback_recovery_plan(store, intent)
         assert recovered.assertion_set_sha256 == original_plan.assertion_set_sha256
         assert recovered.canonical_json == original_plan.canonical_json
-        assert recovered.automation_target.target_sha256 == original_plan.automation_target.target_sha256
+        assert (
+            recovered.automation_target.target_sha256
+            == original_plan.automation_target.target_sha256
+        )
         assert (
             recovered.automation_target.resource_target.target_sha256
             == original_plan.automation_target.resource_target.target_sha256
