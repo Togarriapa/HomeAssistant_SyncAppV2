@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .deployment_rollback import DeploymentRollback
-from .deployment_rollback import execute_deployment_restore_once as execute_rollback_restore
 from .deployment_rollback import (
     reconcile_deployment_restore_once as reconcile_pending_rollback,
 )
@@ -41,6 +40,11 @@ def list_retryable_rollbacks(
     """Return bounded retryable rollback records; wired to durable discovery in the next slice."""
     del store, reference_time
     return []
+
+
+def execute_rollback_restore(*_args: object, **_kwargs: object) -> None:
+    """Fail closed until durable discovery can reconstruct authoritative restore proof."""
+    raise DeploymentRollbackRetriggerError("rollback restore execution is not wired")
 
 
 def rollback_requires_reconciliation(rollback: DeploymentRollback) -> bool:
@@ -82,11 +86,10 @@ def run_deployment_rollback_retrigger_pass(
             return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
         if reference_time < next_retry_at(rollback):
             return DeploymentRollbackRetriggerResult(0, considered, None)
-        # This execution seam is intentionally not reachable through durable discovery
-        # until the persisted plan/proof binding is implemented in the next TDD slice.
+        # Fail closed until persisted plan/proof reconstruction makes execution safe.
         execute_rollback_restore(
             store, rollback, supervisor_token=core_token, attempted_at=reference_time
-        )  # type: ignore[arg-type,call-arg]
+        )
         return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
 
     return DeploymentRollbackRetriggerResult(0, considered, None)
