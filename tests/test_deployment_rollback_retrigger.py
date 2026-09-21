@@ -35,8 +35,9 @@ def _insert_rollback_row(
     sha = "a" * 64
     commit_a = "b" * 40
     commit_b = "c" * 40
+    placeholders = ", ".join("?" for _ in range(17))
     store._connection.execute(
-        "INSERT INTO deployment_rollback VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"INSERT INTO deployment_rollback VALUES ({placeholders})",
         (
             deployment_id,
             "Owner/Private-Home",
