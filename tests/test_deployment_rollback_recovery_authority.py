@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-
 from ha_syncapp.deployment_rollback import (
     RollbackBackupProof,
     RollbackRepositoryProof,
