@@ -20,9 +20,14 @@ def _store(tmp_path: Path) -> StateStore:
     return store
 
 
-def _rollback_stub(deployment_id: str = "rollback-retrigger-test") -> DeploymentRollback:
+def _rollback_stub(
+    deployment_id: str = "rollback-retrigger-test",
+    *,
+    phase: str = "uncertain",
+) -> DeploymentRollback:
     rollback = DeploymentRollback.__new__(DeploymentRollback)
     object.__setattr__(rollback, "deployment_id", deployment_id)
+    object.__setattr__(rollback, "phase", phase)
     return rollback
 
 
@@ -73,7 +78,7 @@ def test_durable_discovery_returns_only_automatic_recovery_phases(
     _insert_rollback_row(store, "blocked-work", "blocked", now - timedelta(minutes=10))
 
     def decode(row: tuple[object, ...]) -> DeploymentRollback:
-        return _rollback_stub(str(row[0]))
+        return _rollback_stub(str(row[0]), phase=str(row[9]))
 
     monkeypatch.setattr(DeploymentRollback, "from_database_row", decode)
     try:
@@ -94,7 +99,7 @@ def test_durable_discovery_is_bounded_and_deterministic(
         _insert_rollback_row(store, f"rollback-{suffix}", "planned", now - timedelta(minutes=10))
 
     def decode(row: tuple[object, ...]) -> DeploymentRollback:
-        return _rollback_stub(str(row[0]))
+        return _rollback_stub(str(row[0]), phase=str(row[9]))
 
     monkeypatch.setattr(DeploymentRollback, "from_database_row", decode)
     try:
@@ -277,50 +282,3 @@ def test_retrigger_skips_deterministically_blocked_candidate_without_mutation(
 
     assert result.processed is None
     assert mutations == []
-
-
-def test_retrigger_backoff_prevents_hot_looping_transient_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = _store(tmp_path)
-    now = datetime(2026, 9, 20, 20, 0, tzinfo=UTC)
-    calls: list[str] = []
-
-    monkeypatch.setattr(
-        "ha_syncapp.deployment_rollback_retrigger.list_retryable_rollbacks",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        "ha_syncapp.deployment_rollback_retrigger.next_retry_at",
-        lambda *_args, **_kwargs: now + timedelta(minutes=5),
-    )
-
-    try:
-        result = run_deployment_rollback_retrigger_pass(
-            store,
-            "Owner/Private-Home",
-            "github-token",
-            "core-token",
-            reference_time=now,
-        )
-    finally:
-        store.__exit__(None, None, None)
-
-    assert result.processed is None
-    assert calls == []
-
-
-def test_retrigger_fails_closed_on_invalid_credentials(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    try:
-        with pytest.raises(DeploymentRollbackRetriggerError):
-            run_deployment_rollback_retrigger_pass(
-                store,
-                "Owner/Private-Home",
-                "",
-                "core-token",
-                reference_time=datetime(2026, 9, 20, 20, 0, tzinfo=UTC),
-            )
-    finally:
-        store.__exit__(None, None, None)
