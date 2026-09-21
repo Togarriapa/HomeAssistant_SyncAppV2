@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .deployment_rollback import DeploymentRollback
-from .state import StateStore
+from .state import StateError, StateStore
+
+_MAX_DISCOVERED_ROLLBACKS = 32
 
 
 class DeploymentRollbackRetriggerError(RuntimeError):
@@ -34,9 +37,23 @@ def _validate_token(value: str, name: str) -> str:
 def list_retryable_rollbacks(
     store: StateStore, reference_time: datetime
 ) -> list[DeploymentRollback]:
-    """Return bounded retryable rollback records; wired to durable discovery in the next slice."""
-    del store, reference_time
-    return []
+    """Read bounded durable rollback work while excluding terminal records."""
+    if reference_time.tzinfo is None or reference_time.utcoffset() is None:
+        raise DeploymentRollbackRetriggerError("reference_time must be timezone-aware")
+    try:
+        rows = store._connection.execute(
+            "SELECT deployment_id, target, repository_id, baseline_sha, candidate_sha, "
+            "backup_slug, finalization_sha256, repository_proof_sha256, "
+            "backup_proof_sha256, phase, reconciliation_state, block_reason, "
+            "attempt_count, restore_job_id, authorized_at, updated_at, record_sha256 "
+            "FROM deployment_rollback WHERE phase IN "
+            "('planned','restore_started','restore_acknowledged','uncertain','observing') "
+            "ORDER BY updated_at, deployment_id LIMIT ?",
+            (_MAX_DISCOVERED_ROLLBACKS,),
+        ).fetchall()
+        return [DeploymentRollback.from_database_row(tuple(row)) for row in rows]
+    except (sqlite3.Error, StateError, ValueError, TypeError, AttributeError):
+        raise DeploymentRollbackRetriggerError("rollback discovery is unavailable") from None
 
 
 def reconcile_pending_rollback(*_args: object, **_kwargs: object) -> None:
