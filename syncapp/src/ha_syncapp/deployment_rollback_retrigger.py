@@ -25,12 +25,19 @@ class DeploymentRollbackRetriggerResult:
 
 
 def _validate_token(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value or len(value) > 512 or any(c.isspace() for c in value):
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 512
+        or any(c.isspace() for c in value)
+    ):
         raise DeploymentRollbackRetriggerError(f"invalid {name}")
     return value
 
 
-def list_retryable_rollbacks(store: StateStore, reference_time: datetime) -> list[DeploymentRollback]:
+def list_retryable_rollbacks(
+    store: StateStore, reference_time: datetime
+) -> list[DeploymentRollback]:
     """Read bounded durable rollback work while excluding terminal records."""
     if reference_time.tzinfo is None or reference_time.utcoffset() is None:
         raise DeploymentRollbackRetriggerError("reference_time must be timezone-aware")
@@ -152,8 +159,11 @@ def run_deployment_rollback_retrigger_pass(
             # A restore has already been proved complete. Recovery may only finish
             # post-restore health observation; it must never issue another restore.
             complete_rollback_observation(
-                store, rollback, github_token=github_token, core_token=core_token,
-                observed_at=reference_time
+                store,
+                rollback,
+                github_token=github_token,
+                core_token=core_token,
+                observed_at=reference_time,
             )
         elif rollback_requires_reconciliation(rollback):
             # Durable discovery must first bind this record back to the exact
