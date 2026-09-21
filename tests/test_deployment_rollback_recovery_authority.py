@@ -114,6 +114,49 @@ def test_recovery_authority_rejects_entity_tampering(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
+def test_recovery_authority_rejects_record_digest_tampering(tmp_path, monkeypatch):
+    store, _plan, intent = _authorized(tmp_path, monkeypatch)
+    try:
+        store._connection.execute(
+            "UPDATE rollback_recovery_authority SET record_sha256 = ? WHERE deployment_id = ?",
+            ("0" * 64, intent.deployment_id),
+        )
+        store._connection.commit()
+        with pytest.raises(DeploymentRollbackRetriggerError, match="authority"):
+            load_rollback_recovery_plan(store, intent)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_recovery_authority_rejects_noncanonical_entity_encoding(tmp_path, monkeypatch):
+    store, _plan, intent = _authorized(tmp_path, monkeypatch)
+    try:
+        store._connection.execute(
+            "UPDATE rollback_recovery_authority SET entity_ids_json = ? WHERE deployment_id = ?",
+            ('[ "light.kitchen" ]', intent.deployment_id),
+        )
+        store._connection.commit()
+        with pytest.raises(DeploymentRollbackRetriggerError, match="authority"):
+            load_rollback_recovery_plan(store, intent)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_recovery_authority_rejects_assertion_digest_tampering(tmp_path, monkeypatch):
+    store, _plan, intent = _authorized(tmp_path, monkeypatch)
+    try:
+        store._connection.execute(
+            "UPDATE rollback_recovery_authority SET assertion_set_sha256 = ? "
+            "WHERE deployment_id = ?",
+            ("0" * 64, intent.deployment_id),
+        )
+        store._connection.commit()
+        with pytest.raises(DeploymentRollbackRetriggerError, match="authority"):
+            load_rollback_recovery_plan(store, intent)
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_missing_recovery_authority_fails_closed(tmp_path, monkeypatch):
     store, _plan, intent = _authorized(tmp_path, monkeypatch)
     try:
