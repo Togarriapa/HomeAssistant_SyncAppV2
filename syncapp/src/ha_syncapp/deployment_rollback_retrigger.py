@@ -74,15 +74,19 @@ def run_deployment_rollback_retrigger_pass(
     considered = len(pending)
     for rollback in pending[:1]:
         if rollback_requires_reconciliation(rollback):
+            # The durable discovery slice will bind the persisted rollback back to its
+            # PostDeploymentAssertionPlan before this seam is enabled in production.
             reconcile_pending_rollback(
                 store, rollback, supervisor_token=core_token, observed_at=reference_time
             )  # type: ignore[arg-type]
             return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
         if reference_time < next_retry_at(rollback):
             return DeploymentRollbackRetriggerResult(0, considered, None)
+        # This execution seam is intentionally not reachable through durable discovery
+        # until the persisted plan/proof binding is implemented in the next TDD slice.
         execute_rollback_restore(
             store, rollback, supervisor_token=core_token, attempted_at=reference_time
-        )  # type: ignore[arg-type]
+        )  # type: ignore[arg-type,call-arg]
         return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
 
     return DeploymentRollbackRetriggerResult(0, considered, None)
