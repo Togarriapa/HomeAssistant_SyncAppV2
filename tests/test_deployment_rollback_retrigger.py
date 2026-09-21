@@ -126,6 +126,88 @@ def test_retrigger_pass_is_bounded_and_noops_without_pending_rollback(tmp_path: 
     )
 
 
+def test_retrigger_claims_exact_deployment_identity_before_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    now = datetime(2026, 9, 20, 20, 0, tzinfo=UTC)
+    rollback = _rollback_stub("rollback-claim")
+    reconcile_calls: list[str] = []
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.list_retryable_rollbacks",
+        lambda *_args, **_kwargs: [rollback],
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.rollback_requires_reconciliation",
+        lambda _rollback: True,
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.reconcile_pending_rollback",
+        lambda *_args, **_kwargs: reconcile_calls.append("reconcile") or None,
+    )
+    try:
+        result = run_deployment_rollback_retrigger_pass(
+            store,
+            "Owner/Private-Home",
+            "github-token",
+            "core-token",
+            reference_time=now,
+        )
+        work = store._get_work("deployment_rollback", "rollback-claim")
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.processed == "rollback-claim"
+    assert work.status == "succeeded"
+    assert work.attempts == 1
+    assert reconcile_calls == ["reconcile"]
+
+
+def test_retrigger_recovers_only_interrupted_rollback_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    now = datetime(2026, 9, 20, 20, 0, tzinfo=UTC)
+    rollback = _rollback_stub("rollback-stale")
+    store.enqueue_work("deployment_rollback", "rollback-stale", now=now - timedelta(minutes=5))
+    claimed = store.claim_work_kind("deployment_rollback", now=now - timedelta(minutes=5))
+    assert claimed is not None
+    other = store.enqueue_work("logs", "unrelated", now=now - timedelta(minutes=5))
+    other_claimed = store.claim_work_kind("logs", now=now - timedelta(minutes=5))
+    assert other_claimed is not None
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.list_retryable_rollbacks",
+        lambda *_args, **_kwargs: [rollback],
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.rollback_requires_reconciliation",
+        lambda _rollback: True,
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.deployment_rollback_retrigger.reconcile_pending_rollback",
+        lambda *_args, **_kwargs: None,
+    )
+    try:
+        result = run_deployment_rollback_retrigger_pass(
+            store,
+            "Owner/Private-Home",
+            "github-token",
+            "core-token",
+            reference_time=now,
+        )
+        rollback_work = store._get_work("deployment_rollback", "rollback-stale")
+        unrelated = store._get_work(other.work_kind, other.work_key)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.recovered_stale_locks == 1
+    assert rollback_work.status == "succeeded"
+    assert rollback_work.attempts == 2
+    assert unrelated.status == "running"
+
+
 def test_retrigger_never_replays_restore_for_uncertain_or_acknowledged_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
