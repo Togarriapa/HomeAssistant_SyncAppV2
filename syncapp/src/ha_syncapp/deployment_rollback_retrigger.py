@@ -25,19 +25,12 @@ class DeploymentRollbackRetriggerResult:
 
 
 def _validate_token(value: str, name: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value) > 512
-        or any(c.isspace() for c in value)
-    ):
+    if not isinstance(value, str) or not value or len(value) > 512 or any(c.isspace() for c in value):
         raise DeploymentRollbackRetriggerError(f"invalid {name}")
     return value
 
 
-def list_retryable_rollbacks(
-    store: StateStore, reference_time: datetime
-) -> list[DeploymentRollback]:
+def list_retryable_rollbacks(store: StateStore, reference_time: datetime) -> list[DeploymentRollback]:
     """Read bounded durable rollback work while excluding terminal records."""
     if reference_time.tzinfo is None or reference_time.utcoffset() is None:
         raise DeploymentRollbackRetriggerError("reference_time must be timezone-aware")
@@ -113,6 +106,11 @@ def execute_rollback_restore(*_args: object, **_kwargs: object) -> None:
     raise DeploymentRollbackRetriggerError("rollback restore execution is not wired")
 
 
+def complete_rollback_observation(*_args: object, **_kwargs: object) -> None:
+    """Fail closed until durable discovery can reconstruct post-restore health authority."""
+    raise DeploymentRollbackRetriggerError("rollback observation completion is not wired")
+
+
 def rollback_requires_reconciliation(rollback: DeploymentRollback) -> bool:
     """Uncertain or acknowledged mutations must be reconciled, never replayed."""
     return rollback.phase in {"restore_started", "restore_acknowledged", "uncertain"}
@@ -147,7 +145,17 @@ def run_deployment_rollback_retrigger_pass(
         return DeploymentRollbackRetriggerResult(recovered, considered, None)
 
     try:
-        if rollback_requires_reconciliation(rollback):
+        if rollback.phase == "observing":
+            if reference_time < next_retry_at(rollback):
+                store.fail_work(claimed, transient=True, now=reference_time)
+                return DeploymentRollbackRetriggerResult(recovered, considered, None)
+            # A restore has already been proved complete. Recovery may only finish
+            # post-restore health observation; it must never issue another restore.
+            complete_rollback_observation(
+                store, rollback, github_token=github_token, core_token=core_token,
+                observed_at=reference_time
+            )
+        elif rollback_requires_reconciliation(rollback):
             # Durable discovery must first bind this record back to the exact
             # PostDeploymentAssertionPlan. Until then this seam fails closed.
             reconcile_pending_rollback(
@@ -157,7 +165,8 @@ def run_deployment_rollback_retrigger_pass(
             store.fail_work(claimed, transient=True, now=reference_time)
             return DeploymentRollbackRetriggerResult(recovered, considered, None)
         else:
-            # Fail closed until persisted plan/proof reconstruction makes execution safe.
+            # Only a planned rollback can reach this path. The execution seam
+            # remains fail-closed until persisted plan/proof reconstruction exists.
             execute_rollback_restore(
                 store, rollback, supervisor_token=core_token, attempted_at=reference_time
             )
