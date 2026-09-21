@@ -6,9 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .deployment_rollback import DeploymentRollback
-from .deployment_rollback import (
-    reconcile_deployment_restore_once as reconcile_pending_rollback,
-)
 from .state import StateStore
 
 
@@ -40,6 +37,11 @@ def list_retryable_rollbacks(
     """Return bounded retryable rollback records; wired to durable discovery in the next slice."""
     del store, reference_time
     return []
+
+
+def reconcile_pending_rollback(*_args: object, **_kwargs: object) -> None:
+    """Fail closed until durable discovery can reconstruct the authoritative assertion plan."""
+    raise DeploymentRollbackRetriggerError("rollback reconciliation is not wired")
 
 
 def execute_rollback_restore(*_args: object, **_kwargs: object) -> None:
@@ -78,11 +80,11 @@ def run_deployment_rollback_retrigger_pass(
     considered = len(pending)
     for rollback in pending[:1]:
         if rollback_requires_reconciliation(rollback):
-            # The durable discovery slice will bind the persisted rollback back to its
-            # PostDeploymentAssertionPlan before this seam is enabled in production.
+            # Durable discovery must first bind this record back to the exact
+            # PostDeploymentAssertionPlan. Until then this seam fails closed.
             reconcile_pending_rollback(
                 store, rollback, supervisor_token=core_token, observed_at=reference_time
-            )  # type: ignore[arg-type]
+            )
             return DeploymentRollbackRetriggerResult(0, considered, rollback.deployment_id)
         if reference_time < next_retry_at(rollback):
             return DeploymentRollbackRetriggerResult(0, considered, None)
