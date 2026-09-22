@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from typing import cast
 
 from .post_deployment_assertion_observation import (
     PostDeploymentAssertionObservationError,
@@ -78,7 +79,8 @@ class RollbackRecoveryAuthority:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
         if type(row[1]) is not int:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
-        authority = cls(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8])
+        typed_row = cast(tuple[str, int, str, str, str, str, str, str, str], row)
+        authority = cls(*typed_row)
         authority.validate()
         if authority.database_values() != row:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
