@@ -16,13 +16,13 @@ from ha_syncapp.post_deployment_assertion_observation import (
     evaluate_post_deployment_assertions_once,
 )
 from test_core_health_window import START, TOKEN
-from test_deployment_finalization import _failed as _failed_finalization
 from test_integration_observation import FakeSession, _factory
+from test_post_deployment_assertion_observation import _ready
 from test_resource_availability_observation import _responses
 
 
 def _authorized(tmp_path, monkeypatch):
-    chain, plan = _failed_finalization(tmp_path, monkeypatch, ("light.kitchen",))
+    chain, plan = _ready(tmp_path, monkeypatch, ("light.kitchen",))
     store = chain[0]
     evaluate_post_deployment_assertions_once(
         store,
