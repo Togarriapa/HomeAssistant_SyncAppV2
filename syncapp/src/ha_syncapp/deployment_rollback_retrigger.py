@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .automation_script_observation import derive_automation_script_target
 from .deployment_rollback import DeploymentRollback
+from .post_deployment_assertion_observation import (
+    PostDeploymentAssertionObservationError,
+    PostDeploymentAssertionPlan,
+    derive_post_deployment_assertion_plan,
+)
+from .resource_availability_observation import (
+    ResourceAvailabilityError,
+    ResourceAvailabilityTarget,
+)
 from .state import StateError, StateStore, WorkItem
 
 _MAX_DISCOVERED_ROLLBACKS = 32
 _WORK_KIND = "deployment_rollback"
+_RECOVERY_AUTHORITY_SCHEMA_VERSION = 1
+_COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_HASH = re.compile(r"^[0-9a-f]{64}$")
 
 
 class DeploymentRollbackRetriggerError(RuntimeError):
@@ -33,6 +49,107 @@ def _validate_token(value: str, name: str) -> str:
     ):
         raise DeploymentRollbackRetriggerError(f"invalid {name}")
     return value
+
+
+def _authority_digest(values: tuple[object, ...]) -> str:
+    return hashlib.sha256(
+        json.dumps(values, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+
+
+def load_rollback_recovery_plan(
+    store: StateStore, rollback: DeploymentRollback
+) -> PostDeploymentAssertionPlan:
+    """Reconstruct exact assertion authority from integrity-bound durable evidence."""
+    try:
+        rollback.validate()
+        rows = store._connection.execute(
+            "SELECT deployment_id, schema_version, candidate_sha, entity_ids_json, "
+            "resource_target_sha256, automation_target_sha256, assertion_canonical_json, "
+            "assertion_set_sha256, record_sha256 FROM rollback_recovery_authority "
+            "WHERE deployment_id = ?",
+            (rollback.deployment_id,),
+        ).fetchall()
+        if len(rows) != 1 or len(rows[0]) != 9:
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is unavailable")
+        row = tuple(rows[0])
+        (
+            deployment_id,
+            schema_version,
+            candidate_sha,
+            entity_ids_json,
+            resource_target_sha256,
+            automation_target_sha256,
+            assertion_canonical_json,
+            assertion_set_sha256,
+            record_sha256,
+        ) = row
+        if (
+            deployment_id != rollback.deployment_id
+            or schema_version != _RECOVERY_AUTHORITY_SCHEMA_VERSION
+            or candidate_sha != rollback.candidate_sha
+            or not isinstance(candidate_sha, str)
+            or _COMMIT.fullmatch(candidate_sha) is None
+            or not all(
+                isinstance(value, str)
+                for value in (
+                    entity_ids_json,
+                    resource_target_sha256,
+                    automation_target_sha256,
+                    assertion_canonical_json,
+                    assertion_set_sha256,
+                    record_sha256,
+                )
+            )
+            or any(
+                _HASH.fullmatch(value) is None
+                for value in (
+                    resource_target_sha256,
+                    automation_target_sha256,
+                    assertion_set_sha256,
+                    record_sha256,
+                )
+            )
+            or record_sha256 != _authority_digest(row[:-1])
+        ):
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        entities_value = json.loads(entity_ids_json)
+        if (
+            not isinstance(entities_value, list)
+            or not all(isinstance(entity, str) for entity in entities_value)
+            or json.dumps(entities_value, ensure_ascii=True, separators=(",", ":"))
+            != entity_ids_json
+        ):
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        prepared = store.prepared_deployment(rollback.deployment_id)
+        if prepared is None or prepared.evidence.candidate_sha != rollback.candidate_sha:
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        resource_target = ResourceAvailabilityTarget.create(prepared, tuple(entities_value))
+        if resource_target.target_sha256 != resource_target_sha256:
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        automation_target = derive_automation_script_target(resource_target)
+        if automation_target.target_sha256 != automation_target_sha256:
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        plan = derive_post_deployment_assertion_plan(automation_target)
+        if (
+            plan.canonical_json != assertion_canonical_json
+            or plan.assertion_set_sha256 != assertion_set_sha256
+        ):
+            raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid")
+        return plan
+    except DeploymentRollbackRetriggerError:
+        raise
+    except (
+        AttributeError,
+        json.JSONDecodeError,
+        PostDeploymentAssertionObservationError,
+        ResourceAvailabilityError,
+        sqlite3.Error,
+        StateError,
+        TypeError,
+        ValueError,
+    ):
+        raise DeploymentRollbackRetriggerError("rollback recovery authority is invalid") from None
 
 
 def list_retryable_rollbacks(
