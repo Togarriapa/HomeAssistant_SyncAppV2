@@ -34,7 +34,7 @@ def _canonical_entities(entity_ids: tuple[str, ...]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class RollbackRecoveryAuthority:
-    """Non-executable evidence sufficient to deterministically rebuild rollback observation authority."""
+    """Evidence for deterministic reconstruction of rollback observation authority."""
 
     deployment_id: str
     schema_version: int
