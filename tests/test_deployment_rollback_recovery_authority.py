@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from ha_syncapp.deployment_finalization import finalize_deployment_once
 from ha_syncapp.deployment_rollback import (
     RollbackBackupProof,
     RollbackRepositoryProof,
@@ -43,6 +44,13 @@ def _authorized(tmp_path, monkeypatch):
             )
         ),
     )
+    finalization = finalize_deployment_once(
+        store,
+        plan,
+        finalized_at=START + timedelta(seconds=308),
+    )
+    assert finalization.outcome == "failure"
+    assert finalization.authority == "rollback"
     prepared = store.prepared_deployment(plan.automation_target.resource_target.deployment_id)
     assert prepared is not None
     result = authorize_deployment_rollback_once(
