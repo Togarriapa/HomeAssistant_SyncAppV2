@@ -53,7 +53,7 @@ class RollbackRecoveryAuthority:
         try:
             plan._validate()
             resource = plan.automation_target.resource_target
-            values: tuple[object, ...] = (
+            values = (
                 resource.deployment_id,
                 RECOVERY_AUTHORITY_SCHEMA_VERSION,
                 resource.candidate_sha,
