@@ -78,9 +78,7 @@ class RollbackRecoveryAuthority:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
         if type(row[1]) is not int:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
-        authority = cls(
-            row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]
-        )
+        authority = cls(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8])
         authority.validate()
         if authority.database_values() != row:
             raise RollbackRecoveryAuthorityError("rollback recovery authority is invalid")
