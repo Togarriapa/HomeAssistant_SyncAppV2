@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -578,6 +578,19 @@ class StateStore:
             "record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_rollback_recovery_authority_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS rollback_recovery_authority ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version > 0), "
+            "candidate_sha TEXT NOT NULL, entity_ids_json TEXT NOT NULL, "
+            "resource_target_sha256 TEXT NOT NULL, automation_target_sha256 TEXT NOT NULL, "
+            "assertion_canonical_json TEXT NOT NULL, assertion_set_sha256 TEXT NOT NULL, "
+            "record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (deployment_id) REFERENCES deployment_rollback(deployment_id))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -599,6 +612,7 @@ class StateStore:
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
         db.execute("PRAGMA synchronous = FULL")
+        db.execute("PRAGMA foreign_keys = ON")
         if created:
             if version != 0:
                 raise StateError("Unsupported state schema")
@@ -638,6 +652,7 @@ class StateStore:
                 self._create_deployment_finalization_table(db)
                 self._create_deployment_promotion_table(db)
                 self._create_deployment_rollback_table(db)
+                self._create_rollback_recovery_authority_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -646,30 +661,8 @@ class StateStore:
                 os.close(root_fd)
         else:
             if version not in {
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,
-                13,
-                14,
-                15,
-                16,
-                17,
-                18,
-                19,
-                20,
-                21,
-                22,
-                23,
-                SCHEMA_VERSION,
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                19, 20, 21, 22, 23, 24, SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
             self._identity()
@@ -809,6 +802,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_deployment_rollback_table(db)
+                    db.execute("PRAGMA user_version = 24")
+                version = 24
+            if version == 24:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_rollback_recovery_authority_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -975,14 +974,12 @@ class StateStore:
 
     def database_retention_intent(self, work_key: str) -> DatabaseRetentionIntent | None:
         """Read one immutable Recorder-retention publication intent."""
-
         _validate_work_identity("database_retention", work_key)
         try:
             rows = self._connection.execute(
                 "SELECT work_key, target, repository_id, expected_head_sha, "
                 "replacement_head_sha, snapshot_id, recorded_at "
-                "FROM database_retention_intent WHERE work_key = ?",
-                (work_key,),
+                "FROM database_retention_intent WHERE work_key = ?", (work_key,)
             ).fetchall()
         except sqlite3.Error:
             raise StateError("Unable to read database retention intent") from None
@@ -990,15 +987,7 @@ class StateStore:
             return None
         if len(rows) != 1 or len(rows[0]) != 7:
             raise StateError("Invalid database retention intent")
-        (
-            persisted_key,
-            target,
-            repository_id,
-            expected_head_sha,
-            replacement_head_sha,
-            snapshot_id,
-            recorded_at,
-        ) = rows[0]
+        persisted_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, recorded_at = rows[0]
         if not isinstance(persisted_key, str) or persisted_key != work_key:
             raise StateError("Invalid database retention intent")
         _validate_repository_binding(target, repository_id)
@@ -1006,35 +995,14 @@ class StateStore:
         _validate_synchronization_identity(target, "database", snapshot_id, replacement_head_sha)
         if expected_head_sha == replacement_head_sha:
             raise StateError("Invalid database retention intent")
-        return DatabaseRetentionIntent(
-            work_key=persisted_key,
-            target=target,
-            repository_id=repository_id,
-            expected_head_sha=expected_head_sha,
-            replacement_head_sha=replacement_head_sha,
-            snapshot_id=snapshot_id,
-            recorded_at=_parse_timestamp(recorded_at),
-        )
+        return DatabaseRetentionIntent(persisted_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, _parse_timestamp(recorded_at))
 
     def record_database_retention_intent(
-        self,
-        item: WorkItem,
-        target: str,
-        repository_id: int,
-        expected_head_sha: str,
-        replacement_head_sha: str,
-        snapshot_id: str,
-        *,
-        recorded_at: datetime | None = None,
+        self, item: WorkItem, target: str, repository_id: int, expected_head_sha: str,
+        replacement_head_sha: str, snapshot_id: str, *, recorded_at: datetime | None = None,
     ) -> DatabaseRetentionIntent:
         """Persist one immutable, non-secret compare-and-swap outcome intent."""
-
-        if (
-            type(item) is not WorkItem
-            or item.work_kind != "database_retention"
-            or item.status != "running"
-            or item.attempts < 1
-        ):
+        if type(item) is not WorkItem or item.work_kind != "database_retention" or item.status != "running" or item.attempts < 1:
             raise StateError("Database retention intent requires claimed work")
         _validate_repository_binding(target, repository_id)
         _validate_synchronization_identity(target, "database", snapshot_id, expected_head_sha)
@@ -1042,41 +1010,20 @@ class StateStore:
         if expected_head_sha == replacement_head_sha:
             raise StateError("Invalid database retention intent")
         when = _timestamp(recorded_at)
-        expected = DatabaseRetentionIntent(
-            item.work_key,
-            target,
-            repository_id,
-            expected_head_sha,
-            replacement_head_sha,
-            snapshot_id,
-            when,
-        )
+        expected = DatabaseRetentionIntent(item.work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, when)
         try:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 if self.repository_id(target) != repository_id:
                     raise StateError("Database retention repository identity mismatch")
                 baseline = self.synchronization_baseline(target, "database")
-                if (
-                    baseline is None
-                    or baseline.snapshot_id != snapshot_id
-                    or baseline.commit_sha != expected_head_sha
-                ):
+                if baseline is None or baseline.snapshot_id != snapshot_id or baseline.commit_sha != expected_head_sha:
                     raise StateError("Database retention baseline changed unexpectedly")
                 db.execute(
                     "INSERT OR IGNORE INTO database_retention_intent "
-                    "(work_key, target, repository_id, expected_head_sha, "
-                    "replacement_head_sha, snapshot_id, recorded_at) "
+                    "(work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, recorded_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        item.work_key,
-                        target,
-                        repository_id,
-                        expected_head_sha,
-                        replacement_head_sha,
-                        snapshot_id,
-                        when.isoformat(),
-                    ),
+                    (item.work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, when.isoformat()),
                 )
             persisted = self.database_retention_intent(item.work_key)
             if persisted != expected:
@@ -1087,14 +1034,11 @@ class StateStore:
 
     def log_retention_intent(self, work_key: str) -> LogsRetentionIntent | None:
         """Read one immutable logs-retention publication intent."""
-
         _validate_work_identity("logs_retention", work_key)
         try:
             rows = self._connection.execute(
-                "SELECT work_key, target, repository_id, expected_head_sha, "
-                "replacement_head_sha, snapshot_id, recorded_at "
-                "FROM log_retention_intent WHERE work_key = ?",
-                (work_key,),
+                "SELECT work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, recorded_at "
+                "FROM log_retention_intent WHERE work_key = ?", (work_key,)
             ).fetchall()
         except sqlite3.Error:
             raise StateError("Unable to read logs retention intent") from None
@@ -1102,15 +1046,7 @@ class StateStore:
             return None
         if len(rows) != 1 or len(rows[0]) != 7:
             raise StateError("Invalid logs retention intent")
-        (
-            persisted_key,
-            target,
-            repository_id,
-            expected_head_sha,
-            replacement_head_sha,
-            snapshot_id,
-            recorded_at,
-        ) = rows[0]
+        persisted_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, recorded_at = rows[0]
         if not isinstance(persisted_key, str) or persisted_key != work_key:
             raise StateError("Invalid logs retention intent")
         _validate_repository_binding(target, repository_id)
@@ -1118,35 +1054,14 @@ class StateStore:
         _validate_synchronization_identity(target, "logs", snapshot_id, replacement_head_sha)
         if expected_head_sha == replacement_head_sha:
             raise StateError("Invalid logs retention intent")
-        return LogsRetentionIntent(
-            work_key=persisted_key,
-            target=target,
-            repository_id=repository_id,
-            expected_head_sha=expected_head_sha,
-            replacement_head_sha=replacement_head_sha,
-            snapshot_id=snapshot_id,
-            recorded_at=_parse_timestamp(recorded_at),
-        )
+        return LogsRetentionIntent(persisted_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, _parse_timestamp(recorded_at))
 
     def record_log_retention_intent(
-        self,
-        item: WorkItem,
-        target: str,
-        repository_id: int,
-        expected_head_sha: str,
-        replacement_head_sha: str,
-        snapshot_id: str,
-        *,
-        recorded_at: datetime | None = None,
+        self, item: WorkItem, target: str, repository_id: int, expected_head_sha: str,
+        replacement_head_sha: str, snapshot_id: str, *, recorded_at: datetime | None = None,
     ) -> LogsRetentionIntent:
         """Persist one immutable, non-secret compare-and-swap outcome intent."""
-
-        if (
-            type(item) is not WorkItem
-            or item.work_kind != "logs_retention"
-            or item.status != "running"
-            or item.attempts < 1
-        ):
+        if type(item) is not WorkItem or item.work_kind != "logs_retention" or item.status != "running" or item.attempts < 1:
             raise StateError("Logs retention intent requires claimed work")
         _validate_repository_binding(target, repository_id)
         _validate_synchronization_identity(target, "logs", snapshot_id, expected_head_sha)
@@ -1154,41 +1069,20 @@ class StateStore:
         if expected_head_sha == replacement_head_sha:
             raise StateError("Invalid logs retention intent")
         when = _timestamp(recorded_at)
-        expected = LogsRetentionIntent(
-            item.work_key,
-            target,
-            repository_id,
-            expected_head_sha,
-            replacement_head_sha,
-            snapshot_id,
-            when,
-        )
+        expected = LogsRetentionIntent(item.work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, when)
         try:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 if self.repository_id(target) != repository_id:
                     raise StateError("Logs retention repository identity mismatch")
                 baseline = self.synchronization_baseline(target, "logs")
-                if (
-                    baseline is None
-                    or baseline.snapshot_id != snapshot_id
-                    or baseline.commit_sha != expected_head_sha
-                ):
+                if baseline is None or baseline.snapshot_id != snapshot_id or baseline.commit_sha != expected_head_sha:
                     raise StateError("Logs retention baseline changed unexpectedly")
                 db.execute(
                     "INSERT OR IGNORE INTO log_retention_intent "
-                    "(work_key, target, repository_id, expected_head_sha, "
-                    "replacement_head_sha, snapshot_id, recorded_at) "
+                    "(work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, recorded_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        item.work_key,
-                        target,
-                        repository_id,
-                        expected_head_sha,
-                        replacement_head_sha,
-                        snapshot_id,
-                        when.isoformat(),
-                    ),
+                    (item.work_key, target, repository_id, expected_head_sha, replacement_head_sha, snapshot_id, when.isoformat()),
                 )
             persisted = self.log_retention_intent(item.work_key)
             if persisted != expected:
@@ -1219,11 +1113,7 @@ class StateStore:
             raise StateError("Unable to read prepared deployment evidence") from None
 
     def record_prepared_deployment(
-        self,
-        deployment_id: str,
-        evidence: "CandidateBackupEvidence",
-        *,
-        prepared_at: datetime | None = None,
+        self, deployment_id: str, evidence: "CandidateBackupEvidence", *, prepared_at: datetime | None = None,
     ) -> PreparedDeployment:
         """Persist one candidate/backup association; replay never replaces evidence."""
         try:
@@ -1239,14 +1129,10 @@ class StateStore:
                     if existing.evidence != evidence:
                         raise StateError("Prepared deployment evidence cannot be rebound")
                     return existing
-                # The unique repository/candidate key rejects alternate deployment IDs,
-                # including aliases of the same pinned repository. Never replace a row.
                 db.execute(
-                    "INSERT INTO prepared_deployment (deployment_id, target, repository_id, "
-                    "baseline_sha, candidate_sha, stage_manifest_sha256, runtime_sha256, "
-                    "risk_level, core_version, backup_slug, prepared_at, record_sha256) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    values,
+                    "INSERT INTO prepared_deployment (deployment_id, target, repository_id, baseline_sha, candidate_sha, "
+                    "stage_manifest_sha256, runtime_sha256, risk_level, core_version, backup_slug, prepared_at, record_sha256) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values,
                 )
                 persisted = self.prepared_deployment(deployment_id)
                 if persisted is None:
@@ -1259,32 +1145,15 @@ class StateStore:
         if len(row) != 7:
             raise StateError("Invalid work record")
         work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at = row
-        if (
-            not isinstance(work_kind, str)
-            or not isinstance(work_key, str)
-            or status not in {"pending", "running", "retry", "blocked", "succeeded"}
-            or type(attempts) is not int
-            or attempts < 0
-        ):
+        if not isinstance(work_kind, str) or not isinstance(work_key, str) or status not in {"pending", "running", "retry", "blocked", "succeeded"} or type(attempts) is not int or attempts < 0:
             raise StateError("Invalid work record")
         _validate_work_identity(work_kind, work_key)
-        return WorkItem(
-            work_kind=work_kind,
-            work_key=work_key,
-            status=status,
-            attempts=attempts,
-            created_at=_parse_timestamp(created_at),
-            updated_at=_parse_timestamp(updated_at),
-            next_attempt_at=(
-                None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
-            ),
-        )
+        return WorkItem(work_kind, work_key, status, attempts, _parse_timestamp(created_at), _parse_timestamp(updated_at), None if next_attempt_at is None else _parse_timestamp(next_attempt_at))
 
     def _get_work(self, work_kind: str, work_key: str) -> WorkItem:
         rows = self._connection.execute(
-            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
-            "next_attempt_at FROM work WHERE work_kind = ? AND work_key = ?",
-            (work_kind, work_key),
+            "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
+            "FROM work WHERE work_kind = ? AND work_key = ?", (work_kind, work_key)
         ).fetchall()
         if len(rows) != 1:
             raise StateError("Work record is missing")
@@ -1292,53 +1161,28 @@ class StateStore:
 
     def recovery_work_evidence(self) -> tuple[RecoveryWorkEvidence, ...]:
         """Read bounded recovery status metadata without selecting sensitive work keys."""
-
         try:
             rows = self._connection.execute(
                 "SELECT work_kind, status, attempts, created_at, updated_at, next_attempt_at "
-                "FROM work ORDER BY work_kind, status, attempts, created_at, updated_at "
-                "LIMIT ?",
+                "FROM work ORDER BY work_kind, status, attempts, created_at, updated_at LIMIT ?",
                 (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
             ).fetchall()
         except sqlite3.Error:
             raise StateError("Unable to read recovery work evidence") from None
         if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
             raise StateError("Recovery work evidence exceeds the limit")
-
         evidence: list[RecoveryWorkEvidence] = []
         for row in rows:
             if len(row) != 6:
                 raise StateError("Invalid recovery work evidence")
             work_kind, status, attempts, created_at, updated_at, next_attempt_at = row
-            if (
-                not isinstance(work_kind, str)
-                or status not in {"pending", "running", "retry", "blocked", "succeeded"}
-                or type(attempts) is not int
-                or attempts < 0
-            ):
+            if not isinstance(work_kind, str) or status not in {"pending", "running", "retry", "blocked", "succeeded"} or type(attempts) is not int or attempts < 0:
                 raise StateError("Invalid recovery work evidence")
             _validate_work_kind(work_kind)
-            evidence.append(
-                RecoveryWorkEvidence(
-                    work_kind=work_kind,
-                    status=status,
-                    attempts=attempts,
-                    created_at=_parse_timestamp(created_at),
-                    updated_at=_parse_timestamp(updated_at),
-                    next_attempt_at=(
-                        None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
-                    ),
-                )
-            )
+            evidence.append(RecoveryWorkEvidence(work_kind, status, attempts, _parse_timestamp(created_at), _parse_timestamp(updated_at), None if next_attempt_at is None else _parse_timestamp(next_attempt_at)))
         return tuple(evidence)
 
-    def enqueue_work(
-        self,
-        work_kind: str,
-        work_key: str,
-        *,
-        now: datetime | None = None,
-    ) -> WorkItem:
+    def enqueue_work(self, work_kind: str, work_key: str, *, now: datetime | None = None) -> WorkItem:
         """Create one deterministic work item, or return its existing durable state."""
         _validate_work_identity(work_kind, work_key)
         current = _timestamp(now).isoformat()
@@ -1346,10 +1190,8 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
-                    "INSERT OR IGNORE INTO work (work_kind, work_key, status, attempts, "
-                    "created_at, updated_at, next_attempt_at) "
-                    "VALUES (?, ?, 'pending', 0, ?, ?, ?)",
-                    (work_kind, work_key, current, current, current),
+                    "INSERT OR IGNORE INTO work (work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at) "
+                    "VALUES (?, ?, 'pending', 0, ?, ?, ?)", (work_kind, work_key, current, current, current)
                 )
             return self._get_work(work_kind, work_key)
         except sqlite3.Error:
@@ -1362,18 +1204,15 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute(
-                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
-                    "next_attempt_at FROM work WHERE status IN ('pending','retry') "
-                    "AND next_attempt_at <= ? "
-                    "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1",
-                    (current,),
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
+                    "FROM work WHERE status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_kind, work_key LIMIT 1", (current,)
                 ).fetchone()
                 if row is None:
                     return None
                 item = self._work_from_row(row)
                 result = db.execute(
-                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
-                    "updated_at = ?, next_attempt_at = NULL "
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, updated_at = ?, next_attempt_at = NULL "
                     "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
                     (current, item.work_kind, item.work_key, item.status, item.attempts),
                 )
@@ -1383,12 +1222,7 @@ class StateStore:
         except sqlite3.Error:
             raise StateError("Unable to claim work") from None
 
-    def claim_work_kind(
-        self,
-        work_kind: str,
-        *,
-        now: datetime | None = None,
-    ) -> WorkItem | None:
+    def claim_work_kind(self, work_kind: str, *, now: datetime | None = None) -> WorkItem | None:
         """Atomically claim the oldest eligible item of exactly one work kind."""
         _validate_work_kind(work_kind)
         current = _timestamp(now).isoformat()
@@ -1396,18 +1230,15 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute(
-                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, "
-                    "next_attempt_at FROM work WHERE work_kind = ? "
-                    "AND status IN ('pending','retry') AND next_attempt_at <= ? "
-                    "ORDER BY next_attempt_at, created_at, work_key LIMIT 1",
-                    (work_kind, current),
+                    "SELECT work_kind, work_key, status, attempts, created_at, updated_at, next_attempt_at "
+                    "FROM work WHERE work_kind = ? AND status IN ('pending','retry') AND next_attempt_at <= ? "
+                    "ORDER BY next_attempt_at, created_at, work_key LIMIT 1", (work_kind, current)
                 ).fetchone()
                 if row is None:
                     return None
                 item = self._work_from_row(row)
                 result = db.execute(
-                    "UPDATE work SET status = 'running', attempts = attempts + 1, "
-                    "updated_at = ?, next_attempt_at = NULL "
+                    "UPDATE work SET status = 'running', attempts = attempts + 1, updated_at = ?, next_attempt_at = NULL "
                     "WHERE work_kind = ? AND work_key = ? AND status = ? AND attempts = ?",
                     (current, item.work_kind, item.work_key, item.status, item.attempts),
                 )
@@ -1424,21 +1255,14 @@ class StateStore:
             with self._connection as db:
                 db.execute("BEGIN IMMEDIATE")
                 result = db.execute(
-                    "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? "
-                    "WHERE status = 'running'",
+                    "UPDATE work SET status = 'retry', updated_at = ?, next_attempt_at = ? WHERE status = 'running'",
                     (current, current),
                 )
             return result.rowcount
         except sqlite3.Error:
             raise StateError("Unable to recover interrupted work") from None
 
-    def fail_work(
-        self,
-        item: WorkItem,
-        *,
-        transient: bool,
-        now: datetime | None = None,
-    ) -> WorkItem:
+    def fail_work(self, item: WorkItem, *, transient: bool, now: datetime | None = None) -> WorkItem:
         """Record a failed running attempt as retryable or permanently blocked."""
         current_time = _timestamp(now)
         current = current_time.isoformat()
@@ -1456,8 +1280,7 @@ class StateStore:
                 db.execute("BEGIN IMMEDIATE")
                 result = db.execute(
                     "UPDATE work SET status = ?, updated_at = ?, next_attempt_at = ? "
-                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
-                    "AND attempts = ?",
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
                     (status, current, next_attempt, item.work_kind, item.work_key, item.attempts),
                 )
                 if result.rowcount != 1:
@@ -1476,8 +1299,7 @@ class StateStore:
                 db.execute("BEGIN IMMEDIATE")
                 result = db.execute(
                     "UPDATE work SET status = 'succeeded', updated_at = ?, next_attempt_at = NULL "
-                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' "
-                    "AND attempts = ?",
+                    "WHERE work_kind = ? AND work_key = ? AND status = 'running' AND attempts = ?",
                     (current, item.work_kind, item.work_key, item.attempts),
                 )
                 if result.rowcount != 1:
