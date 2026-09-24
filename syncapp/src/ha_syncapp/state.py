@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -578,6 +578,18 @@ class StateStore:
             "record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_rollback_recovery_authority_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE rollback_recovery_authority ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL, candidate_sha TEXT NOT NULL, "
+            "entity_ids_json TEXT NOT NULL, resource_target_sha256 TEXT NOT NULL, "
+            "automation_target_sha256 TEXT NOT NULL, assertion_canonical_json TEXT NOT NULL, "
+            "assertion_set_sha256 TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (deployment_id) REFERENCES deployment_rollback(deployment_id))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -595,6 +607,9 @@ class StateStore:
         os.close(fd)
         self._db = sqlite3.connect(path, timeout=5)
         db = self._connection
+        db.execute("PRAGMA foreign_keys = ON")
+        if db.execute("PRAGMA foreign_keys").fetchone() != (1,):
+            raise StateError("Unable to enforce state foreign keys")
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
@@ -638,6 +653,7 @@ class StateStore:
                 self._create_deployment_finalization_table(db)
                 self._create_deployment_promotion_table(db)
                 self._create_deployment_rollback_table(db)
+                self._create_rollback_recovery_authority_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -669,6 +685,7 @@ class StateStore:
                 21,
                 22,
                 23,
+                24,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -809,7 +826,13 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_deployment_rollback_table(db)
-                    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                    db.execute("PRAGMA user_version = 24")
+                version = 24
+            if version == 24:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_rollback_recovery_authority_table(db)
+                    db.execute("PRAGMA user_version = 25")
         self._identity()
 
     def _identity(self) -> tuple[str, int, str | None]:
