@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from ha_syncapp.state import SCHEMA_VERSION, StateStore
@@ -82,5 +83,46 @@ def test_recovery_authority_cannot_exist_without_rollback_intent(tmp_path: Path)
             assert "FOREIGN KEY" in str(error).upper()
         else:
             raise AssertionError("orphan recovery authority must be rejected")
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_schema_24_store_migrates_recovery_authority_transactionally(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    root = data / "syncapp"
+    root.mkdir(parents=True)
+    database = root / "state.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE installation ("
+            "singleton INTEGER PRIMARY KEY CHECK (singleton = 1), "
+            "installation_id TEXT NOT NULL, boot_count INTEGER NOT NULL CHECK (boot_count >= 0), "
+            "active_run_id TEXT, last_started_at TEXT, last_stopped_at TEXT)"
+        )
+        db.execute(
+            "INSERT INTO installation VALUES "
+            "(1, '00000000-0000-0000-0000-000000000001', 0, NULL, NULL, NULL)"
+        )
+        db.execute(
+            "CREATE TABLE deployment_rollback ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, backup_slug TEXT NOT NULL, "
+            "finalization_sha256 TEXT NOT NULL, repository_proof_sha256 TEXT NOT NULL, "
+            "backup_proof_sha256 TEXT NOT NULL, phase TEXT NOT NULL, "
+            "reconciliation_state TEXT NOT NULL, block_reason TEXT NOT NULL, "
+            "attempt_count INTEGER NOT NULL, restore_job_id TEXT, authorized_at TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
+        db.execute("PRAGMA user_version = 24")
+
+    store = StateStore(data)
+    store.__enter__()
+    try:
+        assert store._connection.execute("PRAGMA user_version").fetchone() == (25,)
+        assert store._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'rollback_recovery_authority'"
+        ).fetchone() == ("rollback_recovery_authority",)
     finally:
         store.__exit__(None, None, None)
