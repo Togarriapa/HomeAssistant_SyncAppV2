@@ -52,10 +52,17 @@ def test_fresh_state_has_integrity_bound_rollback_recovery_authority_table(
         store.__exit__(None, None, None)
 
 
+def test_state_connection_enforces_foreign_keys(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        assert store._connection.execute("PRAGMA foreign_keys").fetchone() == (1,)
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_recovery_authority_cannot_exist_without_rollback_intent(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:
-        store._connection.execute("PRAGMA foreign_keys = ON")
         try:
             store._connection.execute(
                 "INSERT INTO rollback_recovery_authority VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
