@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_orchestration() -> None:
-    assert SCHEMA_VERSION == 28
+    assert SCHEMA_VERSION == 29
 
 
 def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
@@ -31,6 +31,36 @@ def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
             "updated_at": "TEXT",
             "record_sha256": "TEXT",
         }
+
+
+def test_fresh_state_has_candidate_dependency_checkpoint_table(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        columns = {
+            str(row[1]): str(row[2])
+            for row in store._connection.execute(
+                "PRAGMA table_info(candidate_dependency_checkpoint)"
+            ).fetchall()
+        }
+        assert columns == {
+            "candidate_sha": "TEXT",
+            "schema_version": "INTEGER",
+            "orchestration_sha256": "TEXT",
+            "fetch_stage_sha256": "TEXT",
+            "integrity_sha256": "TEXT",
+            "target": "TEXT",
+            "repository_id": "INTEGER",
+            "baseline_sha": "TEXT",
+            "stage_manifest_sha256": "TEXT",
+            "phase": "TEXT",
+            "runtime_json": "TEXT",
+            "dependencies_json": "TEXT",
+            "reference_count": "INTEGER",
+            "planned_at": "TEXT",
+            "completed_at": "TEXT",
+            "record_sha256": "TEXT",
+        }
         foreign_keys = store._connection.execute(
             "PRAGMA foreign_key_list(candidate_orchestration)"
         ).fetchall()
@@ -52,9 +82,25 @@ def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path:
         store._connection.execute("PRAGMA user_version = 25")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (28,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"
         ).fetchone()
         assert table == ("candidate_orchestration",)
+
+
+def test_schema_28_migrates_transactionally_to_dependency_checkpoint(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        store._connection.execute("DROP TABLE candidate_dependency_checkpoint")
+        store._connection.execute("PRAGMA user_version = 28")
+
+    with StateStore(root) as migrated:
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
+        table = migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'candidate_dependency_checkpoint'"
+        ).fetchone()
+        assert table == ("candidate_dependency_checkpoint",)

@@ -122,11 +122,26 @@ class CandidateOrchestration:
             or type(self.repository_id) is not int
             or not 0 < self.repository_id <= 2**63 - 1
             or self.phase
-            not in {"detected", "staged", "integrity_verified", "completed", "blocked"}
-            or self.next_action not in {"fetch_stage", "analyze", "analyze_dependencies", "none"}
+            not in {
+                "detected",
+                "staged",
+                "integrity_verified",
+                "dependencies_analyzed",
+                "completed",
+                "blocked",
+            }
+            or self.next_action
+            not in {
+                "fetch_stage",
+                "analyze",
+                "analyze_dependencies",
+                "classify_risk",
+                "none",
+            }
             or (self.phase == "detected") != (self.next_action == "fetch_stage")
             or (self.phase == "staged") != (self.next_action == "analyze")
             or (self.phase == "integrity_verified") != (self.next_action == "analyze_dependencies")
+            or (self.phase == "dependencies_analyzed") != (self.next_action == "classify_risk")
             or terminal != (self.next_action == "none")
             or self.registered_at.tzinfo is None
             or self.registered_at.utcoffset() is None
@@ -211,6 +226,42 @@ def integrity_verified_candidate_orchestration(
         repository_id=current.repository_id,
         phase="integrity_verified",
         next_action="analyze_dependencies",
+        registered_at=current.registered_at,
+        updated_at=when,
+        record_sha256=_digest(values),
+    )
+    result.validate()
+    return result
+
+
+def dependencies_analyzed_candidate_orchestration(
+    current: CandidateOrchestration,
+    *,
+    updated_at: datetime,
+) -> CandidateOrchestration:
+    """Derive the sole permitted dependency-analysis successor without persisting it."""
+    current.validate()
+    if current.phase != "integrity_verified" or current.next_action != "analyze_dependencies":
+        _invalid()
+    when = _timestamp(updated_at)
+    values: tuple[object, ...] = (
+        _WORK_KIND,
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        "dependencies_analyzed",
+        "classify_risk",
+        current.registered_at.astimezone(UTC).isoformat(),
+        when.isoformat(),
+    )
+    result = CandidateOrchestration(
+        candidate_sha=current.candidate_sha,
+        schema_version=current.schema_version,
+        target=current.target,
+        repository_id=current.repository_id,
+        phase="dependencies_analyzed",
+        next_action="classify_risk",
         registered_at=current.registered_at,
         updated_at=when,
         record_sha256=_digest(values),

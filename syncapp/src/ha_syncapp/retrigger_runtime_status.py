@@ -6,6 +6,11 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
+from .candidate_dependency_execution import (
+    CandidateDependencyExecutionError,
+    CandidateDependencyRuntimeEvidence,
+    candidate_dependency_runtime_evidence,
+)
 from .candidate_fetch_stage_execution import (
     CandidateFetchStageExecutionError,
     CandidateFetchStageRuntimeEvidence,
@@ -66,7 +71,13 @@ def collect_retrigger_runtime_inventory(
         rollback_evidence = store.deployment_rollback_runtime_evidence()
         fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
         integrity_evidence = candidate_integrity_runtime_evidence(store)
-    except (StateError, CandidateFetchStageExecutionError, CandidateIntegrityExecutionError):
+        dependency_evidence = candidate_dependency_runtime_evidence(store)
+    except (
+        StateError,
+        CandidateFetchStageExecutionError,
+        CandidateIntegrityExecutionError,
+        CandidateDependencyExecutionError,
+    ):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
     recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
@@ -79,6 +90,10 @@ def collect_retrigger_runtime_inventory(
     )
     recovery["candidate_integrity"] = render_candidate_integrity_runtime_status(
         integrity_evidence,
+        reference_time=reference_time,
+    )
+    recovery["candidate_dependencies"] = render_candidate_dependency_runtime_status(
+        dependency_evidence,
         reference_time=reference_time,
     )
     return RuntimeInventoryInput(
@@ -186,6 +201,52 @@ def render_candidate_integrity_runtime_status(
         "total": total,
         "phases": phases,
         "changed_paths": changed_total,
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_candidate_dependency_runtime_status(
+    evidence: Iterable[CandidateDependencyRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate dependency checkpoints without identity or candidate contents."""
+    reference = _utc(reference_time, "candidate dependency reference time is invalid")
+    phases = {"completed": 0, "planned": 0}
+    references = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "candidate dependency runtime evidence exceeds the limit"
+            )
+        if type(row) is not CandidateDependencyRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate dependency runtime evidence is invalid")
+        planned = _utc(row.planned_at, "candidate dependency runtime evidence is invalid")
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(row.completed_at, "candidate dependency runtime evidence is invalid")
+        )
+        is_completed = row.phase == "completed"
+        if (
+            planned > reference
+            or is_completed != (completed is not None)
+            or is_completed != (row.reference_count is not None)
+            or (completed is not None and (completed < planned or completed > reference))
+            or (row.reference_count is not None and row.reference_count < 0)
+        ):
+            raise RetriggerRuntimeStatusError("candidate dependency runtime evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        references += row.reference_count or 0
+        observed = completed or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "references": references,
         "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 
