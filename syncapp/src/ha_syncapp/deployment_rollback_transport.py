@@ -24,8 +24,12 @@ _CORE = re.compile(r"^20[0-9]{2}\.(?:[1-9]|1[0-2])\.(?:0|[1-9][0-9]*)$")
 _TOKEN = re.compile(r"^[!-~]{1,512}$")
 
 
-class DeploymentRollbackTransportError(RuntimeError):
+class DeploymentRollbackTransportError(DeploymentRollbackError):
     """A rollback proof transport failed without exposing response details."""
+
+    def __init__(self, message: str, *, transient: bool) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,13 +58,14 @@ def read_rollback_repository_proof(
         proof = RollbackRepositoryProof(head.repository_id, True, head.commit_sha)
         proof.validate()
         return proof
-    except (
-        DeploymentRollbackError,
-        RepositoryVerificationError,
-        AttributeError,
-        ValueError,
-    ):
-        raise DeploymentRollbackTransportError("rollback repository proof is unavailable") from None
+    except DeploymentRollbackError:
+        raise DeploymentRollbackTransportError(
+            "rollback repository proof is invalid", transient=False
+        ) from None
+    except (RepositoryVerificationError, AttributeError, ValueError):
+        raise DeploymentRollbackTransportError(
+            "rollback repository proof is unavailable", transient=True
+        ) from None
 
 
 def read_rollback_backup_proof(
@@ -100,7 +105,9 @@ def read_rollback_backup_proof(
     except DeploymentRollbackTransportError:
         raise
     except Exception:
-        raise DeploymentRollbackTransportError("rollback backup proof is unavailable") from None
+        raise DeploymentRollbackTransportError(
+            "rollback backup proof is unavailable", transient=True
+        ) from None
     if (
         type(response) is not SupervisorBackupProofResponse
         or response.status != 200
@@ -172,7 +179,9 @@ def _default_backup_proof_transport(
     except DeploymentRollbackTransportError:
         raise
     except (http.client.HTTPException, TimeoutError, OSError, ValueError):
-        raise DeploymentRollbackTransportError("rollback backup proof is unavailable") from None
+        raise DeploymentRollbackTransportError(
+            "rollback backup proof is unavailable", transient=True
+        ) from None
     finally:
         connection.close()
 
@@ -195,4 +204,6 @@ def _reject_constant(_value: str) -> NoReturn:
 
 
 def _invalid() -> NoReturn:
-    raise DeploymentRollbackTransportError("rollback proof response is invalid") from None
+    raise DeploymentRollbackTransportError(
+        "rollback proof response is invalid", transient=False
+    ) from None

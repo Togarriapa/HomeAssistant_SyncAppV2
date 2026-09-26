@@ -45,6 +45,10 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 class DeploymentRollbackRetriggerError(RuntimeError):
     """Rollback recovery inputs or durable state are invalid."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class DeploymentRollbackRetriggerResult:
@@ -53,7 +57,7 @@ class DeploymentRollbackRetriggerResult:
     processed: str | None
 
 
-def _validate_token(value: str, name: str) -> str:
+def _validate_token(value: str | None, name: str) -> str:
     if (
         not isinstance(value, str)
         or not value
@@ -251,8 +255,8 @@ def reconcile_pending_rollback(
         )
     except DeploymentRollbackRetriggerError:
         raise
-    except DeploymentRollbackError:
-        raise DeploymentRollbackRetriggerError("rollback reconciliation failed closed") from None
+    except DeploymentRollbackError as exc:
+        raise _domain_error(exc, "rollback reconciliation failed closed") from None
 
 
 def execute_rollback_restore(
@@ -279,8 +283,8 @@ def execute_rollback_restore(
         )
     except DeploymentRollbackRetriggerError:
         raise
-    except DeploymentRollbackError:
-        raise DeploymentRollbackRetriggerError("rollback restore execution failed closed") from None
+    except DeploymentRollbackError as exc:
+        raise _domain_error(exc, "rollback restore execution failed closed") from None
 
 
 def complete_rollback_observation(
@@ -305,10 +309,21 @@ def complete_rollback_observation(
         )
     except DeploymentRollbackRetriggerError:
         raise
-    except DeploymentRollbackError:
-        raise DeploymentRollbackRetriggerError(
-            "rollback observation completion failed closed"
-        ) from None
+    except DeploymentRollbackError as exc:
+        raise _domain_error(exc, "rollback observation completion failed closed") from None
+
+
+def _domain_error(error: DeploymentRollbackError, message: str) -> DeploymentRollbackRetriggerError:
+    explicit = getattr(error, "transient", None)
+    transient_messages = {
+        "rollback reconciliation is temporarily unavailable",
+        "rollback post-restore health is unavailable",
+        "rollback restore outcome is uncertain",
+        "repository proof is unavailable",
+        "backup proof is unavailable",
+    }
+    transient = explicit if type(explicit) is bool else str(error) in transient_messages
+    return DeploymentRollbackRetriggerError(message, transient=transient)
 
 
 def rollback_requires_reconciliation(rollback: DeploymentRollback) -> bool:
@@ -325,16 +340,14 @@ def next_retry_at(rollback: DeploymentRollback) -> datetime:
 def run_deployment_rollback_retrigger_pass(
     store: StateStore,
     target: str,
-    github_token: str,
-    core_token: str,
+    github_token: str | None,
+    core_token: str | None,
     *,
     reference_time: datetime,
     repository_reader: RepositoryReader = read_rollback_repository_proof,
     backup_reader: BackupReader = read_rollback_backup_proof,
 ) -> DeploymentRollbackRetriggerResult:
     """Claim and process at most one rollback item without bypassing safeguards."""
-    _validate_token(github_token, "GitHub token")
-    _validate_token(core_token, "Core token")
     if reference_time.tzinfo is None or reference_time.utcoffset() is None:
         raise DeploymentRollbackRetriggerError("reference_time must be timezone-aware")
     if not isinstance(target, str) or "/" not in target:
@@ -342,10 +355,15 @@ def run_deployment_rollback_retrigger_pass(
 
     pending = list_retryable_rollbacks(store, reference_time)
     considered = len(pending)
+    if not pending:
+        return DeploymentRollbackRetriggerResult(0, 0, None)
+    github_credential = _validate_token(github_token, "GitHub token")
+    supervisor_credential = _validate_token(core_token, "Core token")
     recovered, claimed, rollback = _claim_discovered_work(store, pending, reference_time)
     if claimed is None or rollback is None:
         return DeploymentRollbackRetriggerResult(recovered, considered, None)
 
+    outcome: RollbackRestoreResult | None = None
     try:
         if rollback.phase == "observing":
             if reference_time < next_retry_at(rollback):
@@ -353,19 +371,22 @@ def run_deployment_rollback_retrigger_pass(
                 return DeploymentRollbackRetriggerResult(recovered, considered, None)
             # A restore has already been proved complete. Recovery may only finish
             # post-restore health observation; it must never issue another restore.
-            complete_rollback_observation(
+            outcome = complete_rollback_observation(
                 store,
                 rollback,
-                github_token=github_token,
-                supervisor_token=core_token,
+                github_token=github_credential,
+                supervisor_token=supervisor_credential,
                 repository_reader=repository_reader,
                 observed_at=reference_time,
             )
         elif rollback_requires_reconciliation(rollback):
             # Durable discovery must first bind this record back to the exact
             # PostDeploymentAssertionPlan. Until then this seam fails closed.
-            reconcile_pending_rollback(
-                store, rollback, supervisor_token=core_token, observed_at=reference_time
+            outcome = reconcile_pending_rollback(
+                store,
+                rollback,
+                supervisor_token=supervisor_credential,
+                observed_at=reference_time,
             )
         elif reference_time < next_retry_at(rollback):
             store.fail_work(claimed, transient=True, now=reference_time)
@@ -373,18 +394,23 @@ def run_deployment_rollback_retrigger_pass(
         else:
             # Only a planned rollback can reach this path. The execution seam
             # remains fail-closed until persisted plan/proof reconstruction exists.
-            execute_rollback_restore(
+            outcome = execute_rollback_restore(
                 store,
                 rollback,
-                github_token=github_token,
-                supervisor_token=core_token,
+                github_token=github_credential,
+                supervisor_token=supervisor_credential,
                 repository_reader=repository_reader,
                 backup_reader=backup_reader,
                 attempted_at=reference_time,
             )
-    except DeploymentRollbackRetriggerError:
-        store.fail_work(claimed, transient=True, now=reference_time)
+    except DeploymentRollbackRetriggerError as exc:
+        store.fail_work(claimed, transient=exc.transient, now=reference_time)
         raise
 
-    store.complete_work(claimed, now=reference_time)
+    if outcome is not None and outcome.status in {"blocked", "ambiguous"}:
+        store.fail_work(claimed, transient=False, now=reference_time)
+    elif outcome is not None and outcome.status != "completed":
+        store.fail_work(claimed, transient=True, now=reference_time)
+    else:
+        store.complete_work(claimed, now=reference_time)
     return DeploymentRollbackRetriggerResult(recovered, considered, rollback.deployment_id)
