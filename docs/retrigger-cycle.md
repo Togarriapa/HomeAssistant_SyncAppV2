@@ -6,11 +6,16 @@ One cycle runs, in deterministic order:
 
 1. one bounded Local -> Repo B `main` recovery pass;
 2. one bounded Recorder -> Repo B `database` recovery pass;
-3. one bounded generated runtime -> Repo B `runtime` recovery pass.
+3. optional Recorder retention recovery;
+4. one bounded generated runtime -> Repo B `runtime` recovery pass;
+5. optional logs synchronization and retention recovery;
+6. one bounded deployment-rollback recovery pass;
+7. trusted candidate detection;
+8. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
-The GitHub credential is used by the Repo B publication lanes. The separate Core credential is forwarded only to the runtime lane, where the independently verified runtime Retrigger pass uses it for the documented read-only Core API collection after a valid runtime work claim.
+The GitHub credential is used by Repo B publication and exact rollback-baseline proof. The separate Supervisor credential is forwarded only to guarded runtime/log collection and rollback boundaries. The rollback pass performs no credential or network access when no rollback is pending. When work exists, it accepts only the persisted exact backup and executes at most one restore, reconciliation or observation action.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
@@ -32,4 +37,4 @@ All staging, snapshot and Git workspace roots are derived beneath the protected 
 
 This is the **cron-invocable primitive**, not the cron scheduler or cadence. A later packaging increment can install the periodic scheduler only after this one-shot boundary is verified on HAOS.
 
-This primitive deliberately does not consume `candidate` or `logs` work. Those README-defined lanes must be added to the cycle only after their own guarded, tested transaction primitives exist. The cycle also does not restore database data, deploy a candidate, mutate Home Assistant, restart Home Assistant, or run Git in the live Home Assistant tree.
+Candidate detection and logs handling use their own guarded primitives; arbitrary generic `candidate` or `logs` work is not claimed by another lane. The cycle never restores Recorder data or runs Git in the live Home Assistant tree. A Supervisor backup restore is reachable only from the exact immutable failed-deployment authority and journal-before-mutation rollback state machine documented in `deployment-rollback.md`.
