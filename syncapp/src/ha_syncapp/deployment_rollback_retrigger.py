@@ -10,7 +10,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .automation_script_observation import derive_automation_script_target
-from .deployment_rollback import DeploymentRollback
+from .deployment_rollback import (
+    BackupReader,
+    DeploymentRollback,
+    DeploymentRollbackError,
+    RepositoryReader,
+    RollbackRestoreResult,
+    complete_deployment_rollback_once,
+    reconcile_deployment_restore_once,
+    request_deployment_restore_once,
+)
 from .post_deployment_assertion_observation import (
     PostDeploymentAssertionObservationError,
     PostDeploymentAssertionPlan,
@@ -220,19 +229,82 @@ def _claim_discovered_work(
     return recovered, claimed, rollback
 
 
-def reconcile_pending_rollback(*_args: object, **_kwargs: object) -> None:
-    """Fail closed until durable discovery can reconstruct the authoritative assertion plan."""
-    raise DeploymentRollbackRetriggerError("rollback reconciliation is not wired")
+def reconcile_pending_rollback(
+    store: StateStore,
+    rollback: DeploymentRollback,
+    *,
+    supervisor_token: str,
+    observed_at: datetime,
+) -> RollbackRestoreResult:
+    """Reconcile one exact restore only after reconstructing its durable authority."""
+    try:
+        plan = load_rollback_recovery_plan(store, rollback)
+        return reconcile_deployment_restore_once(
+            store,
+            plan,
+            supervisor_token=supervisor_token,
+            observed_at=observed_at,
+        )
+    except DeploymentRollbackRetriggerError:
+        raise
+    except DeploymentRollbackError:
+        raise DeploymentRollbackRetriggerError("rollback reconciliation failed closed") from None
 
 
-def execute_rollback_restore(*_args: object, **_kwargs: object) -> None:
-    """Fail closed until durable discovery can reconstruct authoritative restore proof."""
-    raise DeploymentRollbackRetriggerError("rollback restore execution is not wired")
+def execute_rollback_restore(
+    store: StateStore,
+    rollback: DeploymentRollback,
+    *,
+    github_token: str,
+    supervisor_token: str,
+    repository_reader: RepositoryReader,
+    backup_reader: BackupReader,
+    attempted_at: datetime,
+) -> RollbackRestoreResult:
+    """Request one exact restore through the existing journal-before-mutation guard."""
+    try:
+        plan = load_rollback_recovery_plan(store, rollback)
+        return request_deployment_restore_once(
+            store,
+            plan,
+            github_token=github_token,
+            supervisor_token=supervisor_token,
+            repository_reader=repository_reader,
+            backup_reader=backup_reader,
+            requested_at=attempted_at,
+        )
+    except DeploymentRollbackRetriggerError:
+        raise
+    except DeploymentRollbackError:
+        raise DeploymentRollbackRetriggerError("rollback restore execution failed closed") from None
 
 
-def complete_rollback_observation(*_args: object, **_kwargs: object) -> None:
-    """Fail closed until durable discovery can reconstruct post-restore health authority."""
-    raise DeploymentRollbackRetriggerError("rollback observation completion is not wired")
+def complete_rollback_observation(
+    store: StateStore,
+    rollback: DeploymentRollback,
+    *,
+    github_token: str,
+    supervisor_token: str,
+    repository_reader: RepositoryReader,
+    observed_at: datetime,
+) -> RollbackRestoreResult:
+    """Complete only the exact restored deployment after bounded health proofs."""
+    try:
+        plan = load_rollback_recovery_plan(store, rollback)
+        return complete_deployment_rollback_once(
+            store,
+            plan,
+            github_token=github_token,
+            supervisor_token=supervisor_token,
+            repository_reader=repository_reader,
+            observed_at=observed_at,
+        )
+    except DeploymentRollbackRetriggerError:
+        raise
+    except DeploymentRollbackError:
+        raise DeploymentRollbackRetriggerError(
+            "rollback observation completion failed closed"
+        ) from None
 
 
 def rollback_requires_reconciliation(rollback: DeploymentRollback) -> bool:
