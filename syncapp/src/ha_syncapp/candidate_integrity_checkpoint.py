@@ -267,8 +267,10 @@ def _parse_changes(payload: str) -> tuple[CandidateChange, ...]:
             item["candidate_mode"],
             item["candidate_object_id"],
         )
-        if not isinstance(item["path"], str) or not isinstance(item["status"], str) or any(
-            value is not None and not isinstance(value, str) for value in optional
+        if (
+            not isinstance(item["path"], str)
+            or not isinstance(item["status"], str)
+            or any(value is not None and not isinstance(value, str) for value in optional)
         ):
             _invalid()
         changes.append(

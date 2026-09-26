@@ -116,9 +116,7 @@ def execute_candidate_integrity_once(
             changes = checkpoint.changes()
             integrity = _integrity_from_checkpoint(checkpoint, changes)
             verify_candidate_integrity(integrity, stage, changes)
-            return CandidateIntegrityExecutionResult(
-                checkpoint, current, integrity, changes, True
-            )
+            return CandidateIntegrityExecutionResult(checkpoint, current, integrity, changes, True)
         if current.phase != "staged" or current.next_action != "analyze":
             _invalid()
         if checkpoint is None:
@@ -158,9 +156,7 @@ def execute_candidate_integrity_once(
             _invalid()
         advanced = integrity_verified_candidate_orchestration(current, updated_at=current_time)
         _complete_atomically(store, checkpoint, completed, current, advanced)
-        return CandidateIntegrityExecutionResult(
-            completed, advanced, integrity, changes, False
-        )
+        return CandidateIntegrityExecutionResult(completed, advanced, integrity, changes, False)
     except CandidateIntegrityExecutionError:
         raise
     except (CandidateFetchError, RepositoryVerificationError, CandidateChangeError) as error:

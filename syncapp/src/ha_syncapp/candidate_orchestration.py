@@ -123,12 +123,10 @@ class CandidateOrchestration:
             or not 0 < self.repository_id <= 2**63 - 1
             or self.phase
             not in {"detected", "staged", "integrity_verified", "completed", "blocked"}
-            or self.next_action
-            not in {"fetch_stage", "analyze", "analyze_dependencies", "none"}
+            or self.next_action not in {"fetch_stage", "analyze", "analyze_dependencies", "none"}
             or (self.phase == "detected") != (self.next_action == "fetch_stage")
             or (self.phase == "staged") != (self.next_action == "analyze")
-            or (self.phase == "integrity_verified")
-            != (self.next_action == "analyze_dependencies")
+            or (self.phase == "integrity_verified") != (self.next_action == "analyze_dependencies")
             or terminal != (self.next_action == "none")
             or self.registered_at.tzinfo is None
             or self.registered_at.utcoffset() is None

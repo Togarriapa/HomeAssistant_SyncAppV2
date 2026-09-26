@@ -30,16 +30,17 @@ def _ready(tmp_path: Path):
     store.enqueue_work("candidate", SHA, now=NOW)
     claimed = store.claim_work_kind("candidate", now=NOW)
     assert claimed is not None
-    detected = register_claimed_candidate(
-        store, claimed, target=TARGET, repository_id=42, now=NOW
-    )
+    detected = register_claimed_candidate(store, claimed, target=TARGET, repository_id=42, now=NOW)
     staged = staged_candidate_orchestration(detected, updated_at=NOW)
     store._connection.execute(
         "UPDATE candidate_orchestration SET phase = ?, next_action = ?, updated_at = ?, "
         "record_sha256 = ? WHERE candidate_sha = ?",
         (
-            staged.phase, staged.next_action, staged.updated_at.isoformat(),
-            staged.record_sha256, SHA,
+            staged.phase,
+            staged.next_action,
+            staged.updated_at.isoformat(),
+            staged.record_sha256,
+            SHA,
         ),
     )
     store._connection.commit()
