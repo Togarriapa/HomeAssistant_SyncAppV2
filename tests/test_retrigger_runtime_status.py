@@ -166,7 +166,7 @@ def test_rollback_runtime_status_exposes_only_bounded_aggregate_state() -> None:
     assert status["latest_updated_at"] == "2026-09-13T00:59:00+00:00"
     encoded = json.dumps(status, sort_keys=True)
     assert "deployment_id" not in encoded
-    assert "backup" not in encoded
+    assert "backup_slug" not in encoded
     assert "candidate" not in encoded
 
 

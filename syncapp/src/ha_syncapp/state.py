@@ -74,6 +74,17 @@ class RecoveryWorkEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class DeploymentRollbackRuntimeEvidence:
+    """Content-free rollback lifecycle evidence for runtime diagnostics."""
+
+    phase: str
+    reconciliation_state: str
+    block_reason: str
+    attempt_count: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseRetentionIntent:
     """Non-privileged durable evidence for crash-safe ref-update reconciliation."""
 
@@ -1352,6 +1363,43 @@ class StateStore:
                     next_attempt_at=(
                         None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
                     ),
+                )
+            )
+        return tuple(evidence)
+
+    def deployment_rollback_runtime_evidence(
+        self,
+    ) -> tuple[DeploymentRollbackRuntimeEvidence, ...]:
+        """Read bounded rollback state without selecting deployment or backup identity."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT phase, reconciliation_state, block_reason, attempt_count, updated_at "
+                "FROM deployment_rollback ORDER BY updated_at, phase, reconciliation_state "
+                "LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read rollback runtime evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Rollback runtime evidence exceeds the limit")
+        evidence: list[DeploymentRollbackRuntimeEvidence] = []
+        for row in rows:
+            if len(row) != 5:
+                raise StateError("Invalid rollback runtime evidence")
+            phase, reconciliation, block_reason, attempts, updated_at = row
+            if (
+                not all(isinstance(value, str) for value in (phase, reconciliation, block_reason))
+                or type(attempts) is not int
+            ):
+                raise StateError("Invalid rollback runtime evidence")
+            evidence.append(
+                DeploymentRollbackRuntimeEvidence(
+                    phase=phase,
+                    reconciliation_state=reconciliation,
+                    block_reason=block_reason,
+                    attempt_count=attempts,
+                    updated_at=_parse_timestamp(updated_at),
                 )
             )
         return tuple(evidence)
