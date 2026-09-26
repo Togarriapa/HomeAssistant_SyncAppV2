@@ -4,15 +4,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.candidate_orchestration import (
     CandidateOrchestrationError,
+    candidate_orchestration_runtime_evidence,
     discover_candidate_orchestrations,
     load_candidate_orchestration,
     register_claimed_candidate,
 )
 from ha_syncapp.state import StateStore
-
 
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
 TARGET = "owner/home-assistant-config"
@@ -142,6 +141,12 @@ def test_discovery_is_bounded_canonical_and_network_free(tmp_path: Path) -> None
             now=NOW,
         )
         assert discover_candidate_orchestrations(store) == (record,)
+        runtime = candidate_orchestration_runtime_evidence(store)
+        assert len(runtime) == 1
+        assert runtime[0].phase == "detected"
+        assert runtime[0].next_action == "fetch_stage"
+        assert runtime[0].updated_at == NOW
+        assert CANDIDATE_SHA not in repr(runtime)
+        assert TARGET not in repr(runtime)
     finally:
         store.__exit__(None, None, None)
-

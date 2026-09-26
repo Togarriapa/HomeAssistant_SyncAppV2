@@ -308,7 +308,7 @@ def test_tampering_rebinding_temporal_order_and_schema_21_migration(tmp_path, mo
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 26
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_finalization'"
         ).fetchone() == ("deployment_finalization",)

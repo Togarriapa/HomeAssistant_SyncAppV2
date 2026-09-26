@@ -20,6 +20,7 @@ def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
             ).fetchall()
         }
         assert columns == {
+            "work_kind": "TEXT",
             "candidate_sha": "TEXT",
             "schema_version": "INTEGER",
             "target": "TEXT",
@@ -39,9 +40,21 @@ def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
             and str(row[4]) == "target"
             for row in foreign_keys
         )
-        assert any(
-            str(row[2]) == "work"
-            and str(row[3]) == "candidate_sha"
-            and str(row[4]) == "work_key"
-            for row in foreign_keys
-        )
+        work_keys = {(str(row[3]), str(row[4])) for row in foreign_keys if str(row[2]) == "work"}
+        assert work_keys == {("work_kind", "work_kind"), ("candidate_sha", "work_key")}
+
+
+def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        store._connection.execute("DROP TABLE candidate_orchestration")
+        store._connection.execute("PRAGMA user_version = 25")
+
+    with StateStore(root) as migrated:
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (26,)
+        table = migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'candidate_orchestration'"
+        ).fetchone()
+        assert table == ("candidate_orchestration",)

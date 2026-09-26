@@ -212,7 +212,7 @@ def test_tampering_and_schema_19_migration_fail_safe(tmp_path, monkeypatch):
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 26
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'automation_script_observation'"
         ).fetchone() == ("automation_script_observation",)
