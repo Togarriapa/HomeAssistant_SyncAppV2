@@ -32,13 +32,27 @@ def _runtime() -> RuntimeInventoryInput:
 
 def _analysis(runtime: RuntimeInventoryInput) -> CandidateDependencyAnalysis:
     file = CandidateDependencyFile(
-        "automations.yaml", "analyzed_text", ("light.kitchen",), (), False,
+        "automations.yaml",
+        "analyzed_text",
+        ("light.kitchen",),
+        (),
+        False,
         ("light.turn_on",),
     )
     return CandidateDependencyAnalysis(
-        "owner/home", 42, BASELINE_SHA, CANDIDATE_SHA, HASH,
-        fingerprint_runtime(runtime), "best_effort_lexical", (file,),
-        ("light.kitchen",), (), (), (), ("light.turn_on",),
+        "owner/home",
+        42,
+        BASELINE_SHA,
+        CANDIDATE_SHA,
+        HASH,
+        fingerprint_runtime(runtime),
+        "best_effort_lexical",
+        (file,),
+        ("light.kitchen",),
+        (),
+        (),
+        (),
+        ("light.turn_on",),
     )
 
 
@@ -61,9 +75,12 @@ def test_completed_checkpoint_round_trips_canonical_runtime_and_dependency_evide
     assert completed.phase == "completed"
     assert completed.dependencies() == _analysis(runtime)
     assert completed.runtime() == runtime
-    assert completed.database_values() == CandidateDependencyCheckpoint.from_database_row(
+    assert (
         completed.database_values()
-    ).database_values()
+        == CandidateDependencyCheckpoint.from_database_row(
+            completed.database_values()
+        ).database_values()
+    )
 
 
 def test_checkpoint_tampering_fails_closed() -> None:

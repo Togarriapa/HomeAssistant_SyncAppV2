@@ -82,9 +82,25 @@ def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path:
         store._connection.execute("PRAGMA user_version = 25")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (28,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"
         ).fetchone()
         assert table == ("candidate_orchestration",)
+
+
+def test_schema_28_migrates_transactionally_to_dependency_checkpoint(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        store._connection.execute("DROP TABLE candidate_dependency_checkpoint")
+        store._connection.execute("PRAGMA user_version = 28")
+
+    with StateStore(root) as migrated:
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
+        table = migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'candidate_dependency_checkpoint'"
+        ).fetchone()
+        assert table == ("candidate_dependency_checkpoint",)

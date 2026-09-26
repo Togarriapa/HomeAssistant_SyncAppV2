@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -720,6 +720,28 @@ class StateStore:
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
         )
 
+    @staticmethod
+    def _create_candidate_dependency_checkpoint_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_dependency_checkpoint ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
+            "orchestration_sha256 TEXT NOT NULL, fetch_stage_sha256 TEXT NOT NULL, "
+            "integrity_sha256 TEXT NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, stage_manifest_sha256 TEXT NOT NULL, "
+            "phase TEXT NOT NULL CHECK (phase IN ('planned', 'completed')), "
+            "runtime_json TEXT, dependencies_json TEXT, reference_count INTEGER "
+            "CHECK (reference_count IS NULL OR reference_count >= 0), "
+            "planned_at TEXT NOT NULL, completed_at TEXT, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (candidate_sha) REFERENCES candidate_orchestration(candidate_sha), "
+            "FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_fetch_stage_checkpoint(candidate_sha), "
+            "FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_integrity_checkpoint(candidate_sha), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -785,6 +807,7 @@ class StateStore:
                 self._create_candidate_orchestration_table(db)
                 self._create_candidate_fetch_stage_checkpoint_table(db)
                 self._create_candidate_integrity_checkpoint_table(db)
+                self._create_candidate_dependency_checkpoint_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -820,6 +843,7 @@ class StateStore:
                 25,
                 26,
                 27,
+                28,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -986,6 +1010,12 @@ class StateStore:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_candidate_orchestration_table_v28(db)
                     self._create_candidate_integrity_checkpoint_table(db)
+                    db.execute("PRAGMA user_version = 28")
+                version = 28
+            if version == 28:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_candidate_dependency_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
