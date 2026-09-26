@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -106,6 +106,42 @@ def test_unclaimed_or_rebound_candidate_cannot_be_registered(tmp_path: Path) -> 
                 repository_id=REPOSITORY_ID + 1,
                 now=NOW,
             )
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_transient_retry_can_register_but_deterministic_block_cannot(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        first = _claimed_candidate(store)
+        retry = store.fail_work(first, transient=True, now=NOW)
+        assert retry.status == "retry"
+        retried = store.claim_work_kind("candidate", now=NOW + timedelta(seconds=60))
+        assert retried is not None
+        record = register_claimed_candidate(
+            store,
+            retried,
+            target=TARGET,
+            repository_id=REPOSITORY_ID,
+            now=NOW + timedelta(seconds=60),
+        )
+        assert record.next_action == "fetch_stage"
+
+        other_sha = "b" * 40
+        store.enqueue_work("candidate", other_sha, now=NOW)
+        deterministic = store.claim_work_kind("candidate", now=NOW)
+        assert deterministic is not None and deterministic.work_key == other_sha
+        blocked = store.fail_work(deterministic, transient=False, now=NOW)
+        assert blocked.status == "blocked"
+        with pytest.raises(CandidateOrchestrationError, match="unavailable"):
+            register_claimed_candidate(
+                store,
+                deterministic,
+                target=TARGET,
+                repository_id=REPOSITORY_ID,
+                now=NOW,
+            )
+        assert load_candidate_orchestration(store, other_sha) is None
     finally:
         store.__exit__(None, None, None)
 
