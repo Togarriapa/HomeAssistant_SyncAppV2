@@ -122,3 +122,32 @@ def test_missing_core_credentials_remains_planned_and_retryable(tmp_path) -> Non
         assert checkpoint is not None and checkpoint.phase == "planned"
     finally:
         store.__exit__(None, None, None)
+
+
+def test_stale_concurrent_authority_cannot_reexecute_completed_analysis(tmp_path) -> None:
+    store, integrity_result, staging, home = _integrity_ready(tmp_path)
+    try:
+        execute_candidate_dependency_once(
+            store,
+            integrity_result.orchestration,
+            core_token=TOKEN,
+            staging_root=staging,
+            home_assistant_root=home,
+            runtime_collector=lambda *, token: _runtime(),
+            now=NOW + timedelta(seconds=1),
+        )
+
+        with pytest.raises(CandidateDependencyExecutionError, match="evidence is invalid"):
+            execute_candidate_dependency_once(
+                store,
+                integrity_result.orchestration,
+                core_token=TOKEN,
+                staging_root=staging,
+                home_assistant_root=home,
+                runtime_collector=lambda **kwargs: pytest.fail(
+                    "stale authority must fail before transport"
+                ),
+                now=NOW + timedelta(seconds=2),
+            )
+    finally:
+        store.__exit__(None, None, None)
