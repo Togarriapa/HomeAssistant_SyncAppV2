@@ -85,8 +85,16 @@ The integrity gate:
 
 Failure is sanitized and fail-closed. Integrity success grants no permission to validate with Home Assistant, create a backup, apply candidate bytes, reload/restart Home Assistant, promote a branch or perform rollback.
 
+## Durable analysis checkpoint
+
+Schema v28 connects the existing change-detection and integrity gates to production orchestration without retaining the transient Git workspace. A `staged/analyze` action first journals an integrity-protected plan bound to the orchestration digest, completed Fetch/Stage checkpoint digest, repository identity, exact candidate SHA, and Stage manifest digest. Only then may it re-observe and re-fetch that exact candidate into a fresh isolated workspace, establish a stable trusted `main` baseline, derive canonical changes, and run the integrity gate.
+
+Completion and the `integrity_verified/analyze_dependencies` transition are committed atomically. The checkpoint stores bounded canonical path-level change metadata plus exact baseline/candidate bindings, but no credentials, live paths, exception text, or file content. A completed replay reconstructs and verifies the same `CandidateChanges` and `CandidateIntegrity` evidence from protected state and the durable Stage without GitHub access. Tampered, rebound, malformed, non-canonical, or impossible evidence fails closed.
+
+The candidate analysis Retrigger lane recovers only interrupted `analyze` work, atomically claims at most one eligible exact SHA, preserves controlled transient backoff, and blocks deterministic failures. The top-level cycle never runs Fetch/Stage and analysis for the same candidate in one invocation. Runtime inventory publishes only checkpoint phase, aggregate changed-path count, and timestamps.
+
 ## Not implemented yet
 
 No candidate byte from Stage is copied into the live Home Assistant configuration. Dependency analysis, risk classification, Home Assistant configuration validation, pre-deployment backup, apply, reload/restart, observation, promotion, rejection marking and rollback remain downstream.
 
-The next increment should consume successful integrity evidence and immutable change evidence for **Dependency analysis**. Risk classification follows dependency analysis. Only after those gates and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.
+The next increment should consume the durable successful integrity and immutable change evidence for **Dependency analysis**. Risk classification follows dependency analysis. Only after those gates and Home Assistant validation succeed may the transaction create a recoverable pre-deployment backup. Apply must remain after that backup and must be followed by runtime observation and automatic rollback on failure.

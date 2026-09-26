@@ -37,7 +37,7 @@ def test_schema_28_adds_integrity_checkpoint_and_successor_authority(tmp_path: P
     assert "'analyze_dependencies'" in orchestration[0]
 
 
-def test_schema_27_migration_preserves_candidate_authority(tmp_path: Path) -> None:
+def test_schema_27_migration_preserves_candidate_work(tmp_path: Path) -> None:
     data = tmp_path / "data"
     data.mkdir()
     with StateStore(data) as store:
@@ -46,7 +46,7 @@ def test_schema_27_migration_preserves_candidate_authority(tmp_path: Path) -> No
         store._connection.execute("PRAGMA user_version = 27")
         store._connection.commit()
 
-    database = data / "state.sqlite3"
+    database = data / "syncapp" / "state.sqlite3"
     connection = sqlite3.connect(database)
     connection.execute("DROP TABLE candidate_integrity_checkpoint")
     connection.commit()

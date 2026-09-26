@@ -16,6 +16,11 @@ from ha_syncapp.candidate_fetch_stage_retrigger import (
     CandidateFetchStageRetriggerResult,
     run_candidate_fetch_stage_retrigger_pass,
 )
+from ha_syncapp.candidate_integrity_retrigger import (
+    CandidateIntegrityRetriggerError,
+    CandidateIntegrityRetriggerResult,
+    run_candidate_integrity_retrigger_pass,
+)
 from ha_syncapp.database_retention_work import (
     DatabaseRetentionPassResult,
     DatabaseRetentionWorkError,
@@ -76,6 +81,7 @@ class RetriggerCycleResult:
     log_retention: LogRetentionPassResult
     deployment_rollback: DeploymentRollbackRetriggerResult
     candidate_fetch_stage: CandidateFetchStageRetriggerResult
+    candidate_integrity: CandidateIntegrityRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -198,6 +204,17 @@ def run_retrigger_cycle(
             github_token,
             reference_time=recovery_reference_time or datetime.now(UTC),
         )
+        if candidate_fetch_stage.processed is None:
+            candidate_integrity = run_candidate_integrity_retrigger_pass(
+                store,
+                home_assistant_root,
+                local_workspace_root / "candidate-analysis",
+                snapshot_staging_root / "candidate-stage",
+                github_token,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_integrity = CandidateIntegrityRetriggerResult(0, 0, None)
 
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
@@ -227,6 +244,7 @@ def run_retrigger_cycle(
         DatabaseRetentionWorkError,
         DeploymentRollbackRetriggerError,
         CandidateFetchStageRetriggerError,
+        CandidateIntegrityRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -239,6 +257,7 @@ def run_retrigger_cycle(
         log_retention=log_retention,
         deployment_rollback=deployment_rollback,
         candidate_fetch_stage=candidate_fetch_stage,
+        candidate_integrity=candidate_integrity,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

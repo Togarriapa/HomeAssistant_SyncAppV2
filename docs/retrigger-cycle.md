@@ -11,8 +11,9 @@ One cycle runs, in deterministic order:
 5. optional logs synchronization and retention recovery;
 6. one bounded deployment-rollback recovery pass;
 7. one bounded candidate Fetch/Stage recovery pass;
-8. trusted candidate detection;
-9. optional fresh Supervisor log collection.
+8. if Fetch/Stage performed no action, one bounded candidate integrity-analysis pass;
+9. trusted candidate detection;
+10. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -21,6 +22,11 @@ The GitHub credential is used by Repo B publication and exact rollback-baseline 
 The candidate Fetch/Stage pass accepts only exact `detected/fetch_stage` authority,
 executes at most one action, and runs before fresh detection. Successful staging
 enables `analyze` for a later cycle; it never chains into another candidate action.
+The analysis pass accepts only exact `staged/analyze` authority, re-fetches the
+same candidate into an isolated transient workspace, checkpoints canonical
+change/integrity evidence, and enables `analyze_dependencies` for a later cycle.
+Completed analysis replay is credential- and network-free. The conditional lane
+ordering enforces at most one candidate action per cycle.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
