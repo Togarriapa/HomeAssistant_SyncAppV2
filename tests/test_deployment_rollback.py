@@ -249,7 +249,7 @@ def test_persistence_failure_is_sanitized_and_schema_23_migrates(tmp_path, monke
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 27
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 28
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_rollback'"
         ).fetchone() == ("deployment_rollback",)

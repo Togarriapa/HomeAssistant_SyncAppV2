@@ -71,6 +71,40 @@ def validate_candidate_integrity(
     )
 
 
+def verify_candidate_integrity(
+    integrity: CandidateIntegrity,
+    stage: CandidateStage,
+    changes: CandidateChanges,
+) -> None:
+    """Revalidate durable integrity evidence without credentials or network access."""
+    if type(integrity) is not CandidateIntegrity or type(stage) is not CandidateStage:
+        raise CandidateIntegrityError("candidate integrity evidence bindings are invalid")
+    try:
+        stage_module.verify_candidate_stage(stage)
+    except CandidateStageError as exc:
+        raise CandidateIntegrityError("candidate evidence could not be reverified") from exc
+    if (
+        integrity.target != stage.target
+        or integrity.repository_id != stage.repository_id
+        or integrity.baseline_sha != changes.baseline_sha
+        or integrity.candidate_sha != stage.commit_sha
+        or integrity.stage_manifest_sha256 != stage.manifest_sha256
+        or integrity.changed_paths != tuple(change.path for change in changes.changes)
+        or changes.target != stage.target
+        or changes.repository_id != stage.repository_id
+        or changes.candidate_sha != stage.commit_sha
+        or _OBJECT_ID.fullmatch(changes.baseline_sha) is None
+    ):
+        raise CandidateIntegrityError("candidate integrity evidence bindings are invalid")
+    _validate_changes(changes, stage)
+    try:
+        stage_module.verify_candidate_stage(stage)
+    except CandidateStageError as exc:
+        raise CandidateIntegrityError(
+            "candidate evidence changed during integrity verification"
+        ) from exc
+
+
 def _validate_bindings(
     fetched: CandidateFetch,
     stage: CandidateStage,

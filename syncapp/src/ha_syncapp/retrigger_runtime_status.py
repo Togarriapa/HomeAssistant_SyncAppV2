@@ -11,6 +11,11 @@ from .candidate_fetch_stage_execution import (
     CandidateFetchStageRuntimeEvidence,
     candidate_fetch_stage_runtime_evidence,
 )
+from .candidate_integrity_execution import (
+    CandidateIntegrityExecutionError,
+    CandidateIntegrityRuntimeEvidence,
+    candidate_integrity_runtime_evidence,
+)
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
@@ -60,7 +65,8 @@ def collect_retrigger_runtime_inventory(
         evidence = store.recovery_work_evidence()
         rollback_evidence = store.deployment_rollback_runtime_evidence()
         fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
-    except (StateError, CandidateFetchStageExecutionError):
+        integrity_evidence = candidate_integrity_runtime_evidence(store)
+    except (StateError, CandidateFetchStageExecutionError, CandidateIntegrityExecutionError):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
     recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
@@ -69,6 +75,10 @@ def collect_retrigger_runtime_inventory(
     )
     recovery["candidate_fetch_stage"] = render_candidate_fetch_stage_runtime_status(
         fetch_stage_evidence,
+        reference_time=reference_time,
+    )
+    recovery["candidate_integrity"] = render_candidate_integrity_runtime_status(
+        integrity_evidence,
         reference_time=reference_time,
     )
     return RuntimeInventoryInput(
@@ -130,6 +140,52 @@ def render_candidate_fetch_stage_runtime_status(
         "total": total,
         "phases": phases,
         "staged": {"entries": entries_total, "bytes": bytes_total},
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_candidate_integrity_runtime_status(
+    evidence: Iterable[CandidateIntegrityRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate candidate analysis checkpoints without identity or changed paths."""
+    reference = _utc(reference_time, "candidate integrity reference time is invalid")
+    phases = {"completed": 0, "planned": 0}
+    changed_total = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "candidate integrity runtime evidence exceeds the limit"
+            )
+        if type(row) is not CandidateIntegrityRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate integrity runtime evidence is invalid")
+        planned = _utc(row.planned_at, "candidate integrity runtime evidence is invalid")
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(row.completed_at, "candidate integrity runtime evidence is invalid")
+        )
+        is_completed = row.phase == "completed"
+        if (
+            planned > reference
+            or is_completed != (completed is not None)
+            or is_completed != (row.changed_count is not None)
+            or (completed is not None and (completed < planned or completed > reference))
+            or (row.changed_count is not None and row.changed_count < 0)
+        ):
+            raise RetriggerRuntimeStatusError("candidate integrity runtime evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        changed_total += row.changed_count or 0
+        observed = completed or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "changed_paths": changed_total,
         "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 

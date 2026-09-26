@@ -263,19 +263,12 @@ def execute_candidate_fetch_stage_once(
         if checkpoint is not None and checkpoint.phase == "completed":
             if current.phase != "staged" or current.next_action != "analyze":
                 _invalid()
-            destination = _completed_workspace(
-                staging_root, home_assistant_root, checkpoint.workspace_id
+            load_completed_candidate_stage(
+                store,
+                current,
+                staging_root=staging_root,
+                home_assistant_root=home_assistant_root,
             )
-            stage = load_candidate_stage(destination)
-            if (
-                stage.target != checkpoint.target
-                or stage.repository_id != checkpoint.repository_id
-                or stage.commit_sha != checkpoint.candidate_sha
-                or stage.manifest_sha256 != checkpoint.manifest_sha256
-                or len(stage.entries) != checkpoint.entry_count
-                or sum(entry.size for entry in stage.entries) != checkpoint.total_bytes
-            ):
-                _invalid()
             return CandidateFetchStageResult(checkpoint, current, True)
         if current.phase != "detected" or current.next_action != "fetch_stage":
             _invalid()
@@ -402,7 +395,10 @@ def load_candidate_fetch_stage_checkpoint(
             or current.target != result.target
             or current.repository_id != result.repository_id
             or (result.phase == "planned" and current.record_sha256 != result.orchestration_sha256)
-            or (result.phase == "completed" and current.phase != "staged")
+            or (
+                result.phase == "completed"
+                and current.phase not in {"staged", "integrity_verified", "completed", "blocked"}
+            )
         ):
             _invalid()
         return result
@@ -412,6 +408,43 @@ def load_candidate_fetch_stage_checkpoint(
         raise CandidateFetchStageExecutionError(
             "Candidate Fetch/Stage evidence is invalid", transient=False
         ) from None
+
+
+def load_completed_candidate_stage(
+    store: StateStore,
+    orchestration: CandidateOrchestration,
+    *,
+    staging_root: Path,
+    home_assistant_root: Path,
+) -> tuple[CandidateFetchStageCheckpoint, CandidateStage]:
+    """Load exact completed Stage evidence without credentials or external I/O."""
+    try:
+        checkpoint = load_candidate_fetch_stage_checkpoint(store, orchestration.candidate_sha)
+        if (
+            checkpoint is None
+            or checkpoint.phase != "completed"
+            or checkpoint.target != orchestration.target
+            or checkpoint.repository_id != orchestration.repository_id
+        ):
+            _invalid()
+        destination = _completed_workspace(
+            staging_root, home_assistant_root, checkpoint.workspace_id
+        )
+        stage = load_candidate_stage(destination)
+        if (
+            stage.target != checkpoint.target
+            or stage.repository_id != checkpoint.repository_id
+            or stage.commit_sha != checkpoint.candidate_sha
+            or stage.manifest_sha256 != checkpoint.manifest_sha256
+            or len(stage.entries) != checkpoint.entry_count
+            or sum(entry.size for entry in stage.entries) != checkpoint.total_bytes
+        ):
+            _invalid()
+        return checkpoint, stage
+    except CandidateFetchStageExecutionError:
+        raise
+    except CandidateStageError:
+        _invalid()
 
 
 def candidate_fetch_stage_runtime_evidence(

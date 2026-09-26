@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_fetch_stage_checkpoint() -> None:
-    assert SCHEMA_VERSION == 27
+    assert SCHEMA_VERSION == 28
 
 
 def test_fresh_state_has_candidate_fetch_stage_checkpoint_table(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_schema_26_migrates_checkpoint_and_expands_orchestration(tmp_path: Path)
         store._connection.execute("PRAGMA user_version = 26")
 
     with StateStore(tmp_path) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (27,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (28,)
         sql = migrated._connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"

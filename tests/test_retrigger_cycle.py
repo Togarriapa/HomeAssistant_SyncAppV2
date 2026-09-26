@@ -5,6 +5,7 @@ import pytest
 from ha_syncapp import retrigger_cycle
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
+from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
@@ -20,6 +21,11 @@ def _candidate_fetch_stage_lane(monkeypatch: pytest.MonkeyPatch) -> None:
         retrigger_cycle,
         "run_candidate_fetch_stage_retrigger_pass",
         lambda *_args, **_kwargs: CandidateFetchStageRetriggerResult(0, 0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_integrity_retrigger_pass",
+        lambda *_args, **_kwargs: CandidateIntegrityRetriggerResult(0, 0, None),
     )
 
 
@@ -196,6 +202,65 @@ def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
     assert calls == ["rollback", "fetch_stage", "candidate"]
     assert result.deployment_rollback.processed == "deployment-1"
     assert result.candidate_fetch_stage.processed == "completed"
+    assert result.candidate_integrity.processed is None
+
+
+def test_cycle_runs_at_most_one_candidate_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_local_sync_retrigger_pass",
+        lambda *_args, **_kwargs: LocalSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_database_sync_retrigger_pass",
+        lambda *_args, **_kwargs: DatabaseSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_runtime_sync_retrigger_pass",
+        lambda *_args, **_kwargs: RuntimeSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_fetch_stage_retrigger_pass",
+        lambda *_args, **_kwargs: CandidateFetchStageRetriggerResult(0, 0, None),
+    )
+
+    def integrity(*args, **kwargs):
+        calls.append("integrity")
+        return CandidateIntegrityRetriggerResult(0, 1, "completed")
+
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_integrity_retrigger_pass", integrity)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *_a, **_k: _candidate_absent(),
+    )
+    try:
+        result = retrigger_cycle.run_retrigger_cycle(
+            store,
+            tmp_path / "homeassistant",
+            tmp_path / "snapshots",
+            tmp_path / "local-workspaces",
+            None,
+            tmp_path / "database-staging",
+            tmp_path / "database-snapshots",
+            tmp_path / "database-workspaces",
+            tmp_path / "runtime-staging",
+            tmp_path / "runtime-snapshots",
+            tmp_path / "runtime-workspaces",
+            TARGET,
+            "github-token",
+        )
+    finally:
+        store.__exit__(None, None, None)
+    assert calls == ["integrity"]
+    assert result.candidate_integrity.processed == "completed"
 
 
 def test_cycle_passes_explicit_inputs_and_separates_core_credential(
