@@ -651,9 +651,7 @@ class StateStore:
             "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
         )
-        db.execute(
-            "INSERT INTO candidate_orchestration_v27 SELECT * FROM candidate_orchestration"
-        )
+        db.execute("INSERT INTO candidate_orchestration_v27 SELECT * FROM candidate_orchestration")
         db.execute("DROP TABLE candidate_orchestration")
         db.execute("ALTER TABLE candidate_orchestration_v27 RENAME TO candidate_orchestration")
 
@@ -1607,6 +1605,37 @@ class StateStore:
             return self._get_work(item.work_kind, item.work_key)
         except sqlite3.Error:
             raise StateError("Unable to record work failure") from None
+
+    def defer_work(
+        self,
+        item: WorkItem,
+        *,
+        now: datetime | None = None,
+    ) -> WorkItem:
+        """Release successful phased work for its next action without backoff."""
+        current = _timestamp(now).isoformat()
+        if item.status != "running" or item.attempts < 1:
+            raise StateError("Only running work can be deferred")
+        try:
+            with self._connection as db:
+                db.execute("BEGIN IMMEDIATE")
+                result = db.execute(
+                    "UPDATE work SET status = 'pending', attempts = 0, updated_at = ?, "
+                    "next_attempt_at = ? WHERE work_kind = ? AND work_key = ? "
+                    "AND status = 'running' AND attempts = ?",
+                    (
+                        current,
+                        current,
+                        item.work_kind,
+                        item.work_key,
+                        item.attempts,
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise StateError("Work transition changed unexpectedly")
+            return self._get_work(item.work_kind, item.work_key)
+        except sqlite3.Error:
+            raise StateError("Unable to defer work") from None
 
     def complete_work(self, item: WorkItem, *, now: datetime | None = None) -> WorkItem:
         """Durably mark one running attempt successful."""

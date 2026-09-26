@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import NoReturn
 from uuid import UUID, uuid4
 
-from .candidate_detection import CandidateObservation, observe_trusted_candidate
+from .candidate_detection import (
+    CandidateDetectionError,
+    CandidateObservation,
+    observe_trusted_candidate,
+)
 from .candidate_fetch import CandidateFetch, CandidateFetchError, fetch_trusted_candidate
 from .candidate_orchestration import (
     CandidateOrchestration,
@@ -27,9 +31,11 @@ from .candidate_orchestration import (
 from .candidate_stage import (
     CandidateStage,
     CandidateStageError,
+    load_candidate_stage,
     stage_fetched_candidate,
     verify_candidate_stage,
 )
+from .github_repo import RepositoryVerificationError
 from .state import StateError, StateStore
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -37,6 +43,8 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 _TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$")
 _SCHEMA_VERSION = 1
 _FINAL_PREFIX = ".syncapp-candidate-stage-"
+_TEMP_PREFIX = ".git-workspace-candidate-stage-"
+_MAX_DISCOVERABLE = 64
 
 
 class CandidateFetchStageExecutionError(RuntimeError):
@@ -215,6 +223,17 @@ class CandidateFetchStageResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateFetchStageRuntimeEvidence:
+    """Content-free checkpoint state for runtime and AI diagnostics."""
+
+    phase: str
+    entry_count: int | None
+    total_bytes: int | None
+    planned_at: datetime
+    completed_at: datetime | None
+
+
 Observer = Callable[..., CandidateObservation]
 Fetcher = Callable[..., CandidateFetch]
 Stager = Callable[..., CandidateStage]
@@ -244,7 +263,19 @@ def execute_candidate_fetch_stage_once(
         if checkpoint is not None and checkpoint.phase == "completed":
             if current.phase != "staged" or current.next_action != "analyze":
                 _invalid()
-            _completed_workspace(staging_root, home_assistant_root, checkpoint.workspace_id)
+            destination = _completed_workspace(
+                staging_root, home_assistant_root, checkpoint.workspace_id
+            )
+            stage = load_candidate_stage(destination)
+            if (
+                stage.target != checkpoint.target
+                or stage.repository_id != checkpoint.repository_id
+                or stage.commit_sha != checkpoint.candidate_sha
+                or stage.manifest_sha256 != checkpoint.manifest_sha256
+                or len(stage.entries) != checkpoint.entry_count
+                or sum(entry.size for entry in stage.entries) != checkpoint.total_bytes
+            ):
+                _invalid()
             return CandidateFetchStageResult(checkpoint, current, True)
         if current.phase != "detected" or current.next_action != "fetch_stage":
             _invalid()
@@ -259,6 +290,7 @@ def execute_candidate_fetch_stage_once(
             checkpoint.workspace_id,
             allow_missing=True,
         )
+        _clean_abandoned_stage_temps(staging_root)
         _remove_incomplete_destination(destination, staging_root)
         if token is None:
             raise CandidateFetchStageExecutionError(
@@ -296,6 +328,8 @@ def execute_candidate_fetch_stage_once(
             manifest=destination / "manifest.json",
         )
         verify_candidate_stage(moved)
+        _fsync_directory(destination)
+        _fsync_directory(destination.parent)
         completed = checkpoint.complete(moved, completed_at=current_time)
         advanced = staged_candidate_orchestration(current, updated_at=current_time)
         _complete_atomically(store, checkpoint, completed, current, advanced)
@@ -310,6 +344,17 @@ def execute_candidate_fetch_stage_once(
             else "Candidate Fetch/Stage evidence is invalid",
             transient=transient,
         ) from None
+    except RepositoryVerificationError as error:
+        message = str(error)
+        transient = "transport failed" in message or any(
+            f"HTTP {code}" in message for code in (408, 429, 500, 502, 503, 504)
+        )
+        raise CandidateFetchStageExecutionError(
+            "Candidate Fetch/Stage is temporarily unavailable"
+            if transient
+            else "Candidate Fetch/Stage evidence is invalid",
+            transient=transient,
+        ) from None
     except CandidateStageError as error:
         transient = "filesystem operation failed" in str(error)
         raise CandidateFetchStageExecutionError(
@@ -318,7 +363,14 @@ def execute_candidate_fetch_stage_once(
             else "Candidate Fetch/Stage evidence is invalid",
             transient=transient,
         ) from None
-    except (CandidateOrchestrationError, StateError, sqlite3.Error, OSError, ValueError):
+    except (
+        CandidateDetectionError,
+        CandidateOrchestrationError,
+        StateError,
+        sqlite3.Error,
+        OSError,
+        ValueError,
+    ):
         raise CandidateFetchStageExecutionError(
             "Candidate Fetch/Stage evidence is invalid", transient=False
         ) from None
@@ -357,6 +409,46 @@ def load_candidate_fetch_stage_checkpoint(
     except CandidateFetchStageExecutionError:
         raise
     except (CandidateOrchestrationError, StateError, sqlite3.Error):
+        raise CandidateFetchStageExecutionError(
+            "Candidate Fetch/Stage evidence is invalid", transient=False
+        ) from None
+
+
+def candidate_fetch_stage_runtime_evidence(
+    store: StateStore,
+) -> tuple[CandidateFetchStageRuntimeEvidence, ...]:
+    """Read bounded checkpoint metadata without selecting candidate identities."""
+    try:
+        rows = store._connection.execute(
+            "SELECT candidate_sha, schema_version, orchestration_sha256, target, "
+            "repository_id, workspace_id, phase, manifest_sha256, entry_count, "
+            "total_bytes, planned_at, completed_at, record_sha256 "
+            "FROM candidate_fetch_stage_checkpoint ORDER BY planned_at, candidate_sha LIMIT ?",
+            (_MAX_DISCOVERABLE + 1,),
+        ).fetchall()
+        if len(rows) > _MAX_DISCOVERABLE:
+            _invalid()
+        checkpoints = tuple(
+            CandidateFetchStageCheckpoint.from_database_row(tuple(row)) for row in rows
+        )
+        if any(
+            load_candidate_fetch_stage_checkpoint(store, checkpoint.candidate_sha) != checkpoint
+            for checkpoint in checkpoints
+        ):
+            _invalid()
+        return tuple(
+            CandidateFetchStageRuntimeEvidence(
+                phase=checkpoint.phase,
+                entry_count=checkpoint.entry_count,
+                total_bytes=checkpoint.total_bytes,
+                planned_at=checkpoint.planned_at,
+                completed_at=checkpoint.completed_at,
+            )
+            for checkpoint in checkpoints
+        )
+    except CandidateFetchStageExecutionError:
+        raise
+    except (StateError, sqlite3.Error):
         raise CandidateFetchStageExecutionError(
             "Candidate Fetch/Stage evidence is invalid", transient=False
         ) from None
@@ -484,6 +576,34 @@ def _remove_incomplete_destination(destination: Path, staging_root: Path) -> Non
     shutil.rmtree(destination)
 
 
+def _clean_abandoned_stage_temps(staging_root: Path) -> None:
+    try:
+        root = staging_root.resolve(strict=True)
+        candidates = sorted(
+            entry
+            for entry in root.iterdir()
+            if entry.name.startswith(_TEMP_PREFIX) and entry.name.endswith(".tmp")
+        )
+        if len(candidates) > _MAX_DISCOVERABLE:
+            _invalid()
+        for candidate in candidates:
+            metadata = candidate.lstat()
+            if (
+                candidate.parent != root
+                or not stat.S_ISDIR(metadata.st_mode)
+                or candidate.is_symlink()
+                or metadata.st_uid != os.geteuid()
+            ):
+                _invalid()
+            shutil.rmtree(candidate)
+    except CandidateFetchStageExecutionError:
+        raise
+    except OSError:
+        raise CandidateFetchStageExecutionError(
+            "Candidate Fetch/Stage is temporarily unavailable", transient=True
+        ) from None
+
+
 def _remove_fetch_workspace(path: Path, workspace_root: Path) -> None:
     try:
         root = workspace_root.resolve(strict=True)
@@ -497,6 +617,14 @@ def _remove_fetch_workspace(path: Path, workspace_root: Path) -> None:
             shutil.rmtree(path)
     except OSError:
         return
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _timestamp(value: datetime) -> datetime:

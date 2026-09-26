@@ -11,6 +11,11 @@ from ha_syncapp.candidate_detection import (
     CandidateDetectionResult,
     detect_and_enqueue_trusted_candidate,
 )
+from ha_syncapp.candidate_fetch_stage_retrigger import (
+    CandidateFetchStageRetriggerError,
+    CandidateFetchStageRetriggerResult,
+    run_candidate_fetch_stage_retrigger_pass,
+)
 from ha_syncapp.database_retention_work import (
     DatabaseRetentionPassResult,
     DatabaseRetentionWorkError,
@@ -70,6 +75,7 @@ class RetriggerCycleResult:
     log_sync: LogSyncRetriggerResult
     log_retention: LogRetentionPassResult
     deployment_rollback: DeploymentRollbackRetriggerResult
+    candidate_fetch_stage: CandidateFetchStageRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -183,6 +189,16 @@ def run_retrigger_cycle(
             reference_time=recovery_reference_time or datetime.now(UTC),
         )
 
+        candidate_fetch_stage = run_candidate_fetch_stage_retrigger_pass(
+            store,
+            home_assistant_root,
+            local_workspace_root / "candidate-fetch",
+            snapshot_staging_root / "candidate-stage",
+            target,
+            github_token,
+            reference_time=recovery_reference_time or datetime.now(UTC),
+        )
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -210,6 +226,7 @@ def run_retrigger_cycle(
         LogCollectionError,
         DatabaseRetentionWorkError,
         DeploymentRollbackRetriggerError,
+        CandidateFetchStageRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -221,6 +238,7 @@ def run_retrigger_cycle(
         log_sync=log_sync,
         log_retention=log_retention,
         deployment_rollback=deployment_rollback,
+        candidate_fetch_stage=candidate_fetch_stage,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

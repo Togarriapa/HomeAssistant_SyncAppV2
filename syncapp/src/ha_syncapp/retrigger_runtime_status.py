@@ -6,6 +6,11 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
+from .candidate_fetch_stage_execution import (
+    CandidateFetchStageExecutionError,
+    CandidateFetchStageRuntimeEvidence,
+    candidate_fetch_stage_runtime_evidence,
+)
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
@@ -54,17 +59,79 @@ def collect_retrigger_runtime_inventory(
     try:
         evidence = store.recovery_work_evidence()
         rollback_evidence = store.deployment_rollback_runtime_evidence()
-    except StateError:
+        fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
+    except (StateError, CandidateFetchStageExecutionError):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
     recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
         rollback_evidence,
         reference_time=reference_time,
     )
+    recovery["candidate_fetch_stage"] = render_candidate_fetch_stage_runtime_status(
+        fetch_stage_evidence,
+        reference_time=reference_time,
+    )
     return RuntimeInventoryInput(
         manifest={},
         analysis={"recovery": recovery},
     )
+
+
+def render_candidate_fetch_stage_runtime_status(
+    evidence: Iterable[CandidateFetchStageRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate Fetch/Stage checkpoints without exposing candidate or repository identity."""
+
+    reference = _utc(reference_time, "candidate Fetch/Stage reference time is invalid")
+    phases = {"completed": 0, "planned": 0}
+    entries_total = 0
+    bytes_total = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "candidate Fetch/Stage runtime evidence exceeds the limit"
+            )
+        if type(row) is not CandidateFetchStageRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate Fetch/Stage runtime evidence is invalid")
+        planned = _utc(
+            row.planned_at,
+            "candidate Fetch/Stage runtime evidence is invalid",
+        )
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(
+                row.completed_at,
+                "candidate Fetch/Stage runtime evidence is invalid",
+            )
+        )
+        is_completed = row.phase == "completed"
+        if (
+            planned > reference
+            or is_completed != (completed is not None)
+            or is_completed != (row.entry_count is not None)
+            or is_completed != (row.total_bytes is not None)
+            or (completed is not None and (completed < planned or completed > reference))
+            or (row.entry_count is not None and row.entry_count < 0)
+            or (row.total_bytes is not None and row.total_bytes < 0)
+        ):
+            raise RetriggerRuntimeStatusError("candidate Fetch/Stage runtime evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        entries_total += row.entry_count or 0
+        bytes_total += row.total_bytes or 0
+        observed = completed or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "staged": {"entries": entries_total, "bytes": bytes_total},
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
 
 
 def render_deployment_rollback_runtime_status(

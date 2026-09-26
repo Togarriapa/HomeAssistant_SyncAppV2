@@ -19,6 +19,7 @@ The initial state is deliberately narrow:
 | Phase | Next action | Meaning |
 |---|---|---|
 | `detected` | `fetch_stage` | The exact trusted SHA may enter the existing read-only Fetch/Stage boundary. |
+| `staged` | `analyze` | A verified, durable Stage exists for the exact candidate and may enter analysis. |
 | `completed` | `none` | Reserved terminal state for a later evidence-driven transition. |
 | `blocked` | `none` | Reserved deterministic terminal state for a later evidence-driven transition. |
 
@@ -29,7 +30,8 @@ promote, or roll back a deployment.
 
 ## Durable evidence and replay
 
-`candidate_orchestration` is owned by schema v26. Each row is bound by composite
+`candidate_orchestration` was introduced by schema v26 and expanded by schema v27.
+Each row is bound by composite
 foreign key to `work_kind=candidate` plus the exact work key/SHA, and by foreign
 key to the pinned repository target. The canonical integrity digest covers the
 work kind, exact SHA, schema version, target, repository ID, phase, next action,
@@ -49,8 +51,8 @@ It is the bounded discovery seam for a later Retrigger worker.
 
 `candidate_orchestration_runtime_evidence` exposes only phase, next action, and
 update time. Repository targets and candidate SHAs are intentionally absent.
-The later top-level runtime publication task will aggregate this evidence into
-the existing recovery document.
+The top-level runtime publication aggregates Fetch/Stage checkpoints into the
+existing recovery document without publishing repository or candidate identity.
 
 ## Follow-up delivery
 
