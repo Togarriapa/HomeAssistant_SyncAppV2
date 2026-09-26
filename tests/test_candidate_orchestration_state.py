@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_orchestration() -> None:
-    assert SCHEMA_VERSION == 28
+    assert SCHEMA_VERSION == 29
 
 
 def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
@@ -29,6 +29,36 @@ def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
             "next_action": "TEXT",
             "registered_at": "TEXT",
             "updated_at": "TEXT",
+            "record_sha256": "TEXT",
+        }
+
+
+def test_fresh_state_has_candidate_dependency_checkpoint_table(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        columns = {
+            str(row[1]): str(row[2])
+            for row in store._connection.execute(
+                "PRAGMA table_info(candidate_dependency_checkpoint)"
+            ).fetchall()
+        }
+        assert columns == {
+            "candidate_sha": "TEXT",
+            "schema_version": "INTEGER",
+            "orchestration_sha256": "TEXT",
+            "fetch_stage_sha256": "TEXT",
+            "integrity_sha256": "TEXT",
+            "target": "TEXT",
+            "repository_id": "INTEGER",
+            "baseline_sha": "TEXT",
+            "stage_manifest_sha256": "TEXT",
+            "phase": "TEXT",
+            "runtime_json": "TEXT",
+            "dependencies_json": "TEXT",
+            "reference_count": "INTEGER",
+            "planned_at": "TEXT",
+            "completed_at": "TEXT",
             "record_sha256": "TEXT",
         }
         foreign_keys = store._connection.execute(
