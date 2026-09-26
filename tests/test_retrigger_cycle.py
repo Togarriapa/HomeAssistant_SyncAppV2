@@ -1,9 +1,11 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from ha_syncapp import retrigger_cycle
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
+from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.runtime_sync_retrigger import RuntimeSyncRetriggerResult
 from ha_syncapp.state import StateStore
@@ -96,6 +98,67 @@ def test_cycle_runs_supported_lanes_then_candidate_detection_in_deterministic_or
     assert result.database_sync.processed is None
     assert result.runtime_sync.processed is None
     assert result.candidate_detection.work is None
+
+
+def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+    reference = datetime(2026, 9, 26, 11, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_local_sync_retrigger_pass",
+        lambda *_args, **_kwargs: LocalSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_database_sync_retrigger_pass",
+        lambda *_args, **_kwargs: DatabaseSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_runtime_sync_retrigger_pass",
+        lambda *_args, **_kwargs: RuntimeSyncRetriggerResult(0, None),
+    )
+
+    def rollback(*args: object, **kwargs: object) -> DeploymentRollbackRetriggerResult:
+        calls.append("rollback")
+        assert args == (store, TARGET, "github-token", "core-token")
+        assert kwargs == {"reference_time": reference}
+        return DeploymentRollbackRetriggerResult(0, 1, "deployment-1")
+
+    def candidate(*_args: object, **_kwargs: object) -> CandidateDetectionResult:
+        calls.append("candidate")
+        return _candidate_absent()
+
+    monkeypatch.setattr(retrigger_cycle, "run_deployment_rollback_retrigger_pass", rollback)
+    monkeypatch.setattr(retrigger_cycle, "detect_and_enqueue_trusted_candidate", candidate)
+    try:
+        result = retrigger_cycle.run_retrigger_cycle(
+            store,
+            tmp_path / "homeassistant",
+            tmp_path / "snapshots",
+            tmp_path / "local-workspaces",
+            None,
+            tmp_path / "database-staging",
+            tmp_path / "database-snapshots",
+            tmp_path / "database-workspaces",
+            tmp_path / "runtime-staging",
+            tmp_path / "runtime-snapshots",
+            tmp_path / "runtime-workspaces",
+            TARGET,
+            "github-token",
+            core_token="core-token",
+            recovery_reference_time=reference,
+        )
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["rollback", "candidate"]
+    assert result.deployment_rollback.processed == "deployment-1"
 
 
 def test_cycle_passes_explicit_inputs_and_separates_core_credential(

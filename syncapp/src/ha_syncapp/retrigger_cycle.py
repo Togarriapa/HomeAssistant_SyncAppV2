@@ -21,6 +21,11 @@ from ha_syncapp.database_sync_retrigger import (
     DatabaseSyncRetriggerResult,
     run_database_sync_retrigger_pass,
 )
+from ha_syncapp.deployment_rollback_retrigger import (
+    DeploymentRollbackRetriggerError,
+    DeploymentRollbackRetriggerResult,
+    run_deployment_rollback_retrigger_pass,
+)
 from ha_syncapp.github_repo import RepositoryVerificationError
 from ha_syncapp.local_sync_retrigger import (
     LocalSyncRetriggerError,
@@ -64,6 +69,7 @@ class RetriggerCycleResult:
     runtime_sync: RuntimeSyncRetriggerResult
     log_sync: LogSyncRetriggerResult
     log_retention: LogRetentionPassResult
+    deployment_rollback: DeploymentRollbackRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -89,6 +95,7 @@ def run_retrigger_cycle(
     log_workspace_root: Path | None = None,
     recorder_retention_days: int | None = None,
     retention_reference_time: datetime | None = None,
+    recovery_reference_time: datetime | None = None,
 ) -> RetriggerCycleResult:
     """Recover bounded work, detect candidate, then enqueue one fresh log artifact."""
     if type(store) is not StateStore:
@@ -168,6 +175,14 @@ def run_retrigger_cycle(
                 recover_interrupted=True,
             )
 
+        deployment_rollback = run_deployment_rollback_retrigger_pass(
+            store,
+            target,
+            github_token,
+            core_token,
+            reference_time=recovery_reference_time or datetime.now(UTC),
+        )
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -194,6 +209,7 @@ def run_retrigger_cycle(
         RepositoryVerificationError,
         LogCollectionError,
         DatabaseRetentionWorkError,
+        DeploymentRollbackRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -204,6 +220,7 @@ def run_retrigger_cycle(
         runtime_sync=runtime_sync,
         log_sync=log_sync,
         log_retention=log_retention,
+        deployment_rollback=deployment_rollback,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

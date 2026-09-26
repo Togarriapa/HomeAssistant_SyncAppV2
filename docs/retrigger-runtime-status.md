@@ -28,10 +28,18 @@ The recovery file exposes:
 - bounded total and maximum attempt counts;
 - ready work and scheduled-backoff counts with the earliest next-attempt time;
 - the same aggregates per validated work kind, in deterministic order.
+- content-free rollback aggregates for every phase, reconciliation state and block
+  reason, plus total/maximum rollback attempts and the latest update timestamp.
 
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
 no candidate SHA or retry capability is published.
+
+Rollback evidence is read through a second bounded StateStore projection that never
+selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
+Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,
+block reason, attempt count and update time. Tokens, paths, response bodies and nested
+exception text are likewise absent.
 
 ## Safety boundary
 

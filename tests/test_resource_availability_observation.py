@@ -192,7 +192,7 @@ def test_schema_17_migrates_to_18(tmp_path, monkeypatch):
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 25
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'resource_availability_observation'"
         ).fetchone() == ("resource_availability_observation",)

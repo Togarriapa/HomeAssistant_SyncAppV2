@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 25
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -71,6 +71,17 @@ class RecoveryWorkEvidence:
     created_at: datetime
     updated_at: datetime
     next_attempt_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentRollbackRuntimeEvidence:
+    """Content-free rollback lifecycle evidence for runtime diagnostics."""
+
+    phase: str
+    reconciliation_state: str
+    block_reason: str
+    attempt_count: int
+    updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -557,6 +568,42 @@ class StateStore:
             "planned_at TEXT NOT NULL, terminal_at TEXT, record_sha256 TEXT NOT NULL)"
         )
 
+    @staticmethod
+    def _create_deployment_rollback_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS deployment_rollback ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, "
+            "backup_slug TEXT NOT NULL, finalization_sha256 TEXT NOT NULL, "
+            "repository_proof_sha256 TEXT NOT NULL, backup_proof_sha256 TEXT NOT NULL, "
+            "phase TEXT NOT NULL CHECK (phase IN ('planned', 'restore_started', "
+            "'restore_acknowledged', 'uncertain', 'observing', 'completed', 'blocked')), "
+            "reconciliation_state TEXT NOT NULL CHECK (reconciliation_state IN "
+            "('none', 'not_started', 'in_progress', 'restored', 'ambiguous')), "
+            "block_reason TEXT NOT NULL CHECK (block_reason IN ('none', "
+            "'invalid_authority', 'backup_invalid', 'repository_divergence', "
+            "'restore_rejected', 'ambiguous')), attempt_count INTEGER NOT NULL "
+            "CHECK (attempt_count >= 0 AND attempt_count <= 8), restore_job_id TEXT, "
+            "authorized_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "record_sha256 TEXT NOT NULL)"
+        )
+
+    @staticmethod
+    def _create_rollback_recovery_authority_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS rollback_recovery_authority ("
+            "deployment_id TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version > 0), "
+            "candidate_sha TEXT NOT NULL, entity_ids_json TEXT NOT NULL, "
+            "resource_target_sha256 TEXT NOT NULL, "
+            "automation_target_sha256 TEXT NOT NULL, "
+            "assertion_canonical_json TEXT NOT NULL, "
+            "assertion_set_sha256 TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (deployment_id) "
+            "REFERENCES deployment_rollback(deployment_id))"
+        )
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -578,6 +625,7 @@ class StateStore:
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
             raise StateError("State integrity check failed")
         db.execute("PRAGMA synchronous = FULL")
+        db.execute("PRAGMA foreign_keys = ON")
         if created:
             if version != 0:
                 raise StateError("Unsupported state schema")
@@ -616,6 +664,8 @@ class StateStore:
                 self._create_post_deployment_assertion_observation_table(db)
                 self._create_deployment_finalization_table(db)
                 self._create_deployment_promotion_table(db)
+                self._create_deployment_rollback_table(db)
+                self._create_rollback_recovery_authority_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -646,6 +696,8 @@ class StateStore:
                 20,
                 21,
                 22,
+                23,
+                24,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -780,6 +832,18 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_deployment_promotion_table(db)
+                    db.execute("PRAGMA user_version = 23")
+                version = 23
+            if version == 23:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_deployment_rollback_table(db)
+                    db.execute("PRAGMA user_version = 24")
+                version = 24
+            if version == 24:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_rollback_recovery_authority_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -1299,6 +1363,43 @@ class StateStore:
                     next_attempt_at=(
                         None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
                     ),
+                )
+            )
+        return tuple(evidence)
+
+    def deployment_rollback_runtime_evidence(
+        self,
+    ) -> tuple[DeploymentRollbackRuntimeEvidence, ...]:
+        """Read bounded rollback state without selecting deployment or backup identity."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT phase, reconciliation_state, block_reason, attempt_count, updated_at "
+                "FROM deployment_rollback ORDER BY updated_at, phase, reconciliation_state "
+                "LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read rollback runtime evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Rollback runtime evidence exceeds the limit")
+        evidence: list[DeploymentRollbackRuntimeEvidence] = []
+        for row in rows:
+            if len(row) != 5:
+                raise StateError("Invalid rollback runtime evidence")
+            phase, reconciliation, block_reason, attempts, updated_at = row
+            if (
+                not all(isinstance(value, str) for value in (phase, reconciliation, block_reason))
+                or type(attempts) is not int
+            ):
+                raise StateError("Invalid rollback runtime evidence")
+            evidence.append(
+                DeploymentRollbackRuntimeEvidence(
+                    phase=phase,
+                    reconciliation_state=reconciliation,
+                    block_reason=block_reason,
+                    attempt_count=attempts,
+                    updated_at=_parse_timestamp(updated_at),
                 )
             )
         return tuple(evidence)

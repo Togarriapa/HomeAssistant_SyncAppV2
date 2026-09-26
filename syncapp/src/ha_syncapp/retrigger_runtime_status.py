@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
+    DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
     StateError,
     StateStore,
@@ -17,6 +18,24 @@ from .state import (
 MAX_RECOVERY_EVIDENCE_ROWS = MAX_RECOVERY_WORK_EVIDENCE_ROWS
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _STATUSES = ("blocked", "pending", "retry", "running", "succeeded")
+_ROLLBACK_PHASES = (
+    "blocked",
+    "completed",
+    "observing",
+    "planned",
+    "restore_acknowledged",
+    "restore_started",
+    "uncertain",
+)
+_RECONCILIATION_STATES = ("ambiguous", "in_progress", "none", "not_started", "restored")
+_ROLLBACK_BLOCK_REASONS = (
+    "ambiguous",
+    "backup_invalid",
+    "invalid_authority",
+    "none",
+    "repository_divergence",
+    "restore_rejected",
+)
 
 
 class RetriggerRuntimeStatusError(RuntimeError):
@@ -34,17 +53,65 @@ def collect_retrigger_runtime_inventory(
         raise RetriggerRuntimeStatusError("recovery state store is invalid")
     try:
         evidence = store.recovery_work_evidence()
+        rollback_evidence = store.deployment_rollback_runtime_evidence()
     except StateError:
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
+    recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
+    recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
+        rollback_evidence,
+        reference_time=reference_time,
+    )
     return RuntimeInventoryInput(
         manifest={},
-        analysis={
-            "recovery": render_retrigger_runtime_status(
-                evidence,
-                reference_time=reference_time,
-            )
-        },
+        analysis={"recovery": recovery},
     )
+
+
+def render_deployment_rollback_runtime_status(
+    evidence: Iterable[DeploymentRollbackRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate rollback phases without exposing deployment, candidate, or backup identity."""
+
+    reference = _utc(reference_time, "rollback reference time is invalid")
+    phases = {value: 0 for value in _ROLLBACK_PHASES}
+    reconciliation = {value: 0 for value in _RECONCILIATION_STATES}
+    block_reasons = {value: 0 for value in _ROLLBACK_BLOCK_REASONS}
+    attempts_total = 0
+    attempts_maximum = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError("rollback runtime evidence exceeds the limit")
+        if (
+            type(row) is not DeploymentRollbackRuntimeEvidence
+            or row.phase not in phases
+            or row.reconciliation_state not in reconciliation
+            or row.block_reason not in block_reasons
+            or type(row.attempt_count) is not int
+            or not 0 <= row.attempt_count <= 8
+        ):
+            raise RetriggerRuntimeStatusError("rollback runtime evidence is invalid")
+        updated = _utc(row.updated_at, "rollback runtime evidence is invalid")
+        if updated > reference:
+            raise RetriggerRuntimeStatusError("rollback runtime evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        reconciliation[row.reconciliation_state] += 1
+        block_reasons[row.block_reason] += 1
+        attempts_total += row.attempt_count
+        attempts_maximum = max(attempts_maximum, row.attempt_count)
+        latest = updated if latest is None or updated > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "reconciliation": reconciliation,
+        "block_reasons": block_reasons,
+        "attempts": {"maximum": attempts_maximum, "total": attempts_total},
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
 
 
 def render_retrigger_runtime_status(
