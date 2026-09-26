@@ -10,9 +10,14 @@ from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
+    render_deployment_rollback_runtime_status,
     render_retrigger_runtime_status,
 )
-from ha_syncapp.state import RecoveryWorkEvidence, StateStore
+from ha_syncapp.state import (
+    DeploymentRollbackRuntimeEvidence,
+    RecoveryWorkEvidence,
+    StateStore,
+)
 
 NOW = datetime(2026, 9, 13, 1, 0, tzinfo=UTC)
 STATUSES = {"pending", "running", "retry", "blocked", "succeeded"}
@@ -99,7 +104,110 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
         "ready": 0,
         "backoff": {"scheduled": 0, "next_attempt_at": None},
         "kinds": [],
+        "deployment_rollback": {
+            "total": 0,
+            "phases": {
+                "blocked": 0,
+                "completed": 0,
+                "observing": 0,
+                "planned": 0,
+                "restore_acknowledged": 0,
+                "restore_started": 0,
+                "uncertain": 0,
+            },
+            "reconciliation": {
+                "ambiguous": 0,
+                "in_progress": 0,
+                "none": 0,
+                "not_started": 0,
+                "restored": 0,
+            },
+            "block_reasons": {
+                "ambiguous": 0,
+                "backup_invalid": 0,
+                "invalid_authority": 0,
+                "none": 0,
+                "repository_divergence": 0,
+                "restore_rejected": 0,
+            },
+            "attempts": {"maximum": 0, "total": 0},
+            "latest_updated_at": None,
+        },
     }
+
+
+def test_rollback_runtime_status_exposes_only_bounded_aggregate_state() -> None:
+    evidence = (
+        DeploymentRollbackRuntimeEvidence(
+            phase="observing",
+            reconciliation_state="restored",
+            block_reason="none",
+            attempt_count=1,
+            updated_at=NOW - timedelta(minutes=2),
+        ),
+        DeploymentRollbackRuntimeEvidence(
+            phase="blocked",
+            reconciliation_state="ambiguous",
+            block_reason="ambiguous",
+            attempt_count=2,
+            updated_at=NOW - timedelta(minutes=1),
+        ),
+    )
+
+    status = render_deployment_rollback_runtime_status(evidence, reference_time=NOW)
+
+    assert status["total"] == 2
+    assert status["phases"]["observing"] == 1
+    assert status["phases"]["blocked"] == 1
+    assert status["reconciliation"]["restored"] == 1
+    assert status["reconciliation"]["ambiguous"] == 1
+    assert status["block_reasons"]["ambiguous"] == 1
+    assert status["attempts"] == {"maximum": 2, "total": 3}
+    assert status["latest_updated_at"] == "2026-09-13T00:59:00+00:00"
+    encoded = json.dumps(status, sort_keys=True)
+    assert "deployment_id" not in encoded
+    assert "backup" not in encoded
+    assert "candidate" not in encoded
+
+
+def test_collect_includes_sanitized_rollback_runtime_evidence(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    values = (
+        "secret-deployment-id",
+        "Owner/Private-Home",
+        123,
+        "a" * 40,
+        "b" * 40,
+        "secret-backup-slug",
+        "c" * 64,
+        "d" * 64,
+        "e" * 64,
+        "blocked",
+        "ambiguous",
+        "ambiguous",
+        2,
+        None,
+        (NOW - timedelta(minutes=2)).isoformat(),
+        (NOW - timedelta(minutes=1)).isoformat(),
+        "f" * 64,
+    )
+    store._connection.execute(
+        "INSERT INTO deployment_rollback VALUES (" + ",".join("?" for _ in values) + ")",
+        values,
+    )
+    store._connection.commit()
+    try:
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    rollback = inventory.analysis["recovery"]["deployment_rollback"]
+    assert rollback["total"] == 1
+    assert rollback["phases"]["blocked"] == 1
+    encoded = json.dumps(inventory.analysis, sort_keys=True)
+    assert "secret-deployment-id" not in encoded
+    assert "secret-backup-slug" not in encoded
+    assert "Owner/Private-Home" not in encoded
 
 
 def test_collection_is_read_only_for_pending_work(tmp_path: Path) -> None:
