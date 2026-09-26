@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from ha_syncapp.candidate_detection import CandidateObservation
 from ha_syncapp.candidate_fetch import CandidateFetch, CandidateFetchError
 from ha_syncapp.candidate_fetch_stage_execution import (
@@ -15,7 +14,6 @@ from ha_syncapp.candidate_fetch_stage_execution import (
 from ha_syncapp.candidate_orchestration import register_claimed_candidate
 from ha_syncapp.candidate_stage import CandidateStage
 from ha_syncapp.state import StateStore
-
 
 NOW = datetime(2026, 9, 26, 16, 0, tzinfo=UTC)
 TARGET = "owner/home-assistant-config"
@@ -62,7 +60,11 @@ def _transport(staging: Path):
         root = workspace_root / "fetch-result"
         root.mkdir()
         return CandidateFetch(
-            root, TARGET, REPOSITORY_ID, "candidate", CANDIDATE_SHA,
+            root,
+            TARGET,
+            REPOSITORY_ID,
+            "candidate",
+            CANDIDATE_SHA,
             "refs/syncapp/candidate-fetch",
         )
 
@@ -177,12 +179,15 @@ def test_completed_replay_requires_no_credentials_or_transport(
 
 def test_transport_failure_is_sanitized_and_retryable(tmp_path: Path) -> None:
     store, orchestration, workspace, staging, home = _ready(tmp_path)
+    _, observe, _, _ = _transport(staging)
 
     def fail(*args, **kwargs):
         raise CandidateFetchError("confined Git command failed: secret-token")
 
     try:
-        with pytest.raises(CandidateFetchStageExecutionError, match="temporarily unavailable") as error:
+        with pytest.raises(
+            CandidateFetchStageExecutionError, match="temporarily unavailable"
+        ) as error:
             execute_candidate_fetch_stage_once(
                 store,
                 orchestration,
@@ -190,6 +195,7 @@ def test_transport_failure_is_sanitized_and_retryable(tmp_path: Path) -> None:
                 workspace_root=workspace,
                 staging_root=staging,
                 home_assistant_root=home,
+                observer=observe,
                 fetcher=fail,
                 now=NOW,
             )
@@ -199,4 +205,3 @@ def test_transport_failure_is_sanitized_and_retryable(tmp_path: Path) -> None:
         assert checkpoint is not None and checkpoint.phase == "planned"
     finally:
         store.__exit__(None, None, None)
-

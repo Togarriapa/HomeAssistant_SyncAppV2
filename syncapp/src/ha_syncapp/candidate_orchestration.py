@@ -121,8 +121,10 @@ class CandidateOrchestration:
             or _TARGET.fullmatch(self.target) is None
             or type(self.repository_id) is not int
             or not 0 < self.repository_id <= 2**63 - 1
-            or self.phase not in {"detected", "completed", "blocked"}
-            or self.next_action not in {"fetch_stage", "none"}
+            or self.phase not in {"detected", "staged", "completed", "blocked"}
+            or self.next_action not in {"fetch_stage", "analyze", "none"}
+            or (self.phase == "detected") != (self.next_action == "fetch_stage")
+            or (self.phase == "staged") != (self.next_action == "analyze")
             or terminal != (self.next_action == "none")
             or self.registered_at.tzinfo is None
             or self.registered_at.utcoffset() is None
@@ -141,6 +143,42 @@ class CandidateOrchestrationRuntimeEvidence:
     phase: str
     next_action: str
     updated_at: datetime
+
+
+def staged_candidate_orchestration(
+    current: CandidateOrchestration,
+    *,
+    updated_at: datetime,
+) -> CandidateOrchestration:
+    """Derive the sole permitted Fetch/Stage successor without persisting it."""
+    current.validate()
+    if current.phase != "detected" or current.next_action != "fetch_stage":
+        _invalid()
+    when = _timestamp(updated_at)
+    values: tuple[object, ...] = (
+        _WORK_KIND,
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        "staged",
+        "analyze",
+        current.registered_at.astimezone(UTC).isoformat(),
+        when.isoformat(),
+    )
+    result = CandidateOrchestration(
+        candidate_sha=current.candidate_sha,
+        schema_version=current.schema_version,
+        target=current.target,
+        repository_id=current.repository_id,
+        phase="staged",
+        next_action="analyze",
+        registered_at=current.registered_at,
+        updated_at=when,
+        record_sha256=_digest(values),
+    )
+    result.validate()
+    return result
 
 
 def register_claimed_candidate(

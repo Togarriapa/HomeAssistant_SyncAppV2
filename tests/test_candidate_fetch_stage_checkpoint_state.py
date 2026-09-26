@@ -21,6 +21,8 @@ def test_fresh_state_has_candidate_fetch_stage_checkpoint_table(tmp_path: Path) 
             "candidate_sha": "TEXT",
             "schema_version": "INTEGER",
             "orchestration_sha256": "TEXT",
+            "target": "TEXT",
+            "repository_id": "INTEGER",
             "workspace_id": "TEXT",
             "phase": "TEXT",
             "manifest_sha256": "TEXT",
@@ -54,4 +56,3 @@ def test_schema_26_migrates_checkpoint_and_expands_orchestration(tmp_path: Path)
         ).fetchone()[0]
         assert "'staged'" in sql
         assert "'analyze'" in sql
-

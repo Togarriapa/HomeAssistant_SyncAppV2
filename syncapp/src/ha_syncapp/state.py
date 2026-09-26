@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -612,12 +612,50 @@ class StateStore:
             "candidate_sha TEXT PRIMARY KEY NOT NULL, "
             "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
             "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
-            "phase TEXT NOT NULL CHECK (phase IN ('detected', 'completed', 'blocked')), "
-            "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'none')), "
+            "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', 'completed', 'blocked')), "
+            "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', 'none')), "
             "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
             "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
         )
+
+    @staticmethod
+    def _create_candidate_fetch_stage_checkpoint_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_fetch_stage_checkpoint ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
+            "orchestration_sha256 TEXT NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "workspace_id TEXT NOT NULL UNIQUE, phase TEXT NOT NULL "
+            "CHECK (phase IN ('planned', 'completed')), manifest_sha256 TEXT, "
+            "entry_count INTEGER CHECK (entry_count IS NULL OR entry_count >= 0), "
+            "total_bytes INTEGER CHECK (total_bytes IS NULL OR total_bytes >= 0), "
+            "planned_at TEXT NOT NULL, completed_at TEXT, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_orchestration(candidate_sha), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+
+    @staticmethod
+    def _expand_candidate_orchestration_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE candidate_orchestration_v27 ("
+            "work_kind TEXT NOT NULL CHECK (work_kind = 'candidate'), "
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
+            "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', 'completed', 'blocked')), "
+            "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', 'none')), "
+            "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+        db.execute(
+            "INSERT INTO candidate_orchestration_v27 SELECT * FROM candidate_orchestration"
+        )
+        db.execute("DROP TABLE candidate_orchestration")
+        db.execute("ALTER TABLE candidate_orchestration_v27 RENAME TO candidate_orchestration")
 
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
@@ -682,6 +720,7 @@ class StateStore:
                 self._create_deployment_rollback_table(db)
                 self._create_rollback_recovery_authority_table(db)
                 self._create_candidate_orchestration_table(db)
+                self._create_candidate_fetch_stage_checkpoint_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -715,6 +754,7 @@ class StateStore:
                 23,
                 24,
                 25,
+                26,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -867,6 +907,13 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_candidate_orchestration_table(db)
+                    db.execute("PRAGMA user_version = 26")
+                version = 26
+            if version == 26:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._expand_candidate_orchestration_table(db)
+                    self._create_candidate_fetch_stage_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
