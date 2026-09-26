@@ -613,9 +613,9 @@ class StateStore:
             "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
             "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
             "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', "
-            "'integrity_verified', 'completed', 'blocked')), "
+            "'integrity_verified', 'dependencies_analyzed', 'completed', 'blocked')), "
             "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', "
-            "'analyze_dependencies', 'none')), "
+            "'analyze_dependencies', 'classify_risk', 'none')), "
             "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
             "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
@@ -740,6 +740,72 @@ class StateStore:
             "FOREIGN KEY (candidate_sha) "
             "REFERENCES candidate_integrity_checkpoint(candidate_sha), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+
+    @staticmethod
+    def _expand_candidate_orchestration_table_v29(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE candidate_orchestration_v29 ("
+            "work_kind TEXT NOT NULL CHECK (work_kind = 'candidate'), "
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
+            "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', "
+            "'integrity_verified', 'dependencies_analyzed', 'completed', 'blocked')), "
+            "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', "
+            "'analyze_dependencies', 'classify_risk', 'none')), "
+            "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+        db.execute(
+            "CREATE TABLE candidate_fetch_stage_checkpoint_v29 ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, schema_version INTEGER NOT NULL "
+            "CHECK (schema_version = 1), orchestration_sha256 TEXT NOT NULL, "
+            "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "workspace_id TEXT NOT NULL UNIQUE, phase TEXT NOT NULL "
+            "CHECK (phase IN ('planned', 'completed')), manifest_sha256 TEXT, "
+            "entry_count INTEGER CHECK (entry_count IS NULL OR entry_count >= 0), "
+            "total_bytes INTEGER CHECK (total_bytes IS NULL OR total_bytes >= 0), "
+            "planned_at TEXT NOT NULL, completed_at TEXT, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (candidate_sha) REFERENCES candidate_orchestration_v29(candidate_sha), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+        db.execute(
+            "CREATE TABLE candidate_integrity_checkpoint_v29 ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, schema_version INTEGER NOT NULL "
+            "CHECK (schema_version = 1), orchestration_sha256 TEXT NOT NULL, "
+            "fetch_stage_sha256 TEXT NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "stage_manifest_sha256 TEXT NOT NULL, phase TEXT NOT NULL "
+            "CHECK (phase IN ('planned', 'completed')), baseline_sha TEXT, changes_json TEXT, "
+            "changed_count INTEGER CHECK (changed_count IS NULL OR changed_count >= 0), "
+            "planned_at TEXT NOT NULL, completed_at TEXT, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (candidate_sha) REFERENCES candidate_orchestration_v29(candidate_sha), "
+            "FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_fetch_stage_checkpoint_v29(candidate_sha), "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target))"
+        )
+        db.execute("INSERT INTO candidate_orchestration_v29 SELECT * FROM candidate_orchestration")
+        db.execute(
+            "INSERT INTO candidate_fetch_stage_checkpoint_v29 "
+            "SELECT * FROM candidate_fetch_stage_checkpoint"
+        )
+        db.execute(
+            "INSERT INTO candidate_integrity_checkpoint_v29 "
+            "SELECT * FROM candidate_integrity_checkpoint"
+        )
+        db.execute("DROP TABLE candidate_integrity_checkpoint")
+        db.execute("DROP TABLE candidate_fetch_stage_checkpoint")
+        db.execute("DROP TABLE candidate_orchestration")
+        db.execute("ALTER TABLE candidate_orchestration_v29 RENAME TO candidate_orchestration")
+        db.execute(
+            "ALTER TABLE candidate_fetch_stage_checkpoint_v29 "
+            "RENAME TO candidate_fetch_stage_checkpoint"
+        )
+        db.execute(
+            "ALTER TABLE candidate_integrity_checkpoint_v29 "
+            "RENAME TO candidate_integrity_checkpoint"
         )
 
     def _open_database(self) -> None:
@@ -1015,6 +1081,7 @@ class StateStore:
             if version == 28:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
+                    self._expand_candidate_orchestration_table_v29(db)
                     self._create_candidate_dependency_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()

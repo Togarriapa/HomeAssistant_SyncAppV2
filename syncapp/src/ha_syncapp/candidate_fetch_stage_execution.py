@@ -397,7 +397,14 @@ def load_candidate_fetch_stage_checkpoint(
             or (result.phase == "planned" and current.record_sha256 != result.orchestration_sha256)
             or (
                 result.phase == "completed"
-                and current.phase not in {"staged", "integrity_verified", "completed", "blocked"}
+                and current.phase
+                not in {
+                    "staged",
+                    "integrity_verified",
+                    "dependencies_analyzed",
+                    "completed",
+                    "blocked",
+                }
             )
         ):
             _invalid()

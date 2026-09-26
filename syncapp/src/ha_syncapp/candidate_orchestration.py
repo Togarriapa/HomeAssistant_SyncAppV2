@@ -130,7 +130,8 @@ class CandidateOrchestration:
                 "completed",
                 "blocked",
             }
-            or self.next_action not in {
+            or self.next_action
+            not in {
                 "fetch_stage",
                 "analyze",
                 "analyze_dependencies",

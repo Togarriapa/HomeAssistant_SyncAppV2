@@ -210,7 +210,10 @@ def load_candidate_integrity_checkpoint(
             or current.target != result.target
             or current.repository_id != result.repository_id
             or (result.phase == "planned" and current.record_sha256 != result.orchestration_sha256)
-            or (result.phase == "completed" and current.phase != "integrity_verified")
+            or (
+                result.phase == "completed"
+                and current.phase not in {"integrity_verified", "dependencies_analyzed"}
+            )
         ):
             _invalid()
         return result

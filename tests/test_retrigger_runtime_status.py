@@ -6,12 +6,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp.candidate_dependency_execution import CandidateDependencyRuntimeEvidence
 from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
 from ha_syncapp.candidate_integrity_execution import CandidateIntegrityRuntimeEvidence
 from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
+    render_candidate_dependency_runtime_status,
     render_candidate_fetch_stage_runtime_status,
     render_candidate_integrity_runtime_status,
     render_deployment_rollback_runtime_status,
@@ -149,6 +151,12 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "changed_paths": 0,
             "latest_updated_at": None,
         },
+        "candidate_dependencies": {
+            "total": 0,
+            "phases": {"completed": 0, "planned": 0},
+            "references": 0,
+            "latest_updated_at": None,
+        },
     }
 
 
@@ -206,6 +214,24 @@ def test_candidate_integrity_status_exposes_only_bounded_aggregate_state() -> No
         "phases": {"completed": 1, "planned": 1},
         "changed_paths": 3,
         "latest_updated_at": "2026-09-13T00:59:00+00:00",
+    }
+
+
+def test_candidate_dependency_status_exposes_only_bounded_aggregate_state() -> None:
+    evidence = (
+        CandidateDependencyRuntimeEvidence("planned", None, NOW - timedelta(seconds=2), None),
+        CandidateDependencyRuntimeEvidence(
+            "completed", 3, NOW - timedelta(seconds=3), NOW - timedelta(seconds=1)
+        ),
+    )
+
+    status = render_candidate_dependency_runtime_status(evidence, reference_time=NOW)
+
+    assert status == {
+        "total": 2,
+        "phases": {"completed": 1, "planned": 1},
+        "references": 3,
+        "latest_updated_at": (NOW - timedelta(seconds=1)).isoformat(),
     }
     encoded = json.dumps(status, sort_keys=True)
     assert "candidate_sha" not in encoded

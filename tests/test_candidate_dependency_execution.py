@@ -11,7 +11,6 @@ from ha_syncapp.candidate_dependency_execution import (
 )
 from ha_syncapp.candidate_integrity_execution import execute_candidate_integrity_once
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
-
 from test_candidate_integrity_execution import NOW, TOKEN, _changes, _integrity, _ready
 
 
@@ -45,7 +44,9 @@ def test_plans_before_runtime_collection_then_completes_and_advances(tmp_path) -
 
     def collect(*, token):
         assert token == TOKEN
-        checkpoint = load_candidate_dependency_checkpoint(store, integrity_result.orchestration.candidate_sha)
+        checkpoint = load_candidate_dependency_checkpoint(
+            store, integrity_result.orchestration.candidate_sha
+        )
         assert checkpoint is not None and checkpoint.phase == "planned"
         return _runtime()
 

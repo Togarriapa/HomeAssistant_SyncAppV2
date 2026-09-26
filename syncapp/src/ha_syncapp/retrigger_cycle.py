@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ha_syncapp.candidate_dependency_retrigger import (
+    CandidateDependencyRetriggerError,
+    CandidateDependencyRetriggerResult,
+    run_candidate_dependency_retrigger_pass,
+)
 from ha_syncapp.candidate_detection import (
     CandidateDetectionError,
     CandidateDetectionResult,
@@ -82,6 +87,7 @@ class RetriggerCycleResult:
     deployment_rollback: DeploymentRollbackRetriggerResult
     candidate_fetch_stage: CandidateFetchStageRetriggerResult
     candidate_integrity: CandidateIntegrityRetriggerResult
+    candidate_dependencies: CandidateDependencyRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -215,6 +221,16 @@ def run_retrigger_cycle(
             )
         else:
             candidate_integrity = CandidateIntegrityRetriggerResult(0, 0, None)
+        if candidate_fetch_stage.processed is None and candidate_integrity.processed is None:
+            candidate_dependencies = run_candidate_dependency_retrigger_pass(
+                store,
+                home_assistant_root,
+                snapshot_staging_root / "candidate-stage",
+                core_token,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_dependencies = CandidateDependencyRetriggerResult(0, 0, None)
 
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
@@ -245,6 +261,7 @@ def run_retrigger_cycle(
         DeploymentRollbackRetriggerError,
         CandidateFetchStageRetriggerError,
         CandidateIntegrityRetriggerError,
+        CandidateDependencyRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -258,6 +275,7 @@ def run_retrigger_cycle(
         deployment_rollback=deployment_rollback,
         candidate_fetch_stage=candidate_fetch_stage,
         candidate_integrity=candidate_integrity,
+        candidate_dependencies=candidate_dependencies,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

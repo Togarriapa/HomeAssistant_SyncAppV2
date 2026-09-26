@@ -236,7 +236,8 @@ class CandidateDependencyCheckpoint:
         ):
             _invalid()
         if completed:
-            assert self.runtime_json is not None and self.dependencies_json is not None
+            if self.runtime_json is None or self.dependencies_json is None:
+                _invalid()
             if any(
                 len(value.encode("utf-8")) > _MAX_EVIDENCE_BYTES
                 for value in (self.runtime_json, self.dependencies_json)

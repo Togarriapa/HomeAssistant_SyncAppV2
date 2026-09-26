@@ -21,6 +21,7 @@ The initial state is deliberately narrow:
 | `detected` | `fetch_stage` | The exact trusted SHA may enter the existing read-only Fetch/Stage boundary. |
 | `staged` | `analyze` | A verified, durable Stage exists for the exact candidate and may enter analysis. |
 | `integrity_verified` | `analyze_dependencies` | Canonical change evidence and integrity success are durably checkpointed for the exact Stage. |
+| `dependencies_analyzed` | `classify_risk` | Canonical runtime and dependency evidence are durably checkpointed for the exact candidate. |
 | `completed` | `none` | Reserved terminal state for a later evidence-driven transition. |
 | `blocked` | `none` | Reserved deterministic terminal state for a later evidence-driven transition. |
 
@@ -31,7 +32,9 @@ promote, or roll back a deployment.
 
 ## Durable evidence and replay
 
-`candidate_orchestration` was introduced by schema v26, expanded for Fetch/Stage by schema v27, and expanded for the analysis successor by schema v28.
+`candidate_orchestration` was introduced by schema v26, expanded for Fetch/Stage
+by schema v27, expanded for the integrity-analysis successor by schema v28, and
+expanded for the dependency-analysis successor by schema v29.
 Each row is bound by composite
 foreign key to `work_kind=candidate` plus the exact work key/SHA, and by foreign
 key to the pinned repository target. The canonical integrity digest covers the
@@ -52,9 +55,10 @@ It is the bounded discovery seam for a later Retrigger worker.
 
 `candidate_orchestration_runtime_evidence` exposes only phase, next action, and
 update time. Repository targets and candidate SHAs are intentionally absent.
-The top-level runtime publication aggregates Fetch/Stage and integrity-analysis
-checkpoints into the existing recovery document without publishing repository,
-candidate, baseline, or changed-path identity.
+The top-level runtime publication aggregates Fetch/Stage, integrity-analysis,
+and dependency-analysis checkpoints into the existing recovery document
+without publishing repository, candidate, baseline, changed-path, runtime
+payload, or reference identity.
 
 ## Follow-up delivery
 
