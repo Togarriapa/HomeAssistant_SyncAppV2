@@ -20,6 +20,10 @@ from .deployment_rollback import (
     reconcile_deployment_restore_once,
     request_deployment_restore_once,
 )
+from .deployment_rollback_transport import (
+    read_rollback_backup_proof,
+    read_rollback_repository_proof,
+)
 from .post_deployment_assertion_observation import (
     PostDeploymentAssertionObservationError,
     PostDeploymentAssertionPlan,
@@ -325,6 +329,8 @@ def run_deployment_rollback_retrigger_pass(
     core_token: str,
     *,
     reference_time: datetime,
+    repository_reader: RepositoryReader = read_rollback_repository_proof,
+    backup_reader: BackupReader = read_rollback_backup_proof,
 ) -> DeploymentRollbackRetriggerResult:
     """Claim and process at most one rollback item without bypassing safeguards."""
     _validate_token(github_token, "GitHub token")
@@ -351,7 +357,8 @@ def run_deployment_rollback_retrigger_pass(
                 store,
                 rollback,
                 github_token=github_token,
-                core_token=core_token,
+                supervisor_token=core_token,
+                repository_reader=repository_reader,
                 observed_at=reference_time,
             )
         elif rollback_requires_reconciliation(rollback):
@@ -367,7 +374,13 @@ def run_deployment_rollback_retrigger_pass(
             # Only a planned rollback can reach this path. The execution seam
             # remains fail-closed until persisted plan/proof reconstruction exists.
             execute_rollback_restore(
-                store, rollback, supervisor_token=core_token, attempted_at=reference_time
+                store,
+                rollback,
+                github_token=github_token,
+                supervisor_token=core_token,
+                repository_reader=repository_reader,
+                backup_reader=backup_reader,
+                attempted_at=reference_time,
             )
     except DeploymentRollbackRetriggerError:
         store.fail_work(claimed, transient=True, now=reference_time)

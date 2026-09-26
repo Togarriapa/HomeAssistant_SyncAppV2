@@ -19,9 +19,7 @@ def test_repository_proof_reuses_exact_private_identity_and_main_head(monkeypatc
         calls.append((target, token, expected_id, branch))
         return BranchHead(target, expected_id, branch, "a" * 40)
 
-    monkeypatch.setattr(
-        "ha_syncapp.deployment_rollback_transport.fetch_trusted_branch_head", fetch
-    )
+    monkeypatch.setattr("ha_syncapp.deployment_rollback_transport.fetch_trusted_branch_head", fetch)
     proof = read_rollback_repository_proof("Owner/Private-Home", "token", 123)
 
     assert proof.repository_id == 123
