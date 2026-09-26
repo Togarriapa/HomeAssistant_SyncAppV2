@@ -380,8 +380,7 @@ def run_deployment_rollback_retrigger_pass(
                 observed_at=reference_time,
             )
         elif rollback_requires_reconciliation(rollback):
-            # Durable discovery must first bind this record back to the exact
-            # PostDeploymentAssertionPlan. Until then this seam fails closed.
+            # Reconstruct the exact persisted plan before read-only reconciliation.
             outcome = reconcile_pending_rollback(
                 store,
                 rollback,
@@ -392,8 +391,7 @@ def run_deployment_rollback_retrigger_pass(
             store.fail_work(claimed, transient=True, now=reference_time)
             return DeploymentRollbackRetriggerResult(recovered, considered, None)
         else:
-            # Only a planned rollback can reach this path. The execution seam
-            # remains fail-closed until persisted plan/proof reconstruction exists.
+            # Only a planned rollback can reach the proof-bound mutation path.
             outcome = execute_rollback_restore(
                 store,
                 rollback,
