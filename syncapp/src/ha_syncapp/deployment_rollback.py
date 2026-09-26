@@ -29,6 +29,10 @@ from .post_deployment_assertion_observation import (
     PostDeploymentAssertionPlan,
 )
 from .prepared_deployment import PreparedDeployment, PreparedDeploymentError, validate_deployment_id
+from .rollback_recovery_authority import (
+    RollbackRecoveryAuthority,
+    RollbackRecoveryAuthorityError,
+)
 from .state import StateError, StateStore
 from .supervisor_health_observation import (
     SupervisorHealthError,
@@ -626,6 +630,7 @@ def authorize_deployment_rollback_once(
     try:
         existing = load_deployment_rollback(store, plan)
         if existing is not None:
+            _require_recovery_authority(store, plan)
             return RollbackAuthorizationResult(existing.phase, True, existing)
         prepared, finalization = _failure_authority(store, plan)
         repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
@@ -669,6 +674,7 @@ def authorize_deployment_rollback_once(
         DeploymentFinalizationError,
         PostDeploymentAssertionObservationError,
         PreparedDeploymentError,
+        RollbackRecoveryAuthorityError,
         StateError,
         sqlite3.Error,
         AttributeError,
@@ -745,25 +751,55 @@ def _insert_intent(
     requested: DeploymentRollback,
 ) -> tuple[DeploymentRollback, bool]:
     try:
+        authority = RollbackRecoveryAuthority.create(plan)
         with store._connection as db:
             db.execute("BEGIN IMMEDIATE")
             _failure_authority(store, plan)
             existing = load_deployment_rollback(store, plan)
             if existing is not None:
+                _require_recovery_authority(store, plan)
                 return existing, True
             db.execute(
                 "INSERT INTO deployment_rollback VALUES "
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 requested.database_values(),
             )
+            db.execute(
+                "INSERT INTO rollback_recovery_authority VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                authority.database_values(),
+            )
         loaded = load_deployment_rollback(store, plan)
-        if loaded != requested:
+        if loaded != requested or _require_recovery_authority(store, plan) != authority:
             _invalid_state()
         return requested, False
     except DeploymentRollbackError:
         raise
-    except (DeploymentFinalizationError, StateError, sqlite3.Error):
+    except (
+        DeploymentFinalizationError,
+        RollbackRecoveryAuthorityError,
+        StateError,
+        sqlite3.Error,
+    ):
         _invalid_state()
+
+
+def _require_recovery_authority(
+    store: StateStore, plan: PostDeploymentAssertionPlan
+) -> RollbackRecoveryAuthority:
+    expected = RollbackRecoveryAuthority.create(plan)
+    rows = store._connection.execute(
+        "SELECT deployment_id, schema_version, candidate_sha, entity_ids_json, "
+        "resource_target_sha256, automation_target_sha256, assertion_canonical_json, "
+        "assertion_set_sha256, record_sha256 FROM rollback_recovery_authority "
+        "WHERE deployment_id = ?",
+        (expected.deployment_id,),
+    ).fetchall()
+    if len(rows) != 1:
+        _invalid_state()
+    saved = RollbackRecoveryAuthority.from_database_row(tuple(rows[0]))
+    if saved != expected:
+        _invalid_state()
+    return saved
 
 
 def _reprove_external_inputs(
