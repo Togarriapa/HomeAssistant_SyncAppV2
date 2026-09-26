@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.retrigger_cycle import run_retrigger_cycle
@@ -33,6 +34,10 @@ def test_retrigger_cycle_skips_database_lane_when_source_is_unconfigured(
     )
     monkeypatch.setattr(
         "ha_syncapp.retrigger_cycle.run_runtime_sync_retrigger_pass", Mock(return_value=runtime)
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.retrigger_cycle.run_candidate_fetch_stage_retrigger_pass",
+        Mock(return_value=CandidateFetchStageRetriggerResult(0, 0, None)),
     )
     monkeypatch.setattr(
         "ha_syncapp.retrigger_cycle.detect_and_enqueue_trusted_candidate",

@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
 from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
+    render_candidate_fetch_stage_runtime_status,
     render_deployment_rollback_runtime_status,
     render_retrigger_runtime_status,
 )
@@ -133,7 +135,44 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "attempts": {"maximum": 0, "total": 0},
             "latest_updated_at": None,
         },
+        "candidate_fetch_stage": {
+            "total": 0,
+            "phases": {"completed": 0, "planned": 0},
+            "staged": {"entries": 0, "bytes": 0},
+            "latest_updated_at": None,
+        },
     }
+
+
+def test_fetch_stage_status_exposes_only_bounded_aggregate_state() -> None:
+    evidence = (
+        CandidateFetchStageRuntimeEvidence(
+            phase="planned",
+            entry_count=None,
+            total_bytes=None,
+            planned_at=NOW - timedelta(minutes=2),
+            completed_at=None,
+        ),
+        CandidateFetchStageRuntimeEvidence(
+            phase="completed",
+            entry_count=3,
+            total_bytes=2048,
+            planned_at=NOW - timedelta(minutes=3),
+            completed_at=NOW - timedelta(minutes=1),
+        ),
+    )
+
+    status = render_candidate_fetch_stage_runtime_status(evidence, reference_time=NOW)
+
+    assert status == {
+        "total": 2,
+        "phases": {"completed": 1, "planned": 1},
+        "staged": {"entries": 3, "bytes": 2048},
+        "latest_updated_at": "2026-09-13T00:59:00+00:00",
+    }
+    encoded = json.dumps(status, sort_keys=True)
+    assert "candidate_sha" not in encoded
+    assert "repository" not in encoded
 
 
 def test_rollback_runtime_status_exposes_only_bounded_aggregate_state() -> None:

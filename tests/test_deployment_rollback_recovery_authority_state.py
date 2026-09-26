@@ -14,7 +14,7 @@ def _store(tmp_path: Path) -> StateStore:
 
 
 def test_schema_version_includes_rollback_recovery_authority() -> None:
-    assert SCHEMA_VERSION == 26
+    assert SCHEMA_VERSION == 27
 
 
 def test_fresh_state_has_integrity_bound_rollback_recovery_authority_table(

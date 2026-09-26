@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from ha_syncapp import retrigger_cycle
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
+from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
@@ -11,6 +12,15 @@ from ha_syncapp.runtime_sync_retrigger import RuntimeSyncRetriggerResult
 from ha_syncapp.state import StateStore
 
 TARGET = "Owner/Private-Home"
+
+
+@pytest.fixture(autouse=True)
+def _candidate_fetch_stage_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_fetch_stage_retrigger_pass",
+        lambda *_args, **_kwargs: CandidateFetchStageRetriggerResult(0, 0, None),
+    )
 
 
 def _store(tmp_path: Path) -> StateStore:
@@ -84,19 +94,31 @@ def test_cycle_runs_supported_lanes_then_candidate_detection_in_deterministic_or
         calls.append("candidate_detection")
         return _candidate_absent()
 
+    def fetch_stage(*args: object, **kwargs: object) -> CandidateFetchStageRetriggerResult:
+        calls.append("candidate_fetch_stage")
+        return CandidateFetchStageRetriggerResult(0, 0, None)
+
     monkeypatch.setattr(retrigger_cycle, "run_local_sync_retrigger_pass", local)
     monkeypatch.setattr(retrigger_cycle, "run_database_sync_retrigger_pass", database)
     monkeypatch.setattr(retrigger_cycle, "run_runtime_sync_retrigger_pass", runtime)
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_fetch_stage_retrigger_pass", fetch_stage)
     monkeypatch.setattr(retrigger_cycle, "detect_and_enqueue_trusted_candidate", candidate)
     try:
         result = _run(store, tmp_path)
     finally:
         store.__exit__(None, None, None)
 
-    assert calls == ["local_sync", "database", "runtime", "candidate_detection"]
+    assert calls == [
+        "local_sync",
+        "database",
+        "runtime",
+        "candidate_fetch_stage",
+        "candidate_detection",
+    ]
     assert result.local_sync.processed is None
     assert result.database_sync.processed is None
     assert result.runtime_sync.processed is None
+    assert result.candidate_fetch_stage.processed is None
     assert result.candidate_detection.work is None
 
 
@@ -134,7 +156,21 @@ def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
         calls.append("candidate")
         return _candidate_absent()
 
+    def fetch_stage(*args: object, **kwargs: object) -> CandidateFetchStageRetriggerResult:
+        calls.append("fetch_stage")
+        assert args == (
+            store,
+            tmp_path / "homeassistant",
+            tmp_path / "local-workspaces" / "candidate-fetch",
+            tmp_path / "snapshots" / "candidate-stage",
+            TARGET,
+            "github-token",
+        )
+        assert kwargs == {"reference_time": reference}
+        return CandidateFetchStageRetriggerResult(0, 1, "completed")
+
     monkeypatch.setattr(retrigger_cycle, "run_deployment_rollback_retrigger_pass", rollback)
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_fetch_stage_retrigger_pass", fetch_stage)
     monkeypatch.setattr(retrigger_cycle, "detect_and_enqueue_trusted_candidate", candidate)
     try:
         result = retrigger_cycle.run_retrigger_cycle(
@@ -157,8 +193,9 @@ def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
     finally:
         store.__exit__(None, None, None)
 
-    assert calls == ["rollback", "candidate"]
+    assert calls == ["rollback", "fetch_stage", "candidate"]
     assert result.deployment_rollback.processed == "deployment-1"
+    assert result.candidate_fetch_stage.processed == "completed"
 
 
 def test_cycle_passes_explicit_inputs_and_separates_core_credential(
@@ -184,9 +221,14 @@ def test_cycle_passes_explicit_inputs_and_separates_core_credential(
         captured["candidate"] = (args, kwargs)
         return _candidate_absent()
 
+    def fetch_stage(*args: object, **kwargs: object) -> CandidateFetchStageRetriggerResult:
+        captured["fetch_stage"] = (args, kwargs)
+        return CandidateFetchStageRetriggerResult(0, 0, None)
+
     monkeypatch.setattr(retrigger_cycle, "run_local_sync_retrigger_pass", local)
     monkeypatch.setattr(retrigger_cycle, "run_database_sync_retrigger_pass", database)
     monkeypatch.setattr(retrigger_cycle, "run_runtime_sync_retrigger_pass", runtime)
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_fetch_stage_retrigger_pass", fetch_stage)
     monkeypatch.setattr(retrigger_cycle, "detect_and_enqueue_trusted_candidate", candidate)
     try:
         _run(
@@ -201,10 +243,19 @@ def test_cycle_passes_explicit_inputs_and_separates_core_credential(
     local_args, local_kwargs = captured["local"]
     database_args, database_kwargs = captured["database"]
     runtime_args, runtime_kwargs = captured["runtime"]
+    fetch_stage_args, fetch_stage_kwargs = captured["fetch_stage"]
     candidate_args, candidate_kwargs = captured["candidate"]
     assert local_args[0] is store
     assert database_args[0] is store
     assert runtime_args[0] is store
+    assert fetch_stage_args == (
+        store,
+        tmp_path / "homeassistant",
+        tmp_path / "local-workspaces" / "candidate-fetch",
+        tmp_path / "snapshots" / "candidate-stage",
+        TARGET,
+        "github-secret",
+    )
     assert candidate_args == (store, TARGET, "github-secret")
     assert local_args[-2:] == (TARGET, "github-secret")
     assert database_args[-2:] == (TARGET, "github-secret")
@@ -212,10 +263,12 @@ def test_cycle_passes_explicit_inputs_and_separates_core_credential(
     assert local_kwargs == {}
     assert database_kwargs == {}
     assert runtime_kwargs == {"core_token": "core-secret"}
+    assert set(fetch_stage_kwargs) == {"reference_time"}
     assert candidate_kwargs == {}
     assert "core-secret" not in local_args
     assert "core-secret" not in database_args
     assert "core-secret" not in candidate_args
+    assert "core-secret" not in fetch_stage_args
 
 
 def test_cycle_does_not_consume_candidate_or_unimplemented_logs_without_roots(

@@ -30,6 +30,8 @@ The recovery file exposes:
 - the same aggregates per validated work kind, in deterministic order.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
+- content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
+  counts and the latest checkpoint timestamp.
 
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
@@ -40,6 +42,10 @@ selects deployment IDs, repository targets, baseline/candidate SHAs, backup slug
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,
 block reason, attempt count and update time. Tokens, paths, response bodies and nested
 exception text are likewise absent.
+
+Fetch/Stage checkpoint evidence is reconstructed from integrity-protected schema-v27
+rows. Its runtime projection omits candidate SHA, repository target and ID, workspace
+identity/path, manifest digest and content, credentials and nested exception text.
 
 ## Safety boundary
 

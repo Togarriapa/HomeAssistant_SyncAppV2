@@ -22,6 +22,8 @@ _STAGE_PREFIX = ".git-workspace-candidate-stage-"
 _FETCH_REF = "refs/syncapp/candidate-fetch"
 _ALLOWED_MODES = {"100644", "100755"}
 _MANIFEST_VERSION = 1
+_MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+_MAX_MANIFEST_ENTRIES = 4096
 
 
 class CandidateStageError(RuntimeError):
@@ -128,6 +130,62 @@ def verify_candidate_stage(stage: CandidateStage) -> None:
     if hashlib.sha256(actual_manifest).hexdigest() != stage.manifest_sha256:
         raise CandidateStageError("candidate staging manifest digest does not match evidence")
     _verify_staged_tree(stage.tree, stage.entries)
+
+
+def load_candidate_stage(root: Path) -> CandidateStage:
+    """Reconstruct and verify one durable Stage tree without network access."""
+    if not isinstance(root, Path):
+        raise CandidateStageError("candidate staging root is invalid")
+    manifest = root / "manifest.json"
+    data = _read_private_manifest(manifest)
+    try:
+        payload = json.loads(data, object_pairs_hook=_unique_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, CandidateStageError):
+        raise CandidateStageError("candidate staging manifest is invalid") from None
+    if not isinstance(payload, dict) or set(payload) != {
+        "version",
+        "target",
+        "repository_id",
+        "branch",
+        "commit_sha",
+        "entries",
+    }:
+        raise CandidateStageError("candidate staging manifest is invalid")
+    raw_entries = payload["entries"]
+    if not isinstance(raw_entries, list) or len(raw_entries) > _MAX_MANIFEST_ENTRIES:
+        raise CandidateStageError("candidate staging manifest is invalid")
+    entries: list[CandidateStageEntry] = []
+    for raw in raw_entries:
+        if not isinstance(raw, dict) or set(raw) != {
+            "path",
+            "git_mode",
+            "object_id",
+            "size",
+            "sha256",
+        }:
+            raise CandidateStageError("candidate staging manifest is invalid")
+        entries.append(
+            CandidateStageEntry(
+                path=raw["path"],
+                git_mode=raw["git_mode"],
+                object_id=raw["object_id"],
+                size=raw["size"],
+                sha256=raw["sha256"],
+            )
+        )
+    result = CandidateStage(
+        root=root,
+        tree=root / "tree",
+        manifest=manifest,
+        manifest_sha256=hashlib.sha256(data).hexdigest(),
+        target=payload["target"],
+        repository_id=payload["repository_id"],
+        branch=payload["branch"],
+        commit_sha=payload["commit_sha"],
+        entries=tuple(entries),
+    )
+    verify_candidate_stage(result)
+    return result
 
 
 def _validate_fetch_evidence(fetched: CandidateFetch) -> None:
@@ -507,3 +565,34 @@ def _read_private_file(path: Path, *, expected_mode: int) -> bytes:
     ):
         raise CandidateStageError("candidate staging manifest is unsafe")
     return data
+
+
+def _read_private_manifest(path: Path) -> bytes:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            data = handle.read(_MAX_MANIFEST_BYTES + 1)
+    except OSError as exc:
+        raise CandidateStageError("candidate staging manifest is unavailable") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or len(data) > _MAX_MANIFEST_BYTES
+    ):
+        raise CandidateStageError("candidate staging manifest is unsafe")
+    return data
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CandidateStageError("candidate staging manifest is invalid")
+        result[key] = value
+    return result
