@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -10,7 +11,11 @@ from ha_syncapp.candidate_backup_execution import (
     execute_candidate_backup_once,
     load_candidate_backup_checkpoint,
 )
-from ha_syncapp.candidate_semantic_execution import load_candidate_semantic_checkpoint
+from ha_syncapp.candidate_semantic_checkpoint import CandidateSemanticCheckpoint
+from ha_syncapp.candidate_semantic_execution import (
+    execute_candidate_semantic_once,
+    load_candidate_semantic_checkpoint,
+)
 from semantic_fixtures import candidate_inputs
 from test_candidate_integrity_execution import NOW
 from test_candidate_semantic_execution import _semantic_ready
@@ -18,13 +23,61 @@ from test_candidate_semantic_execution import _semantic_ready
 
 def _backup_ready(tmp_path, monkeypatch):
     store, orchestration, semantic = _semantic_ready(tmp_path, monkeypatch)
+    semantic_result = execute_candidate_semantic_once(
+        store,
+        orchestration,
+        staging_root=tmp_path,
+        home_assistant_root=tmp_path,
+        validator=lambda *args: semantic,
+        now=NOW + timedelta(seconds=4),
+    )
+    orchestration = semantic_result.orchestration
     inputs_root = tmp_path / "backup-inputs"
     inputs_root.mkdir()
     static, integrity, stage, dependencies, impact, risk, runtime, version = candidate_inputs(
         inputs_root, {"configuration.yaml": b"homeassistant:\n"}
     )
     semantic_checkpoint = load_candidate_semantic_checkpoint(store, orchestration.candidate_sha)
-    assert semantic_checkpoint is not None
+    assert semantic_checkpoint is not None and semantic_checkpoint.completed_at is not None
+    semantic = replace(semantic, baseline_sha="b" * 40)
+    rebound_plan = CandidateSemanticCheckpoint.plan(
+        candidate_sha=semantic_checkpoint.candidate_sha,
+        orchestration_sha256=semantic_checkpoint.orchestration_sha256,
+        fetch_stage_sha256=semantic_checkpoint.fetch_stage_sha256,
+        integrity_sha256=semantic_checkpoint.integrity_sha256,
+        dependency_sha256=semantic_checkpoint.dependency_sha256,
+        risk_sha256=semantic_checkpoint.risk_sha256,
+        static_sha256=semantic_checkpoint.static_sha256,
+        target=semantic_checkpoint.target,
+        repository_id=semantic_checkpoint.repository_id,
+        baseline_sha=semantic.baseline_sha,
+        stage_manifest_sha256=semantic_checkpoint.stage_manifest_sha256,
+        runtime_sha256=semantic_checkpoint.runtime_sha256,
+        core_version=semantic_checkpoint.core_version,
+        planned_at=semantic_checkpoint.planned_at,
+    )
+    semantic_checkpoint = rebound_plan.complete(
+        semantic,
+        static,
+        integrity,
+        stage,
+        dependencies,
+        impact,
+        risk,
+        runtime,
+        version,
+        completed_at=semantic_checkpoint.completed_at,
+    )
+    with store._connection as db:
+        db.execute(
+            "DELETE FROM candidate_semantic_checkpoint WHERE candidate_sha=?",
+            (orchestration.candidate_sha,),
+        )
+        db.execute(
+            "INSERT INTO candidate_semantic_checkpoint VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            semantic_checkpoint.database_values(),
+        )
     authority = CandidateBackupAuthority(
         semantic,
         static,

@@ -165,7 +165,7 @@ class CandidateBackupCheckpoint:
 
     def block(self, *, completed_at: datetime) -> CandidateBackupCheckpoint:
         self.validate()
-        if self.phase != "planned":
+        if self.phase not in {"planned", "uncertain"}:
             _invalid()
         when = _timestamp(completed_at)
         if when < self.planned_at:
@@ -267,7 +267,7 @@ class CandidateBackupCheckpoint:
             self.target, self.repository_id, self.candidate_sha
         )
         expected_name = f"SyncApp candidate {self.candidate_sha[:12]} {expected_id}"
-        phase_started = self.phase in {"mutation_started", "uncertain", "completed"}
+        phase_requires_start = self.phase in {"mutation_started", "uncertain", "completed"}
         terminal = self.phase in {"completed", "blocked"}
         if (
             _COMMIT.fullmatch(self.candidate_sha) is None
@@ -297,7 +297,8 @@ class CandidateBackupCheckpoint:
             or self.deployment_id != expected_id
             or self.request_name != expected_name
             or self.phase not in _PHASES
-            or phase_started != (self.started_at is not None)
+            or (phase_requires_start and self.started_at is None)
+            or (self.phase == "planned" and self.started_at is not None)
             or terminal != (self.completed_at is not None)
             or (self.phase == "completed") != (self.backup_slug is not None)
             or (self.backup_slug is not None and _BACKUP_SLUG.fullmatch(self.backup_slug) is None)

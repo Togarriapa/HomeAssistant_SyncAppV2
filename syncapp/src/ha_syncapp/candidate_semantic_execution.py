@@ -254,7 +254,10 @@ def load_candidate_semantic_checkpoint(
             or result.risk_sha256 != risk.record_sha256
             or result.static_sha256 != static.record_sha256
             or (result.phase == "planned" and result.orchestration_sha256 != current.record_sha256)
-            or (result.phase == "completed" and current.phase != "semantically_validated")
+            or (
+                result.phase == "completed"
+                and current.phase not in {"semantically_validated", "completed", "blocked"}
+            )
             or (result.phase == "blocked" and current.phase != "blocked")
         ):
             _invalid()
