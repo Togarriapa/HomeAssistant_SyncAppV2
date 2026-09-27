@@ -29,7 +29,8 @@ freshly:
 6. verifies every affected live path against its trusted baseline.
 
 Only the resulting immutable intent and successful work completion are committed,
-in one StateStore transaction. The live Apply writer is not called.
+with one `candidate_apply_execute` successor in the same StateStore transaction.
+The live Apply writer is not called during admission.
 
 ## Recovery and failure policy
 

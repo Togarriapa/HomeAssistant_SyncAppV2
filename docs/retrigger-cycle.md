@@ -19,8 +19,10 @@ One cycle runs, in deterministic order:
 13. under the same condition, one bounded candidate backup/reconciliation pass;
 14. if every earlier candidate lane performed no action, one bounded candidate Apply
     admission pass;
-15. trusted candidate detection;
-16. optional fresh Supervisor log collection.
+15. if admission performed no action, one bounded admitted candidate Apply execution
+    or reconciliation pass;
+16. trusted candidate detection;
+17. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -47,6 +49,14 @@ preconditions. Only then does it atomically persist the immutable live Apply int
 and complete the work item. Deterministic drift is blocked; transport and bounded
 retryable HTTP failures remain retryable. This pass never invokes the live Apply
 writer and never mutates Home Assistant configuration.
+
+The following execution pass accepts only the atomically created
+`candidate_apply_execute` successor. It freshly re-proves backup, repository, Apply,
+Stage and plan authority, then delegates exactly once to the recovery-aware Apply
+controller. A cycle can perform at most one live operation or one read-only
+reconciliation. Partial success is deferred as normal pending work; deterministic
+blocks are not retried unchanged. Completion persists activation authority before
+any restart successor is enqueued. The lane never calls a restart API itself.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 

@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import retrigger_cycle
-from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
 from ha_syncapp.candidate_apply_execution_retrigger import (
     CandidateApplyExecutionRetriggerResult,
 )
+from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
 from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult

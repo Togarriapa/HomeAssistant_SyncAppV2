@@ -27,6 +27,7 @@ from .live_apply_controller import (
 )
 from .live_apply_plan import LiveApplyPlan, LiveApplyPlanError, build_live_apply_plan
 from .live_apply_preconditions import LiveApplyPreconditionEvidence
+from .live_apply_progress_store import discover_live_apply_recovery
 from .live_apply_recovery_preconditions import (
     LiveApplyRecoveryPreconditionError,
     recover_live_apply_precondition_evidence,
@@ -135,14 +136,18 @@ def execute_candidate_apply_once(
         if preconditions.root != str(home_assistant_root):
             _reject(False)
 
-        result = advance_live_apply_once(
-            store,
-            authorization,
-            stage_evidence,
-            authority.stage,
-            plan,
-            preconditions,
-        )
+        try:
+            result = advance_live_apply_once(
+                store,
+                authorization,
+                stage_evidence,
+                authority.stage,
+                plan,
+                preconditions,
+            )
+        except LiveApplyControllerError:
+            decision = discover_live_apply_recovery(store, plan)
+            _reject(decision.action == "reconcile_uncertain")
         return _finish(
             store,
             item,
@@ -160,10 +165,6 @@ def execute_candidate_apply_once(
         _reject(error.transient)
     except PreApplyFreshnessError as error:
         _reject(error.transient)
-    except LiveApplyControllerError:
-        # A journaled uncertain mutation is safe to retry: recovery selects read-only
-        # reconciliation instead of replaying the filesystem mutation.
-        _reject(True)
     except (
         ApplyAuthorizationError,
         StagePrewriteReproofError,

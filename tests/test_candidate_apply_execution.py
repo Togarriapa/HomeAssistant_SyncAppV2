@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from ha_syncapp.candidate_apply_execution import CandidateApplyExecutionError
-from ha_syncapp.candidate_apply_execution import execute_candidate_apply_once
+from ha_syncapp.candidate_apply_execution import (
+    CandidateApplyExecutionError,
+    execute_candidate_apply_once,
+)
 from ha_syncapp.live_apply_controller import (
     LiveApplyControllerError,
     LiveApplyControllerResult,
