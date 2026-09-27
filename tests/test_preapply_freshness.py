@@ -119,6 +119,34 @@ def test_repository_verification_failure_is_sanitized():
     assert caught.value.__suppress_context__ is True
 
 
+def test_repository_transport_classification_is_preserved():
+    prepared = _prepared()
+
+    def fetcher(*_args, **_kwargs):
+        raise RepositoryVerificationError("offline", transient=True)
+
+    with pytest.raises(PreApplyFreshnessError) as caught:
+        reprove_preapply_repo_heads(
+            prepared, prepared.evidence, token="secret-token", head_fetcher=fetcher
+        )
+
+    assert caught.value.transient
+
+
+def test_stale_repository_head_is_deterministic():
+    prepared = _prepared()
+
+    def fetcher(target, token, *, expected_id, branch="main"):
+        return BranchHead(target, expected_id, branch, "f" * 40)
+
+    with pytest.raises(PreApplyFreshnessError) as caught:
+        reprove_preapply_repo_heads(
+            prepared, prepared.evidence, token="secret-token", head_fetcher=fetcher
+        )
+
+    assert not caught.value.transient
+
+
 def test_prepared_evidence_drift_during_github_io_is_rejected():
     prepared = _prepared()
     original = prepared.evidence

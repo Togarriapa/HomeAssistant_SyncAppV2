@@ -147,7 +147,9 @@ def test_supervisor_reproof_failure_remains_retryable(tmp_path, monkeypatch) -> 
     )
     monkeypatch.setattr(
         "ha_syncapp.candidate_apply_admission.reprove_prepared_candidate_backup",
-        lambda *args, **kwargs: (_ for _ in ()).throw(CandidateBackupError("unavailable")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            CandidateBackupError("unavailable", transient=True)
+        ),
     )
     try:
         with pytest.raises(CandidateApplyAdmissionError) as caught:
@@ -161,6 +163,33 @@ def test_supervisor_reproof_failure_remains_retryable(tmp_path, monkeypatch) -> 
             )
 
         assert caught.value.transient
+        assert load_live_apply_intent(store, prepared.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_deterministic_supervisor_evidence_failure_is_not_retried(tmp_path, monkeypatch) -> None:
+    store, prepared, authority, claimed = _prepared_apply(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ha_syncapp.candidate_apply_admission.load_candidate_backup_authority",
+        lambda *args, **kwargs: authority,
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.candidate_apply_admission.reprove_prepared_candidate_backup",
+        lambda *args, **kwargs: (_ for _ in ()).throw(CandidateBackupError("invalid")),
+    )
+    try:
+        with pytest.raises(CandidateApplyAdmissionError) as caught:
+            execute_candidate_apply_admission_once(
+                store,
+                claimed,
+                staging_root=tmp_path,
+                home_assistant_root=tmp_path,
+                github_token="github-token",
+                supervisor_token="supervisor-token",
+            )
+
+        assert not caught.value.transient
         assert load_live_apply_intent(store, prepared.deployment_id) is None
     finally:
         store.__exit__(None, None, None)
