@@ -19,7 +19,7 @@ def test_current_schema_contains_core_health_window_table(tmp_path: Path) -> Non
             "completed_at",
             "record_sha256",
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 30
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 31
 
 
 def test_schema_v13_migrates_window_without_losing_work(tmp_path: Path) -> None:
@@ -35,4 +35,4 @@ def test_schema_v13_migrates_window_without_losing_work(tmp_path: Path) -> None:
         assert item is not None
         assert item.work_key == "preserve-me"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 30
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 31
