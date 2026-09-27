@@ -17,8 +17,10 @@ One cycle runs, in deterministic order:
 11. under the same condition, one bounded static-validation pass;
 12. under the same condition, one bounded semantic-validation pass;
 13. under the same condition, one bounded candidate backup/reconciliation pass;
-14. trusted candidate detection;
-15. optional fresh Supervisor log collection.
+14. if every earlier candidate lane performed no action, one bounded candidate Apply
+    admission pass;
+15. trusted candidate detection;
+16. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -35,6 +37,16 @@ ordering enforces at most one candidate action per cycle. The backup pass accept
 only exact `semantically_validated/prepare_backup` authority. It journals before
 mutation, reconciles interrupted/uncertain requests by exact persisted request
 identity, never creates a blind replacement backup, and cannot authorize Apply.
+
+The candidate Apply admission pass accepts only one eligible `candidate_apply` work
+item produced atomically with the completed prepared deployment. It recovers stale
+running admission work, applies the work ledger's bounded retry/backoff rules, and
+re-proves the exact Supervisor backup, Repo B `main` and `candidate` heads, Apply
+authorization, isolated Stage, canonical Apply plan and affected live-path
+preconditions. Only then does it atomically persist the immutable live Apply intent
+and complete the work item. Deterministic drift is blocked; transport and bounded
+retryable HTTP failures remain retryable. This pass never invokes the live Apply
+writer and never mutates Home Assistant configuration.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 

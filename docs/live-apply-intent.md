@@ -19,6 +19,13 @@ Persisting an intent is **not** permission to write `/homeassistant`. A durable 
 
 The persistence adapter re-derives `LiveApplyIntent` from those objects immediately before opening the StateStore transaction. It then re-reads the prepared deployment and repository pin from protected state inside the transaction and requires exact target, repository ID, baseline SHA, candidate SHA, Stage manifest SHA-256 and backup slug bindings.
 
+The recovery admission adapter `record_candidate_apply_admission()` adds one more
+transactional invariant: the caller must hold the exact running `candidate_apply`
+work item whose key is the deployment ID. The intent insert (or exact idempotent
+replay) and work completion commit in the same transaction. A crash therefore cannot
+publish an admitted intent while leaving the same work eligible for an unrecognized
+duplicate admission, or mark the work successful without the immutable intent.
+
 ## Durable record
 
 Schema v8 stores only recovery metadata:
@@ -47,12 +54,23 @@ The first valid record for a deployment/candidate identity is immutable. Repeati
 
 Discovery does not reconstruct or grant Apply authorization. A later retrigger-aware deployment worker must obtain fresh upstream evidence again, including current repository/Stage/live-path proofs, before any mutation can occur. The persisted record exists only to identify what interrupted work must be reconsidered.
 
+Candidate backup completion now enqueues the exact deployment-bound
+`candidate_apply` work item in the same transaction that persists backup evidence and
+the prepared deployment. The bounded Retrigger admission lane claims at most one such
+item, re-proves every boundary listed above, and records the intent without invoking
+the live writer. Transient proof failures use the durable ledger backoff; deterministic
+identity, evidence or precondition failures are blocked until the candidate changes
+or an explicit administrative retry is requested.
+
 ## Fail-closed read semantics
 
 A loaded record is rejected if its canonical integrity hash fails, its fields are malformed, its repository pin no longer matches, or its associated prepared deployment no longer matches the target/repository/baseline/candidate/Stage/backup identity. Diagnostics are intentionally sanitized and do not echo persisted path or secret-like values.
 
 ## Explicit non-authority
 
-Task #283 performs no live file write, delete, rename, chmod or directory creation; no Supervisor mutation; no Home Assistant reload/restart; no backup restore; no Git promotion; no observation acceptance; and no rollback action.
+Task #283 and the task #353 admission extension perform no live file write, delete,
+rename, chmod or directory creation; no Supervisor mutation; no Home Assistant
+reload/restart; no backup restore; no Git promotion; no observation acceptance; and
+no rollback action.
 
 The eventual writer must consume the durable intent together with fresh producer-issued evidence, re-check every path immediately before mutation, preserve the backup/rollback relationship, and durably record progress so an interrupted Apply is never blindly restarted.

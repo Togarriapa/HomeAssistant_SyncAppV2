@@ -101,6 +101,41 @@ def test_collects_aggregate_status_attempt_and_backoff_without_work_keys(tmp_pat
         assert secret not in encoded
 
 
+def test_candidate_apply_recovery_is_visible_without_deployment_identity(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        deployment_id = "deployment-secret-identity"
+        item = store.enqueue_work("candidate_apply", deployment_id, now=NOW)
+        claimed = store.claim_work_kind(item.work_kind, now=NOW)
+        assert claimed is not None
+        store.fail_work(claimed, transient=True, now=NOW)
+
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    recovery = inventory.analysis["recovery"]
+    kinds = {item["kind"]: item for item in recovery["kinds"]}
+    assert kinds["candidate_apply"] == {
+        "kind": "candidate_apply",
+        "total": 1,
+        "statuses": {
+            "blocked": 0,
+            "pending": 0,
+            "retry": 1,
+            "running": 0,
+            "succeeded": 0,
+        },
+        "attempts": {"maximum": 1, "total": 1},
+        "ready": 0,
+        "backoff": {
+            "scheduled": 1,
+            "next_attempt_at": "2026-09-13T01:01:00+00:00",
+        },
+    }
+    assert deployment_id not in json.dumps(recovery, sort_keys=True)
+
+
 def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:
