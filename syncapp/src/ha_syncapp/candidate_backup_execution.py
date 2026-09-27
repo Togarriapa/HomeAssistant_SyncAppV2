@@ -327,6 +327,22 @@ def _load_authority(
     )
 
 
+def load_candidate_backup_authority(
+    store: StateStore,
+    current: CandidateOrchestration,
+    *,
+    staging_root: Path,
+    home_assistant_root: Path,
+) -> CandidateBackupAuthority:
+    """Reconstruct the exact validated authority used by backup and Apply gates."""
+    return _load_authority(
+        store,
+        current,
+        staging_root=staging_root,
+        home_assistant_root=home_assistant_root,
+    )
+
+
 def _record_plan(
     store: StateStore,
     current: CandidateOrchestration,

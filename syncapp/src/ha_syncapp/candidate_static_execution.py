@@ -200,7 +200,8 @@ def load_candidate_static_checkpoint(
             or (result.phase == "planned" and result.orchestration_sha256 != current.record_sha256)
             or (
                 result.phase == "completed"
-                and current.phase not in {"static_validated", "semantically_validated", "blocked"}
+                and current.phase
+                not in {"static_validated", "semantically_validated", "completed", "blocked"}
             )
         ):
             _invalid()

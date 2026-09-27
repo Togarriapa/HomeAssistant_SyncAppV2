@@ -9,6 +9,10 @@ from ha_syncapp.candidate_apply_admission import (
 )
 from ha_syncapp.candidate_backup import CandidateBackupError
 from ha_syncapp.candidate_backup_execution import execute_candidate_backup_once
+from ha_syncapp.candidate_dependency_execution import load_candidate_dependency_checkpoint
+from ha_syncapp.candidate_integrity_execution import load_candidate_integrity_checkpoint
+from ha_syncapp.candidate_risk_execution import load_candidate_risk_checkpoint
+from ha_syncapp.candidate_static_execution import load_candidate_static_checkpoint
 from ha_syncapp.live_apply_intent_store import load_live_apply_intent
 from ha_syncapp.live_apply_preconditions import LiveApplyPreconditionError
 from test_candidate_backup_execution import NOW, _backup_ready, _evidence
@@ -31,9 +35,7 @@ def _prepared_apply(tmp_path, monkeypatch):
     return store, result.prepared, authority, claimed
 
 
-def test_exact_preapply_chain_is_reproved_before_atomic_admission(
-    tmp_path, monkeypatch
-) -> None:
+def test_exact_preapply_chain_is_reproved_before_atomic_admission(tmp_path, monkeypatch) -> None:
     store, prepared, authority, claimed = _prepared_apply(tmp_path, monkeypatch)
     chain = _chain(tmp_path, prepared, monkeypatch)
     calls: list[str] = []
@@ -160,5 +162,22 @@ def test_supervisor_reproof_failure_remains_retryable(tmp_path, monkeypatch) -> 
 
         assert caught.value.transient
         assert load_live_apply_intent(store, prepared.deployment_id) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_completed_candidate_keeps_upstream_authority_loadable(tmp_path, monkeypatch) -> None:
+    store, prepared, _authority, _claimed = _prepared_apply(tmp_path, monkeypatch)
+    candidate_sha = prepared.evidence.candidate_sha
+    try:
+        integrity = load_candidate_integrity_checkpoint(store, candidate_sha)
+        dependency = load_candidate_dependency_checkpoint(store, candidate_sha)
+        risk = load_candidate_risk_checkpoint(store, candidate_sha)
+        static = load_candidate_static_checkpoint(store, candidate_sha)
+
+        assert integrity is not None and integrity.phase == "completed"
+        assert dependency is not None and dependency.phase == "completed"
+        assert risk is not None and risk.phase == "completed"
+        assert static is not None and static.phase == "completed"
     finally:
         store.__exit__(None, None, None)

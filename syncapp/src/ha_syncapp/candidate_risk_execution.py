@@ -144,7 +144,13 @@ def load_candidate_risk_checkpoint(
             or (
                 result.phase == "completed"
                 and current.phase
-                not in {"risk_classified", "static_validated", "semantically_validated", "blocked"}
+                not in {
+                    "risk_classified",
+                    "static_validated",
+                    "semantically_validated",
+                    "completed",
+                    "blocked",
+                }
             )
         ):
             _invalid()
