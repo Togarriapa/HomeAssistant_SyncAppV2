@@ -204,6 +204,9 @@ def test_uncertain_creation_reconciles_unique_fresh_named_backup_without_post(
                             "slug": "abc123",
                             "name": request_name,
                             "date": (started_at + timedelta(seconds=1)).isoformat(),
+                            "type": "full",
+                            "protected": False,
+                            "compressed": True,
                         }
                     ]
                 }
