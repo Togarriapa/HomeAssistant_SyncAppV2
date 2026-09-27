@@ -29,7 +29,7 @@ def test_schema_28_adds_integrity_checkpoint_and_successor_authority(tmp_path: P
         ).fetchone()
 
     assert SCHEMA_VERSION == 33
-    assert version == (32,)
+    assert version == (33,)
     assert table is not None
     assert "candidate_fetch_stage_checkpoint" in table[0]
     assert orchestration is not None
