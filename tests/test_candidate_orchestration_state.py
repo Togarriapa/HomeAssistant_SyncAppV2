@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_orchestration() -> None:
-    assert SCHEMA_VERSION == 32
+    assert SCHEMA_VERSION == 33
 
 
 def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
@@ -142,6 +142,44 @@ def test_fresh_state_has_candidate_semantic_checkpoint_table(tmp_path: Path) -> 
         }.issubset(columns)
 
 
+def test_fresh_state_has_candidate_backup_checkpoint_table(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        columns = {
+            str(row[1])
+            for row in store._connection.execute(
+                "PRAGMA table_info(candidate_backup_checkpoint)"
+            ).fetchall()
+        }
+        assert columns == {
+            "candidate_sha",
+            "schema_version",
+            "orchestration_sha256",
+            "fetch_stage_sha256",
+            "integrity_sha256",
+            "dependency_sha256",
+            "risk_sha256",
+            "static_sha256",
+            "semantic_sha256",
+            "target",
+            "repository_id",
+            "baseline_sha",
+            "stage_manifest_sha256",
+            "runtime_sha256",
+            "risk_level",
+            "core_version",
+            "deployment_id",
+            "request_name",
+            "phase",
+            "backup_slug",
+            "planned_at",
+            "started_at",
+            "completed_at",
+            "record_sha256",
+        }
+
+
 def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path: Path) -> None:
     root = tmp_path / "data"
     root.mkdir()
@@ -150,7 +188,7 @@ def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path:
         store._connection.execute("PRAGMA user_version = 25")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (33,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"
@@ -166,7 +204,7 @@ def test_schema_28_migrates_transactionally_to_dependency_checkpoint(tmp_path: P
         store._connection.execute("PRAGMA user_version = 28")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (33,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_dependency_checkpoint'"
@@ -182,9 +220,25 @@ def test_schema_31_migrates_transactionally_to_semantic_authority(tmp_path: Path
         store._connection.execute("PRAGMA user_version = 31")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (33,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_semantic_checkpoint'"
         ).fetchone()
         assert table == ("candidate_semantic_checkpoint",)
+
+
+def test_schema_32_migrates_transactionally_to_backup_checkpoint(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        store._connection.execute("DROP TABLE candidate_backup_checkpoint")
+        store._connection.execute("PRAGMA user_version = 32")
+
+    with StateStore(root) as migrated:
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (33,)
+        table = migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'candidate_backup_checkpoint'"
+        ).fetchone()
+        assert table == ("candidate_backup_checkpoint",)
