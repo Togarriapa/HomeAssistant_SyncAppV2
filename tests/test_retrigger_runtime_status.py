@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp.candidate_backup_execution import CandidateBackupRuntimeEvidence
 from ha_syncapp.candidate_dependency_execution import CandidateDependencyRuntimeEvidence
 from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
 from ha_syncapp.candidate_integrity_execution import CandidateIntegrityRuntimeEvidence
@@ -17,6 +18,7 @@ from ha_syncapp.retrigger_runtime_status import (
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
     render_candidate_dependency_runtime_status,
+    render_candidate_backup_runtime_status,
     render_candidate_fetch_stage_runtime_status,
     render_candidate_integrity_runtime_status,
     render_candidate_risk_runtime_status,
@@ -184,6 +186,19 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "outcomes": {"blocked": 0, "succeeded": 0},
             "latest_updated_at": None,
         },
+        "candidate_backup": {
+            "total": 0,
+            "phases": {
+                "blocked": 0,
+                "completed": 0,
+                "mutation_started": 0,
+                "planned": 0,
+                "uncertain": 0,
+            },
+            "outcomes": {"blocked": 0, "succeeded": 0},
+            "mutation_started": 0,
+            "latest_updated_at": None,
+        },
     }
 
 
@@ -310,6 +325,33 @@ def test_candidate_semantic_status_exposes_only_sanitized_aggregate_state() -> N
     encoded = json.dumps(status, sort_keys=True)
     assert "candidate_sha" not in encoded
     assert "repository" not in encoded
+
+
+def test_candidate_backup_status_exposes_only_sanitized_aggregate_state() -> None:
+    evidence = (
+        CandidateBackupRuntimeEvidence(
+            "completed", True, True, NOW - timedelta(minutes=3),
+            NOW - timedelta(minutes=2), NOW - timedelta(minutes=1)
+        ),
+        CandidateBackupRuntimeEvidence(
+            "uncertain", True, None, NOW - timedelta(minutes=2),
+            NOW - timedelta(minutes=1), None
+        ),
+        CandidateBackupRuntimeEvidence("planned", False, None, NOW, None, None),
+    )
+    status = render_candidate_backup_runtime_status(evidence, reference_time=NOW)
+    assert status["phases"] == {
+        "blocked": 0,
+        "completed": 1,
+        "mutation_started": 0,
+        "planned": 1,
+        "uncertain": 1,
+    }
+    assert status["outcomes"] == {"blocked": 0, "succeeded": 1}
+    assert status["mutation_started"] == 2
+    encoded = json.dumps(status, sort_keys=True)
+    assert "candidate_sha" not in encoded
+    assert "backup_slug" not in encoded
 
 
 def test_rollback_runtime_status_exposes_only_bounded_aggregate_state() -> None:
