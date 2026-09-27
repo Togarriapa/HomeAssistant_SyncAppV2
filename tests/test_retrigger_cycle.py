@@ -3,6 +3,9 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import retrigger_cycle
+from ha_syncapp.candidate_apply_execution_retrigger import (
+    CandidateApplyExecutionRetriggerResult,
+)
 from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
 from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
@@ -183,6 +186,40 @@ def test_cycle_runs_apply_only_when_every_earlier_candidate_lane_is_idle(
 
     assert calls == ["candidate_apply"]
     assert result.candidate_apply.processed == "admitted"
+    assert result.candidate_apply_execution.processed is None
+
+
+def test_cycle_advances_apply_execution_only_after_admission_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def execute(*args: object, **kwargs: object) -> CandidateApplyExecutionRetriggerResult:
+        calls.append("candidate_apply_execution")
+        assert kwargs["github_token"] == "github-token"
+        assert kwargs["supervisor_token"] is None
+        return CandidateApplyExecutionRetriggerResult(0, 1, "operation_verified")
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_apply_execution_retrigger_pass",
+        execute,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_apply_execution"]
+    assert result.candidate_apply.processed is None
+    assert result.candidate_apply_execution.processed == "operation_verified"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

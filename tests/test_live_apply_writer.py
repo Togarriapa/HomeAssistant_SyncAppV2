@@ -20,6 +20,10 @@ from ha_syncapp.live_apply_preconditions import (
 )
 from ha_syncapp.live_apply_progress_store import discover_live_apply_progress
 from ha_syncapp.live_apply_reconciliation import reconcile_live_apply_operation
+from ha_syncapp.live_apply_recovery_preconditions import (
+    LiveApplyRecoveryPreconditionError,
+    recover_live_apply_precondition_evidence,
+)
 from ha_syncapp.live_apply_writer import LiveApplyWriterError, apply_live_operation
 from ha_syncapp.prepared_deployment import PreparedDeployment
 from ha_syncapp.stage_prewrite_reproof import StagePrewriteEvidence
@@ -218,6 +222,48 @@ def test_exact_retry_after_verified_is_idempotent(tmp_path: Path, monkeypatch) -
         assert (live / "automations.yaml").read_bytes() == b"candidate\n"
         progress = discover_live_apply_progress(store, plan.deployment_id)
         assert [item.phase for item in progress] == ["mutation_verified"]
+    finally:
+        _close(store)
+
+
+def test_completed_apply_recovers_chain_without_rechecking_old_baseline(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
+    try:
+        advance_live_apply_once(store, authorization, stage_evidence, stage, plan, preconditions)
+
+        recovered = recover_live_apply_precondition_evidence(
+            store, authorization, stage_evidence, plan
+        )
+        result = advance_live_apply_once(
+            store, authorization, stage_evidence, stage, plan, recovered
+        )
+
+        assert recovered.root == preconditions.root
+        assert recovered.verified_paths == ("automations.yaml",)
+        assert result.action == "complete"
+        assert result.replayed is True
+    finally:
+        _close(store)
+
+
+def test_recovery_preconditions_reject_rebound_backup_authority(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store, authorization, stage_evidence, _stage, plan, _preconditions = _chain(
+        tmp_path, monkeypatch
+    )
+    rebound = object.__new__(ApplyAuthorization)
+    for name in authorization.__slots__:
+        object.__setattr__(rebound, name, getattr(authorization, name))
+    object.__setattr__(rebound, "backup_slug", "different_backup")
+    try:
+        with pytest.raises(
+            LiveApplyRecoveryPreconditionError,
+            match="recovery authority does not match durable intent",
+        ):
+            recover_live_apply_precondition_evidence(store, rebound, stage_evidence, plan)
     finally:
         _close(store)
 

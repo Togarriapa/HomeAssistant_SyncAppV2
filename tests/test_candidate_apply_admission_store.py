@@ -28,6 +28,12 @@ def test_apply_intent_and_work_success_are_committed_atomically(tmp_path, monkey
         completed = store._get_work("candidate_apply", prepared.deployment_id)
         assert completed.status == "succeeded"
         assert completed.next_attempt_at is None
+        successor = store._get_work("candidate_apply_execute", prepared.deployment_id)
+        assert successor.status == "pending"
+        assert successor.attempts == 0
+        assert successor.created_at == NOW
+        assert successor.updated_at == NOW
+        assert successor.next_attempt_at == NOW
 
 
 def test_admission_rejects_unclaimed_or_rebound_work_without_persisting(
@@ -80,3 +86,31 @@ def test_work_transition_failure_rolls_back_new_apply_intent(tmp_path, monkeypat
 
         assert load_live_apply_intent(store, prepared.deployment_id) is None
         assert store._get_work("candidate_apply", prepared.deployment_id).status == "running"
+        with pytest.raises(StateError, match="missing"):
+            store._get_work("candidate_apply_execute", prepared.deployment_id)
+
+
+def test_conflicting_apply_execution_successor_rolls_back_admission(tmp_path, monkeypatch) -> None:
+    prepared = _prepared()
+    chain = _chain(tmp_path, prepared, monkeypatch)
+    with StateStore(tmp_path) as store:
+        _prepare_store(store, prepared)
+        store.enqueue_work("candidate_apply", prepared.deployment_id, now=NOW)
+        claimed = store.claim_work_kind("candidate_apply", now=NOW)
+        assert claimed is not None
+        conflicting = store.enqueue_work(
+            "candidate_apply_execute",
+            prepared.deployment_id,
+            now=NOW,
+        )
+        conflicting = store.claim_work_kind(conflicting.work_kind, now=NOW)
+        assert conflicting is not None
+        store.fail_work(conflicting, transient=False, now=NOW)
+
+        with pytest.raises(StateError, match="Unable to persist candidate Apply admission"):
+            record_candidate_apply_admission(store, claimed, *chain, recorded_at=NOW)
+
+        assert load_live_apply_intent(store, prepared.deployment_id) is None
+        assert store._get_work("candidate_apply", prepared.deployment_id).status == "running"
+        successor = store._get_work("candidate_apply_execute", prepared.deployment_id)
+        assert successor.status == "blocked"

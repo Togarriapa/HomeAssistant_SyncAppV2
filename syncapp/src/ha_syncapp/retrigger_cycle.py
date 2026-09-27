@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ha_syncapp.candidate_apply_execution_retrigger import (
+    CandidateApplyExecutionRetriggerError,
+    CandidateApplyExecutionRetriggerResult,
+    run_candidate_apply_execution_retrigger_pass,
+)
 from ha_syncapp.candidate_apply_retrigger import (
     CandidateApplyRetriggerError,
     CandidateApplyRetriggerResult,
@@ -118,6 +123,7 @@ class RetriggerCycleResult:
     candidate_semantic: CandidateSemanticRetriggerResult
     candidate_backup: CandidateBackupRetriggerResult
     candidate_apply: CandidateApplyRetriggerResult
+    candidate_apply_execution: CandidateApplyExecutionRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -339,6 +345,27 @@ def run_retrigger_cycle(
         else:
             candidate_apply = CandidateApplyRetriggerResult(0, 0, None)
 
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+            and candidate_risk.processed is None
+            and candidate_static.processed is None
+            and candidate_semantic.processed is None
+            and candidate_backup.processed is None
+            and candidate_apply.processed is None
+        ):
+            candidate_apply_execution = run_candidate_apply_execution_retrigger_pass(
+                store,
+                staging_root=snapshot_staging_root / "candidate-stage",
+                home_assistant_root=home_assistant_root,
+                github_token=github_token,
+                supervisor_token=None,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_apply_execution = CandidateApplyExecutionRetriggerResult(0, 0, None)
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -374,6 +401,7 @@ def run_retrigger_cycle(
         CandidateSemanticRetriggerError,
         CandidateBackupRetriggerError,
         CandidateApplyRetriggerError,
+        CandidateApplyExecutionRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -393,6 +421,7 @@ def run_retrigger_cycle(
         candidate_semantic=candidate_semantic,
         candidate_backup=candidate_backup,
         candidate_apply=candidate_apply,
+        candidate_apply_execution=candidate_apply_execution,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

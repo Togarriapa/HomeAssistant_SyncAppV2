@@ -30,6 +30,8 @@ The recovery file exposes:
 - the same aggregates per validated work kind, in deterministic order.
 - `candidate_apply` admission work as those same content-free lifecycle, attempt,
   readiness and backoff aggregates; deployment IDs and candidate SHAs remain omitted.
+- `candidate_apply_execute` live Apply progress as the same content-free work
+  aggregates, without deployment IDs, paths, operation indexes or commit identities.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
@@ -44,6 +46,11 @@ freshly re-proven and an immutable live Apply intent was durably recorded. It do
 mean that a live file operation, reload, restart, observation, promotion or rollback
 was performed. Retry and blocked counts preserve the distinction between transient
 proof failures and deterministic rejection without publishing nested error text.
+
+A successful `candidate_apply_execute` item means that the exact ordered Apply plan
+reached durable completion and, for a non-empty plan, activation authority was
+persisted before restart work was scheduled. It does not mean restart, observation,
+promotion, or rollback has occurred.
 
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
