@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+from ha_syncapp.candidate_apply_execution import CandidateApplyExecutionError
 from ha_syncapp.candidate_apply_execution import execute_candidate_apply_once
-from ha_syncapp.live_apply_controller import LiveApplyControllerResult
+from ha_syncapp.live_apply_controller import (
+    LiveApplyControllerError,
+    LiveApplyControllerResult,
+)
 from ha_syncapp.live_apply_intent_store import record_candidate_apply_admission
+from ha_syncapp.live_apply_progress_store import LiveApplyRecoveryDecision
 from ha_syncapp.post_apply_activation import PostApplyActivationResult
 from test_candidate_apply_admission import _prepared_apply
 from test_candidate_backup_execution import NOW
@@ -120,5 +126,38 @@ def test_complete_apply_authorizes_restart_before_finishing_work(
         assert store._get_work("candidate_apply_execute", prepared.deployment_id).status == (
             "succeeded"
         )
+    finally:
+        store.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("recovery_action", "transient"),
+    [("reconcile_uncertain", True), ("start_next", False), ("blocked", False)],
+)
+def test_controller_failure_uses_durable_recovery_state_for_retry_policy(
+    tmp_path, monkeypatch, recovery_action, transient
+) -> None:
+    store, _prepared, _authority, claimed, _chain_value = _admitted(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ha_syncapp.candidate_apply_execution.advance_live_apply_once",
+        lambda *args: (_ for _ in ()).throw(LiveApplyControllerError("sanitized")),
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.candidate_apply_execution.discover_live_apply_recovery",
+        lambda *args: LiveApplyRecoveryDecision(recovery_action, 0, "a" * 64),
+    )
+    try:
+        with pytest.raises(CandidateApplyExecutionError) as caught:
+            execute_candidate_apply_once(
+                store,
+                claimed,
+                staging_root=tmp_path,
+                home_assistant_root=tmp_path / "homeassistant",
+                github_token="github-token",
+                supervisor_token="supervisor-token",
+                now=NOW + timedelta(seconds=9),
+            )
+
+        assert caught.value.transient is transient
     finally:
         store.__exit__(None, None, None)
