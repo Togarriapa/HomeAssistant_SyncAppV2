@@ -133,8 +133,10 @@ def execute_candidate_apply_admission_once(
         raise
     except CandidateBackupExecutionError as error:
         _reject(error.transient)
-    except (CandidateBackupError, PreApplyFreshnessError):
-        _reject(True)
+    except CandidateBackupError as error:
+        _reject(error.transient)
+    except PreApplyFreshnessError as error:
+        _reject(error.transient)
     except (
         ApplyAuthorizationError,
         StagePrewriteReproofError,

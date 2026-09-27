@@ -38,6 +38,10 @@ _BACKUP_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 class CandidateBackupError(RuntimeError):
     """A recoverable candidate-bound backup could not be established safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateBackupEvidence:
@@ -329,10 +333,16 @@ def _request_json(
         headers["Content-Type"] = "application/json"
     try:
         response = transport(method, url, headers, body, timeout_seconds, max_response_bytes)
+    except CandidateBackupError:
+        raise
     except Exception:
-        raise CandidateBackupError("Supervisor backup request failed") from None
+        raise CandidateBackupError("Supervisor backup request failed", transient=True) from None
     if type(response) is not SupervisorBackupResponse or response.status != 200:
-        raise CandidateBackupError("Supervisor backup request failed")
+        status = response.status if type(response) is SupervisorBackupResponse else None
+        raise CandidateBackupError(
+            "Supervisor backup request failed",
+            transient=status in {408, 429} or (type(status) is int and status >= 500),
+        )
     if _media_type(response.content_type) != "application/json":
         raise CandidateBackupError("Supervisor backup response is not JSON")
     if len(response.body) > max_response_bytes:
@@ -447,7 +457,7 @@ def _default_transport(
     except CandidateBackupError:
         raise
     except (http.client.HTTPException, TimeoutError, OSError, ValueError):
-        raise CandidateBackupError("Supervisor backup request failed") from None
+        raise CandidateBackupError("Supervisor backup request failed", transient=True) from None
     finally:
         connection.close()
     return SupervisorBackupResponse(status=status, content_type=content_type, body=response_body)
