@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from types import SimpleNamespace
 
+import ha_syncapp.candidate_semantic_checkpoint as checkpoint_module
 import ha_syncapp.candidate_semantic_execution as execution
 import pytest
 from ha_syncapp.candidate_fetch_stage_execution import load_candidate_fetch_stage_checkpoint
@@ -22,14 +23,14 @@ def _semantic_ready(tmp_path, monkeypatch):
         home_assistant_root=tmp_path,
         now=NOW + timedelta(seconds=3),
     )
+    semantic_root = tmp_path / "semantic"
+    semantic_root.mkdir()
     static, integrity, stage, dependencies, impact, risk, runtime, version = candidate_inputs(
-        tmp_path / "semantic", {"configuration.yaml": b"homeassistant:\n"}
+        semantic_root, {"configuration.yaml": b"homeassistant:\n"}
     )
     fetch = load_candidate_fetch_stage_checkpoint(store, orchestration.candidate_sha)
     assert fetch is not None
-    monkeypatch.setattr(
-        execution, "load_completed_candidate_stage", lambda *a, **k: (fetch, stage)
-    )
+    monkeypatch.setattr(execution, "load_completed_candidate_stage", lambda *a, **k: (fetch, stage))
     monkeypatch.setattr(
         execution,
         "load_candidate_integrity_checkpoint",
@@ -63,12 +64,18 @@ def _semantic_ready(tmp_path, monkeypatch):
         lambda *a: SimpleNamespace(record_sha256="4" * 64, validation=lambda: static),
     )
     monkeypatch.setattr(execution, "bind_core_version", lambda value: version)
+    monkeypatch.setattr(
+        execution.semantic_module, "verify_candidate_semantic_validation", lambda *args: None
+    )
+    monkeypatch.setattr(
+        checkpoint_module, "verify_candidate_semantic_validation", lambda *args: None
+    )
     expected = CandidateSemanticValidation(
-        static.target,
-        static.repository_id,
-        static.baseline_sha,
-        static.candidate_sha,
-        static.stage_manifest_sha256,
+        orchestration.target,
+        orchestration.repository_id,
+        integrity.baseline_sha,
+        orchestration.candidate_sha,
+        stage.manifest_sha256,
         static.runtime_sha256,
         static.risk_level,
         version.version,

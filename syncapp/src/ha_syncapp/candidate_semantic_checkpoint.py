@@ -125,6 +125,16 @@ class CandidateSemanticCheckpoint:
             )
         except CandidateSemanticError:
             _invalid()
+        if (
+            semantic.target != self.target
+            or semantic.repository_id != self.repository_id
+            or semantic.baseline_sha != self.baseline_sha
+            or semantic.candidate_sha != self.candidate_sha
+            or semantic.stage_manifest_sha256 != self.stage_manifest_sha256
+            or semantic.runtime_sha256 != self.runtime_sha256
+            or semantic.core_version != self.core_version
+        ):
+            _invalid()
         result = replace(
             self,
             phase="completed",
