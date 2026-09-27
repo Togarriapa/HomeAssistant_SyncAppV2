@@ -28,7 +28,7 @@ def test_schema_28_adds_integrity_checkpoint_and_successor_authority(tmp_path: P
             "AND name = 'candidate_orchestration'"
         ).fetchone()
 
-    assert SCHEMA_VERSION == 32
+    assert SCHEMA_VERSION == 33
     assert version == (32,)
     assert table is not None
     assert "candidate_fetch_stage_checkpoint" in table[0]
@@ -53,7 +53,7 @@ def test_schema_27_migration_preserves_candidate_work(tmp_path: Path) -> None:
     connection.close()
 
     with StateStore(data) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (33,)
         work = migrated._get_work("candidate", SHA)
 
     assert work.work_key == SHA
