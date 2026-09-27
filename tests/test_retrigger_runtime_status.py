@@ -330,12 +330,15 @@ def test_candidate_semantic_status_exposes_only_sanitized_aggregate_state() -> N
 def test_candidate_backup_status_exposes_only_sanitized_aggregate_state() -> None:
     evidence = (
         CandidateBackupRuntimeEvidence(
-            "completed", True, True, NOW - timedelta(minutes=3),
-            NOW - timedelta(minutes=2), NOW - timedelta(minutes=1)
+            "completed",
+            True,
+            True,
+            NOW - timedelta(minutes=3),
+            NOW - timedelta(minutes=2),
+            NOW - timedelta(minutes=1),
         ),
         CandidateBackupRuntimeEvidence(
-            "uncertain", True, None, NOW - timedelta(minutes=2),
-            NOW - timedelta(minutes=1), None
+            "uncertain", True, None, NOW - timedelta(minutes=2), NOW - timedelta(minutes=1), None
         ),
         CandidateBackupRuntimeEvidence("planned", False, None, NOW, None, None),
     )
