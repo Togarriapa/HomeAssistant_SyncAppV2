@@ -172,6 +172,36 @@ def test_completed_replay_requires_no_credentials_or_transport(tmp_path, monkeyp
         )
         assert replay.replayed
         assert replay.prepared == first.prepared
+        assert store._get_work("candidate_apply", first.prepared.deployment_id).attempts == 0
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_conflicting_apply_work_rolls_back_prepared_success_atomically(
+    tmp_path, monkeypatch
+) -> None:
+    store, orchestration, semantic, _authority = _backup_ready(tmp_path, monkeypatch)
+
+    def conflict(*args, **kwargs):
+        checkpoint = load_candidate_backup_checkpoint(store, orchestration.candidate_sha)
+        assert checkpoint is not None and checkpoint.phase == "mutation_started"
+        store.enqueue_work("candidate_apply", checkpoint.deployment_id, now=NOW)
+        return _evidence(semantic)
+
+    try:
+        with pytest.raises(CandidateBackupExecutionError, match="invalid"):
+            execute_candidate_backup_once(
+                store,
+                orchestration,
+                staging_root=tmp_path,
+                home_assistant_root=tmp_path,
+                creator=conflict,
+                now=NOW + timedelta(seconds=5),
+            )
+        checkpoint = load_candidate_backup_checkpoint(store, orchestration.candidate_sha)
+        assert checkpoint is not None and checkpoint.phase == "mutation_started"
+        assert store.prepared_deployment(checkpoint.deployment_id) is None
+        assert store._get_work("candidate", orchestration.candidate_sha).status == "running"
     finally:
         store.__exit__(None, None, None)
 
