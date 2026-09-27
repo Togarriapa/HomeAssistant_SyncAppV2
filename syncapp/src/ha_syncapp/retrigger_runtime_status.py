@@ -6,6 +6,11 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
+from .candidate_backup_execution import (
+    CandidateBackupExecutionError,
+    CandidateBackupRuntimeEvidence,
+    candidate_backup_runtime_evidence,
+)
 from .candidate_dependency_execution import (
     CandidateDependencyExecutionError,
     CandidateDependencyRuntimeEvidence,
@@ -90,6 +95,7 @@ def collect_retrigger_runtime_inventory(
         risk_evidence = candidate_risk_runtime_evidence(store)
         static_evidence = candidate_static_runtime_evidence(store)
         semantic_evidence = candidate_semantic_runtime_evidence(store)
+        backup_evidence = candidate_backup_runtime_evidence(store)
     except (
         StateError,
         CandidateFetchStageExecutionError,
@@ -98,6 +104,7 @@ def collect_retrigger_runtime_inventory(
         CandidateRiskExecutionError,
         CandidateStaticExecutionError,
         CandidateSemanticExecutionError,
+        CandidateBackupExecutionError,
     ):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
@@ -127,6 +134,10 @@ def collect_retrigger_runtime_inventory(
     )
     recovery["candidate_semantic"] = render_candidate_semantic_runtime_status(
         semantic_evidence,
+        reference_time=reference_time,
+    )
+    recovery["candidate_backup"] = render_candidate_backup_runtime_status(
+        backup_evidence,
         reference_time=reference_time,
     )
     return RuntimeInventoryInput(
@@ -429,6 +440,72 @@ def render_candidate_semantic_runtime_status(
         "total": total,
         "phases": phases,
         "outcomes": outcomes,
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_candidate_backup_runtime_status(
+    evidence: Iterable[CandidateBackupRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate backup checkpoints without identities or backup names."""
+    reference = _utc(reference_time, "candidate backup reference time is invalid")
+    phases = {
+        "blocked": 0,
+        "completed": 0,
+        "mutation_started": 0,
+        "planned": 0,
+        "uncertain": 0,
+    }
+    outcomes = {"blocked": 0, "succeeded": 0}
+    mutation_started = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError("candidate backup evidence exceeds the limit")
+        if type(row) is not CandidateBackupRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate backup evidence is invalid")
+        planned = _utc(row.planned_at, "candidate backup evidence is invalid")
+        started = (
+            None
+            if row.started_at is None
+            else _utc(row.started_at, "candidate backup evidence is invalid")
+        )
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(row.completed_at, "candidate backup evidence is invalid")
+        )
+        terminal = row.phase in {"blocked", "completed"}
+        expected_success = True if row.phase == "completed" else False if terminal else None
+        expected_started = row.phase != "planned"
+        if (
+            planned > reference
+            or row.mutation_started is not expected_started
+            or expected_started != (started is not None)
+            or terminal != (completed is not None)
+            or row.succeeded is not expected_success
+            or (started is not None and (started < planned or started > reference))
+            or (
+                completed is not None
+                and (started is None or completed < started or completed > reference)
+            )
+        ):
+            raise RetriggerRuntimeStatusError("candidate backup evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        mutation_started += int(row.mutation_started)
+        if row.succeeded is not None:
+            outcomes["succeeded" if row.succeeded else "blocked"] += 1
+        observed = completed or started or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "outcomes": outcomes,
+        "mutation_started": mutation_started,
         "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 

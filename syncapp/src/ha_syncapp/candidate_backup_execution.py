@@ -82,6 +82,16 @@ class CandidateBackupExecutionResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateBackupRuntimeEvidence:
+    phase: str
+    mutation_started: bool
+    succeeded: bool | None
+    planned_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
 BackupCreator = Callable[..., CandidateBackupEvidence]
 BackupReconciler = Callable[..., CandidateBackupEvidence]
 
@@ -226,6 +236,46 @@ def load_candidate_backup_checkpoint(
     except CandidateBackupExecutionError:
         raise
     except (CandidateBackupCheckpointError, StateError, sqlite3.Error, TypeError, ValueError):
+        _invalid()
+
+
+def candidate_backup_runtime_evidence(
+    store: StateStore,
+) -> tuple[CandidateBackupRuntimeEvidence, ...]:
+    """Return bounded, identity-free backup checkpoint evidence."""
+    try:
+        rows = store._connection.execute(
+            "SELECT candidate_sha FROM candidate_backup_checkpoint "
+            "ORDER BY planned_at,candidate_sha LIMIT 65"
+        ).fetchall()
+        if len(rows) > 64:
+            _invalid()
+        result: list[CandidateBackupRuntimeEvidence] = []
+        for row in rows:
+            checkpoint = load_candidate_backup_checkpoint(store, str(row[0]))
+            if checkpoint is None:
+                _invalid()
+            succeeded = (
+                True
+                if checkpoint.phase == "completed"
+                else False
+                if checkpoint.phase == "blocked"
+                else None
+            )
+            result.append(
+                CandidateBackupRuntimeEvidence(
+                    checkpoint.phase,
+                    checkpoint.started_at is not None,
+                    succeeded,
+                    checkpoint.planned_at,
+                    checkpoint.started_at,
+                    checkpoint.completed_at,
+                )
+            )
+        return tuple(result)
+    except CandidateBackupExecutionError:
+        raise
+    except (StateError, sqlite3.Error, TypeError, ValueError):
         _invalid()
 
 
