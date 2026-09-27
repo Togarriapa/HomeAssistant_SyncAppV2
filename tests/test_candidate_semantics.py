@@ -45,8 +45,9 @@ def test_success_binds_every_gate_and_uses_a_copy(tmp_path, monkeypatch):
 def test_exact_version_mismatch_never_launches(tmp_path, monkeypatch, version):
     inputs = candidate_inputs(tmp_path, {"configuration.yaml": b"homeassistant:\n"}, version)
     monkeypatch.setattr(semantic, "_run_validator", lambda *args: pytest.fail("must not launch"))
-    with pytest.raises(semantic.CandidateSemanticError, match="version"):
+    with pytest.raises(semantic.CandidateSemanticError, match="version") as caught:
         semantic.validate_candidate_semantics(*inputs)
+    assert not caught.value.transient
 
 
 @pytest.mark.parametrize(
@@ -112,6 +113,20 @@ def test_validator_error_does_not_leak_candidate_bytes(tmp_path, monkeypatch):
     assert "credential-canary" not in str(caught.value)
     assert caught.value.__suppress_context__ is True
     assert not copies[0].exists()
+
+
+def test_validator_platform_failure_is_explicitly_retryable(tmp_path, monkeypatch):
+    inputs = candidate_inputs(tmp_path, {"configuration.yaml": b"homeassistant:\n"})
+    monkeypatch.setattr(
+        semantic,
+        "_run_validator",
+        lambda *_args: (_ for _ in ()).throw(
+            semantic.CandidateSemanticError("semantic validator unavailable", transient=True)
+        ),
+    )
+    with pytest.raises(semantic.CandidateSemanticError) as caught:
+        semantic.validate_candidate_semantics(*inputs)
+    assert caught.value.transient
 
 
 def test_runtime_drift_during_check_discards_success(tmp_path, monkeypatch):

@@ -43,6 +43,10 @@ _MAX_YAML_BYTES = 4 * 1024 * 1024
 class CandidateSemanticError(RuntimeError):
     """No semantic authorization exists; only fixed, secret-free reasons are exposed."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateSemanticValidation:
@@ -91,6 +95,10 @@ def validate_candidate_semantics(
         return result
     except CandidateSemanticError:
         raise
+    except (OSError, subprocess.SubprocessError):
+        raise CandidateSemanticError(
+            "semantic validation evidence could not be established", transient=True
+        ) from None
     except Exception:
         # Upstream parser/OS exceptions can contain raw candidate values. Never chain them.
         raise CandidateSemanticError(
@@ -274,16 +282,20 @@ def _run_validator(config: Path, version: str) -> None:
                     os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
                 raise CandidateSemanticError(
-                    "semantic validator timed out or was interrupted"
+                    "semantic validator timed out or was interrupted", transient=True
                 ) from None
         receipt.seek(0)
         raw = receipt.read(4097)
     if returncode != 0 or len(raw) > 4096:
-        raise CandidateSemanticError("semantic validator unavailable or resource limit exceeded")
+        raise CandidateSemanticError(
+            "semantic validator unavailable or resource limit exceeded", transient=True
+        )
     try:
         payload = json.loads(raw, object_pairs_hook=_json_object_no_duplicates)
     except (ValueError, UnicodeError):
-        raise CandidateSemanticError("semantic validator returned an ambiguous result") from None
+        raise CandidateSemanticError(
+            "semantic validator returned an ambiguous result", transient=True
+        ) from None
     if payload != {"nonce": nonce, "version": version, "result": "passed"}:
         # No child-generated text (even unknown result fields) is exposed to the app logger.
         if isinstance(payload, dict) and payload.get("result") == "invalid":

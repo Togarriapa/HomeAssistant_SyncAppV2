@@ -10,6 +10,7 @@ from ha_syncapp.candidate_dependency_execution import CandidateDependencyRuntime
 from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
 from ha_syncapp.candidate_integrity_execution import CandidateIntegrityRuntimeEvidence
 from ha_syncapp.candidate_risk_execution import CandidateRiskRuntimeEvidence
+from ha_syncapp.candidate_semantic_execution import CandidateSemanticRuntimeEvidence
 from ha_syncapp.candidate_static_execution import CandidateStaticRuntimeEvidence
 from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
@@ -19,6 +20,7 @@ from ha_syncapp.retrigger_runtime_status import (
     render_candidate_fetch_stage_runtime_status,
     render_candidate_integrity_runtime_status,
     render_candidate_risk_runtime_status,
+    render_candidate_semantic_runtime_status,
     render_candidate_static_runtime_status,
     render_deployment_rollback_runtime_status,
     render_retrigger_runtime_status,
@@ -176,6 +178,12 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "unvalidated_paths": 0,
             "latest_updated_at": None,
         },
+        "candidate_semantic": {
+            "total": 0,
+            "phases": {"blocked": 0, "completed": 0, "planned": 0},
+            "outcomes": {"blocked": 0, "succeeded": 0},
+            "latest_updated_at": None,
+        },
     }
 
 
@@ -281,6 +289,24 @@ def test_candidate_static_status_exposes_only_sanitized_aggregate_state() -> Non
     assert status["outcomes"] == {"valid": 0, "invalid": 1}
     assert status["invalid_paths"] == 2
     assert status["unvalidated_paths"] == 1
+    encoded = json.dumps(status, sort_keys=True)
+    assert "candidate_sha" not in encoded
+    assert "repository" not in encoded
+
+
+def test_candidate_semantic_status_exposes_only_sanitized_aggregate_state() -> None:
+    evidence = (
+        CandidateSemanticRuntimeEvidence(
+            "completed", True, NOW - timedelta(minutes=2), NOW - timedelta(minutes=1)
+        ),
+        CandidateSemanticRuntimeEvidence(
+            "blocked", False, NOW - timedelta(minutes=3), NOW - timedelta(minutes=2)
+        ),
+        CandidateSemanticRuntimeEvidence("planned", None, NOW, None),
+    )
+    status = render_candidate_semantic_runtime_status(evidence, reference_time=NOW)
+    assert status["phases"] == {"blocked": 1, "completed": 1, "planned": 1}
+    assert status["outcomes"] == {"blocked": 1, "succeeded": 1}
     encoded = json.dumps(status, sort_keys=True)
     assert "candidate_sha" not in encoded
     assert "repository" not in encoded

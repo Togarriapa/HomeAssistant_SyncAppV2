@@ -2,10 +2,10 @@
 
 ## Bundled Core image identity
 
-The validator base retains the readable Core `2026.9.1` tag and pins the immutable
+The validator base retains the readable Core `2026.9.3` tag and pins the immutable
 multi-platform OCI index digest in `syncapp/Dockerfile` (issue #198). On
 2026-09-10, the official GHCR manifest endpoint for
-`ghcr.io/home-assistant/home-assistant:2026.9.1` returned index digest
+`ghcr.io/home-assistant/home-assistant:2026.9.3` returned index digest
 `sha256:612d76760b544cb40b7ba01387fdac964c59a6a550a50a4d30b4773c822d2918`, containing:
 
 - Linux amd64: `sha256:31076d37e3b7dc9681b32d892aa4413fa866c9a90e5c8a50324b397dce415d17`.
