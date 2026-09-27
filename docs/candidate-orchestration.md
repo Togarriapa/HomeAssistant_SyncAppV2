@@ -22,6 +22,7 @@ The initial state is deliberately narrow:
 | `staged` | `analyze` | A verified, durable Stage exists for the exact candidate and may enter analysis. |
 | `integrity_verified` | `analyze_dependencies` | Canonical change evidence and integrity success are durably checkpointed for the exact Stage. |
 | `dependencies_analyzed` | `classify_risk` | Canonical runtime and dependency evidence are durably checkpointed for the exact candidate. |
+| `risk_classified` | `validate` | Canonical impact and deployment-risk evidence are durably checkpointed for the exact dependency/runtime snapshot. |
 | `completed` | `none` | Reserved terminal state for a later evidence-driven transition. |
 | `blocked` | `none` | Reserved deterministic terminal state for a later evidence-driven transition. |
 

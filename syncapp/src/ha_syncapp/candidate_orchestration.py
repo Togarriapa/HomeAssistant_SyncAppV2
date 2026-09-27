@@ -127,6 +127,7 @@ class CandidateOrchestration:
                 "staged",
                 "integrity_verified",
                 "dependencies_analyzed",
+                "risk_classified",
                 "completed",
                 "blocked",
             }
@@ -136,12 +137,14 @@ class CandidateOrchestration:
                 "analyze",
                 "analyze_dependencies",
                 "classify_risk",
+                "validate",
                 "none",
             }
             or (self.phase == "detected") != (self.next_action == "fetch_stage")
             or (self.phase == "staged") != (self.next_action == "analyze")
             or (self.phase == "integrity_verified") != (self.next_action == "analyze_dependencies")
             or (self.phase == "dependencies_analyzed") != (self.next_action == "classify_risk")
+            or (self.phase == "risk_classified") != (self.next_action == "validate")
             or terminal != (self.next_action == "none")
             or self.registered_at.tzinfo is None
             or self.registered_at.utcoffset() is None
@@ -265,6 +268,42 @@ def dependencies_analyzed_candidate_orchestration(
         registered_at=current.registered_at,
         updated_at=when,
         record_sha256=_digest(values),
+    )
+    result.validate()
+    return result
+
+
+def risk_classified_candidate_orchestration(
+    current: CandidateOrchestration,
+    *,
+    updated_at: datetime,
+) -> CandidateOrchestration:
+    """Derive the sole permitted risk-classification successor."""
+    current.validate()
+    if current.phase != "dependencies_analyzed" or current.next_action != "classify_risk":
+        _invalid()
+    when = _timestamp(updated_at)
+    values: tuple[object, ...] = (
+        _WORK_KIND,
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        "risk_classified",
+        "validate",
+        current.registered_at.astimezone(UTC).isoformat(),
+        when.isoformat(),
+    )
+    result = CandidateOrchestration(
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        "risk_classified",
+        "validate",
+        current.registered_at,
+        when,
+        _digest(values),
     )
     result.validate()
     return result

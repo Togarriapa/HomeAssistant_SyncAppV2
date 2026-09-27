@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -613,9 +613,10 @@ class StateStore:
             "schema_version INTEGER NOT NULL CHECK (schema_version = 1), "
             "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
             "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', "
-            "'integrity_verified', 'dependencies_analyzed', 'completed', 'blocked')), "
+            "'integrity_verified', 'dependencies_analyzed', 'risk_classified', "
+            "'completed', 'blocked')), "
             "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', "
-            "'analyze_dependencies', 'classify_risk', 'none')), "
+            "'analyze_dependencies', 'classify_risk', 'validate', 'none')), "
             "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
             "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
@@ -743,6 +744,25 @@ class StateStore:
         )
 
     @staticmethod
+    def _create_candidate_risk_checkpoint_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_risk_checkpoint ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, schema_version INTEGER NOT NULL "
+            "CHECK (schema_version = 1), orchestration_sha256 TEXT NOT NULL, "
+            "dependency_sha256 TEXT NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "baseline_sha TEXT NOT NULL, stage_manifest_sha256 TEXT NOT NULL, "
+            "phase TEXT NOT NULL CHECK (phase IN ('planned', 'completed')), "
+            "impact_json TEXT, risk_json TEXT, risk_level TEXT CHECK (risk_level IS NULL OR "
+            "risk_level IN ('low', 'medium', 'high', 'critical')), affected_count INTEGER "
+            "CHECK (affected_count IS NULL OR affected_count >= 0), planned_at TEXT NOT NULL, "
+            "completed_at TEXT, record_sha256 TEXT NOT NULL, FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_orchestration(candidate_sha), FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_dependency_checkpoint(candidate_sha), FOREIGN KEY (target) "
+            "REFERENCES repository_binding(target))"
+        )
+
+    @staticmethod
     def _expand_candidate_orchestration_table_v29(db: sqlite3.Connection) -> None:
         db.execute(
             "CREATE TABLE candidate_orchestration_v29 ("
@@ -807,6 +827,50 @@ class StateStore:
             "ALTER TABLE candidate_integrity_checkpoint_v29 "
             "RENAME TO candidate_integrity_checkpoint"
         )
+
+    @staticmethod
+    def _expand_candidate_orchestration_table_v30(db: sqlite3.Connection) -> None:
+        """Expand the guarded state machine while preserving every prior checkpoint."""
+        db.execute("ALTER TABLE candidate_orchestration RENAME TO candidate_orchestration_v29")
+        db.execute(
+            "CREATE TABLE candidate_orchestration (work_kind TEXT NOT NULL "
+            "CHECK (work_kind = 'candidate'), candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version = 1), target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), phase TEXT NOT NULL "
+            "CHECK (phase IN ('detected','staged','integrity_verified','dependencies_analyzed',"
+            "'risk_classified','completed','blocked')), next_action TEXT NOT NULL CHECK "
+            "(next_action IN ('fetch_stage','analyze','analyze_dependencies','classify_risk',"
+            "'validate','none')), registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "record_sha256 TEXT NOT NULL, FOREIGN KEY (work_kind,candidate_sha) "
+            "REFERENCES work(work_kind,work_key), FOREIGN KEY (target) "
+            "REFERENCES repository_binding(target))"
+        )
+        db.execute("INSERT INTO candidate_orchestration SELECT * FROM candidate_orchestration_v29")
+        for table in (
+            "candidate_fetch_stage_checkpoint",
+            "candidate_integrity_checkpoint",
+            "candidate_dependency_checkpoint",
+        ):
+            db.execute(f"ALTER TABLE {table} RENAME TO {table}_v29")
+        StateStore._create_candidate_fetch_stage_checkpoint_table(db)
+        StateStore._create_candidate_integrity_checkpoint_table(db)
+        StateStore._create_candidate_dependency_checkpoint_table(db)
+        db.execute(
+            "INSERT INTO candidate_fetch_stage_checkpoint "
+            "SELECT * FROM candidate_fetch_stage_checkpoint_v29"
+        )
+        db.execute(
+            "INSERT INTO candidate_integrity_checkpoint "
+            "SELECT * FROM candidate_integrity_checkpoint_v29"
+        )
+        db.execute(
+            "INSERT INTO candidate_dependency_checkpoint "
+            "SELECT * FROM candidate_dependency_checkpoint_v29"
+        )
+        db.execute("DROP TABLE candidate_dependency_checkpoint_v29")
+        db.execute("DROP TABLE candidate_integrity_checkpoint_v29")
+        db.execute("DROP TABLE candidate_fetch_stage_checkpoint_v29")
+        db.execute("DROP TABLE candidate_orchestration_v29")
 
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
@@ -874,6 +938,7 @@ class StateStore:
                 self._create_candidate_fetch_stage_checkpoint_table(db)
                 self._create_candidate_integrity_checkpoint_table(db)
                 self._create_candidate_dependency_checkpoint_table(db)
+                self._create_candidate_risk_checkpoint_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -1083,6 +1148,13 @@ class StateStore:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_candidate_orchestration_table_v29(db)
                     self._create_candidate_dependency_checkpoint_table(db)
+                    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                version = 29
+            if version == 29:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._expand_candidate_orchestration_table_v30(db)
+                    self._create_candidate_risk_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
