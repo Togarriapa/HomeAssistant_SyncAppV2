@@ -25,8 +25,8 @@ The initial state is deliberately narrow:
 | `risk_classified` | `validate` | Canonical impact and deployment-risk evidence are durably checkpointed for the exact dependency/runtime snapshot. |
 | `static_validated` | `validate_semantics` | Static validation succeeded for the exact Stage and upstream evidence chain. |
 | `semantically_validated` | `prepare_backup` | Exact-version isolated Core validation succeeded and the candidate may enter the separately guarded backup stage. |
-| `completed` | `none` | Reserved terminal state for a later evidence-driven transition. |
-| `blocked` | `none` | Reserved deterministic terminal state for a later evidence-driven transition. |
+| `completed` | `none` | Exact candidate backup evidence and immutable prepared deployment were committed atomically. |
+| `blocked` | `none` | Exact candidate backup reconciliation failed deterministically. |
 
 Callers cannot supply a phase or action. This slice therefore grants no
 authority to fetch, write Stage, validate configuration, create or restore a
@@ -38,8 +38,8 @@ promote, or roll back a deployment.
 `candidate_orchestration` was introduced by schema v26, expanded for Fetch/Stage
 by schema v27, expanded for the integrity-analysis successor by schema v28, and
 expanded for the dependency-analysis successor by schema v29, risk evidence by
-schema v30, static-validation evidence by schema v31, and semantic-validation
-authority by schema v32.
+schema v30, static-validation evidence by schema v31, semantic-validation
+authority by schema v32, and candidate backup execution evidence by schema v33.
 Each row is bound by composite
 foreign key to `work_kind=candidate` plus the exact work key/SHA, and by foreign
 key to the pinned repository target. The canonical integrity digest covers the
@@ -61,7 +61,8 @@ It is the bounded discovery seam for a later Retrigger worker.
 `candidate_orchestration_runtime_evidence` exposes only phase, next action, and
 update time. Repository targets and candidate SHAs are intentionally absent.
 The top-level runtime publication aggregates Fetch/Stage, integrity-analysis,
-dependency-analysis, risk, static-validation, and semantic-validation checkpoints into the existing recovery document
+dependency-analysis, risk, static-validation, semantic-validation, and candidate
+backup checkpoints into the existing recovery document
 without publishing repository, candidate, baseline, changed-path, runtime
 payload, or reference identity.
 

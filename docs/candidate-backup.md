@@ -10,6 +10,27 @@ The gate uses the supported Supervisor backup API with `SUPERVISOR_TOKEN`. The a
 
 Successful `CandidateBackupEvidence` binds the backup slug to repository ID, baseline SHA, candidate SHA, Stage manifest SHA-256, runtime SHA-256, risk level and exact Home Assistant version. The semantic evidence is re-verified after the backup lookup before this evidence is returned.
 
+## Crash-safe execution and recovery
+
+Schema v33 stores an integrity-protected checkpoint for the exact candidate and
+complete upstream evidence chain. The deterministic deployment UUID and Supervisor
+request name are persisted before mutation. The executor then journals
+`mutation_started` before its single synchronous create request. If the process or
+transport is interrupted, the checkpoint becomes `uncertain`; Retrigger performs a
+bounded read-only Supervisor inventory/info reconciliation for the exact request and
+never issues a blind second create.
+
+Missing, duplicate, stale, malformed, unsafe, or failed reconciliation evidence
+blocks the exact candidate. Verified success atomically persists the immutable
+prepared deployment, advances orchestration to `completed/none`, and completes its
+work identity. Both completed and blocked results replay without credentials or
+network access. Transient create uncertainty remains subject to normal work backoff.
+
+Retrigger reclaims only `prepare_backup` candidate work and executes at most one
+candidate backup action per cycle. Runtime inventory publishes bounded aggregate
+phase, mutation-started, and outcome counts; candidate identities, backup names,
+Supervisor payloads, and credentials are never exposed.
+
 Supervisor responses are bounded and parsed as JSON with duplicate keys and non-finite constants rejected. Backup identifiers are constrained before they are used in a request path. Transport exceptions and response bodies are not propagated into diagnostic exceptions, preventing credentials or candidate content from being copied into logs accidentally.
 
 Successful backup evidence can now be durably associated with an immutable deployment identity through the [prepared deployment state API](prepared-deployment-state.md). A later deployment-orchestration slice must independently re-prove every required gate before Apply; reading a persisted record alone does not authorize deployment. Observation, promotion, known-good tagging, fast rollback and full backup restore remain separate downstream safety milestones.

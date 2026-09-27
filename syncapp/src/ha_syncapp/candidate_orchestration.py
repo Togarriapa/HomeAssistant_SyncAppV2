@@ -343,6 +343,53 @@ def semantic_blocked_candidate_orchestration(
     return _semantic_successor(current, "blocked", "none", updated_at)
 
 
+def backup_prepared_candidate_orchestration(
+    current: CandidateOrchestration, *, updated_at: datetime
+) -> CandidateOrchestration:
+    """Finish candidate processing after durable preparation; Apply remains separately guarded."""
+    return _backup_successor(current, "completed", updated_at)
+
+
+def backup_blocked_candidate_orchestration(
+    current: CandidateOrchestration, *, updated_at: datetime
+) -> CandidateOrchestration:
+    """Block the exact candidate after deterministic backup reconciliation failure."""
+    return _backup_successor(current, "blocked", updated_at)
+
+
+def _backup_successor(
+    current: CandidateOrchestration, phase: str, updated_at: datetime
+) -> CandidateOrchestration:
+    current.validate()
+    if current.phase != "semantically_validated" or current.next_action != "prepare_backup":
+        _invalid()
+    when = _timestamp(updated_at)
+    values: tuple[object, ...] = (
+        _WORK_KIND,
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        phase,
+        "none",
+        current.registered_at.astimezone(UTC).isoformat(),
+        when.isoformat(),
+    )
+    result = CandidateOrchestration(
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        phase,
+        "none",
+        current.registered_at,
+        when,
+        _digest(values),
+    )
+    result.validate()
+    return result
+
+
 def _semantic_successor(
     current: CandidateOrchestration, phase: str, action: str, updated_at: datetime
 ) -> CandidateOrchestration:

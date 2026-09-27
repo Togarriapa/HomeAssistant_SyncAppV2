@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import retrigger_cycle
+from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
@@ -126,6 +127,32 @@ def test_cycle_runs_supported_lanes_then_candidate_detection_in_deterministic_or
     assert result.runtime_sync.processed is None
     assert result.candidate_fetch_stage.processed is None
     assert result.candidate_detection.work is None
+
+
+def test_cycle_runs_backup_only_after_all_earlier_candidate_lanes_are_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def backup(*args: object, **kwargs: object) -> CandidateBackupRetriggerResult:
+        calls.append("candidate_backup")
+        return CandidateBackupRetriggerResult(0, 1, "completed")
+
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_backup_retrigger_pass", backup)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_backup"]
+    assert result.candidate_backup.processed == "completed"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

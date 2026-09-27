@@ -12,8 +12,13 @@ One cycle runs, in deterministic order:
 6. one bounded deployment-rollback recovery pass;
 7. one bounded candidate Fetch/Stage recovery pass;
 8. if Fetch/Stage performed no action, one bounded candidate integrity-analysis pass;
-9. trusted candidate detection;
-10. optional fresh Supervisor log collection.
+9. if earlier candidate lanes performed no action, one bounded dependency-analysis pass;
+10. under the same condition, one bounded risk-classification pass;
+11. under the same condition, one bounded static-validation pass;
+12. under the same condition, one bounded semantic-validation pass;
+13. under the same condition, one bounded candidate backup/reconciliation pass;
+14. trusted candidate detection;
+15. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -26,7 +31,10 @@ The analysis pass accepts only exact `staged/analyze` authority, re-fetches the
 same candidate into an isolated transient workspace, checkpoints canonical
 change/integrity evidence, and enables `analyze_dependencies` for a later cycle.
 Completed analysis replay is credential- and network-free. The conditional lane
-ordering enforces at most one candidate action per cycle.
+ordering enforces at most one candidate action per cycle. The backup pass accepts
+only exact `semantically_validated/prepare_backup` authority. It journals before
+mutation, reconciles interrupted/uncertain requests by exact persisted request
+identity, never creates a blind replacement backup, and cannot authorize Apply.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 

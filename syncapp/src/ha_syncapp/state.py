@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 33
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -805,6 +805,28 @@ class StateStore:
         )
 
     @staticmethod
+    def _create_candidate_backup_checkpoint_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_backup_checkpoint ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, schema_version INTEGER NOT NULL "
+            "CHECK (schema_version=1), orchestration_sha256 TEXT NOT NULL, "
+            "fetch_stage_sha256 TEXT NOT NULL, integrity_sha256 TEXT NOT NULL, "
+            "dependency_sha256 TEXT NOT NULL, risk_sha256 TEXT NOT NULL, "
+            "static_sha256 TEXT NOT NULL, semantic_sha256 TEXT NOT NULL, "
+            "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id>0), "
+            "baseline_sha TEXT NOT NULL, stage_manifest_sha256 TEXT NOT NULL, "
+            "runtime_sha256 TEXT NOT NULL, risk_level TEXT NOT NULL, core_version TEXT NOT NULL, "
+            "deployment_id TEXT NOT NULL UNIQUE, request_name TEXT NOT NULL UNIQUE, "
+            "phase TEXT NOT NULL CHECK (phase IN "
+            "('planned','mutation_started','uncertain','completed','blocked')), "
+            "backup_slug TEXT, planned_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, "
+            "record_sha256 TEXT NOT NULL, FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_orchestration(candidate_sha), FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_semantic_checkpoint(candidate_sha), FOREIGN KEY (target) "
+            "REFERENCES repository_binding(target))"
+        )
+
+    @staticmethod
     def _expand_candidate_orchestration_table_v29(db: sqlite3.Connection) -> None:
         db.execute(
             "CREATE TABLE candidate_orchestration_v29 ("
@@ -1104,6 +1126,7 @@ class StateStore:
                 self._create_candidate_risk_checkpoint_table(db)
                 self._create_candidate_static_checkpoint_table(db)
                 self._create_candidate_semantic_checkpoint_table(db)
+                self._create_candidate_backup_checkpoint_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -1143,6 +1166,7 @@ class StateStore:
                 29,
                 30,
                 31,
+                32,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1337,6 +1361,12 @@ class StateStore:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_candidate_orchestration_table_v32(db)
                     self._create_candidate_semantic_checkpoint_table(db)
+                    db.execute("PRAGMA user_version = 32")
+                version = 32
+            if version == 32:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_candidate_backup_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
