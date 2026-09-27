@@ -479,6 +479,12 @@ def _finish_atomically(
                 "INSERT INTO prepared_deployment VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 prepared_values,
             )
+            completed_at = finished.completed_at.astimezone(UTC).isoformat()
+            db.execute(
+                "INSERT INTO work (work_kind,work_key,status,attempts,created_at,updated_at,"
+                "next_attempt_at) VALUES ('candidate_apply',?,'pending',0,?,?,?)",
+                (finished.deployment_id, completed_at, completed_at, completed_at),
+            )
         second = db.execute(
             "UPDATE candidate_orchestration SET phase=?,next_action=?,updated_at=?,record_sha256=? "
             "WHERE candidate_sha=? AND record_sha256=?",
