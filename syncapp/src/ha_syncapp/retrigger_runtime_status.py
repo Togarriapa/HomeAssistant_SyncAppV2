@@ -21,6 +21,11 @@ from .candidate_integrity_execution import (
     CandidateIntegrityRuntimeEvidence,
     candidate_integrity_runtime_evidence,
 )
+from .candidate_risk_execution import (
+    CandidateRiskExecutionError,
+    CandidateRiskRuntimeEvidence,
+    candidate_risk_runtime_evidence,
+)
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
@@ -72,11 +77,13 @@ def collect_retrigger_runtime_inventory(
         fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
         integrity_evidence = candidate_integrity_runtime_evidence(store)
         dependency_evidence = candidate_dependency_runtime_evidence(store)
+        risk_evidence = candidate_risk_runtime_evidence(store)
     except (
         StateError,
         CandidateFetchStageExecutionError,
         CandidateIntegrityExecutionError,
         CandidateDependencyExecutionError,
+        CandidateRiskExecutionError,
     ):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
@@ -94,6 +101,10 @@ def collect_retrigger_runtime_inventory(
     )
     recovery["candidate_dependencies"] = render_candidate_dependency_runtime_status(
         dependency_evidence,
+        reference_time=reference_time,
+    )
+    recovery["candidate_risk"] = render_candidate_risk_runtime_status(
+        risk_evidence,
         reference_time=reference_time,
     )
     return RuntimeInventoryInput(
@@ -247,6 +258,56 @@ def render_candidate_dependency_runtime_status(
         "total": total,
         "phases": phases,
         "references": references,
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_candidate_risk_runtime_status(
+    evidence: Iterable[CandidateRiskRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate risk checkpoints without identities, paths, contents, or reasons."""
+    reference = _utc(reference_time, "candidate risk reference time is invalid")
+    phases = {"completed": 0, "planned": 0}
+    levels = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    affected = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError("candidate risk evidence exceeds the limit")
+        if type(row) is not CandidateRiskRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate risk evidence is invalid")
+        planned = _utc(row.planned_at, "candidate risk evidence is invalid")
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(row.completed_at, "candidate risk evidence is invalid")
+        )
+        done = row.phase == "completed"
+        if (
+            planned > reference
+            or done != (completed is not None)
+            or done != (row.risk_level is not None)
+            or done != (row.affected_count is not None)
+            or (row.risk_level is not None and row.risk_level not in levels)
+            or (row.affected_count is not None and row.affected_count < 0)
+            or (completed is not None and (completed < planned or completed > reference))
+        ):
+            raise RetriggerRuntimeStatusError("candidate risk evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        if row.risk_level is not None:
+            levels[row.risk_level] += 1
+        affected += row.affected_count or 0
+        observed = completed or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "levels": levels,
+        "affected_entities": affected,
         "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 

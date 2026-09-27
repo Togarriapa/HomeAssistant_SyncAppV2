@@ -26,6 +26,11 @@ from ha_syncapp.candidate_integrity_retrigger import (
     CandidateIntegrityRetriggerResult,
     run_candidate_integrity_retrigger_pass,
 )
+from ha_syncapp.candidate_risk_retrigger import (
+    CandidateRiskRetriggerError,
+    CandidateRiskRetriggerResult,
+    run_candidate_risk_retrigger_pass,
+)
 from ha_syncapp.database_retention_work import (
     DatabaseRetentionPassResult,
     DatabaseRetentionWorkError,
@@ -88,6 +93,7 @@ class RetriggerCycleResult:
     candidate_fetch_stage: CandidateFetchStageRetriggerResult
     candidate_integrity: CandidateIntegrityRetriggerResult
     candidate_dependencies: CandidateDependencyRetriggerResult
+    candidate_risk: CandidateRiskRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -231,6 +237,17 @@ def run_retrigger_cycle(
             )
         else:
             candidate_dependencies = CandidateDependencyRetriggerResult(0, 0, None)
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+        ):
+            candidate_risk = run_candidate_risk_retrigger_pass(
+                store,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_risk = CandidateRiskRetriggerResult(0, 0, None)
 
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
@@ -262,6 +279,7 @@ def run_retrigger_cycle(
         CandidateFetchStageRetriggerError,
         CandidateIntegrityRetriggerError,
         CandidateDependencyRetriggerError,
+        CandidateRiskRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -276,6 +294,7 @@ def run_retrigger_cycle(
         candidate_fetch_stage=candidate_fetch_stage,
         candidate_integrity=candidate_integrity,
         candidate_dependencies=candidate_dependencies,
+        candidate_risk=candidate_risk,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

@@ -9,6 +9,7 @@ import pytest
 from ha_syncapp.candidate_dependency_execution import CandidateDependencyRuntimeEvidence
 from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
 from ha_syncapp.candidate_integrity_execution import CandidateIntegrityRuntimeEvidence
+from ha_syncapp.candidate_risk_execution import CandidateRiskRuntimeEvidence
 from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
     RetriggerRuntimeStatusError,
@@ -16,6 +17,7 @@ from ha_syncapp.retrigger_runtime_status import (
     render_candidate_dependency_runtime_status,
     render_candidate_fetch_stage_runtime_status,
     render_candidate_integrity_runtime_status,
+    render_candidate_risk_runtime_status,
     render_deployment_rollback_runtime_status,
     render_retrigger_runtime_status,
 )
@@ -157,6 +159,13 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "references": 0,
             "latest_updated_at": None,
         },
+        "candidate_risk": {
+            "total": 0,
+            "phases": {"completed": 0, "planned": 0},
+            "levels": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+            "affected_entities": 0,
+            "latest_updated_at": None,
+        },
     }
 
 
@@ -233,6 +242,20 @@ def test_candidate_dependency_status_exposes_only_bounded_aggregate_state() -> N
         "references": 3,
         "latest_updated_at": (NOW - timedelta(seconds=1)).isoformat(),
     }
+    encoded = json.dumps(status, sort_keys=True)
+    assert "candidate_sha" not in encoded
+    assert "repository" not in encoded
+
+
+def test_candidate_risk_status_exposes_only_sanitized_aggregate_state() -> None:
+    evidence = (
+        CandidateRiskRuntimeEvidence("completed", "high", 3, NOW, NOW),
+        CandidateRiskRuntimeEvidence("planned", None, None, NOW, None),
+    )
+    status = render_candidate_risk_runtime_status(evidence, reference_time=NOW)
+    assert status["phases"] == {"completed": 1, "planned": 1}
+    assert status["levels"]["high"] == 1
+    assert status["affected_entities"] == 3
     encoded = json.dumps(status, sort_keys=True)
     assert "candidate_sha" not in encoded
     assert "repository" not in encoded

@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_orchestration() -> None:
-    assert SCHEMA_VERSION == 29
+    assert SCHEMA_VERSION == 30
 
 
 def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
@@ -74,6 +74,27 @@ def test_fresh_state_has_candidate_dependency_checkpoint_table(tmp_path: Path) -
         assert work_keys == {("work_kind", "work_kind"), ("candidate_sha", "work_key")}
 
 
+def test_fresh_state_has_candidate_risk_checkpoint_table(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        columns = {
+            str(row[1])
+            for row in store._connection.execute(
+                "PRAGMA table_info(candidate_risk_checkpoint)"
+            ).fetchall()
+        }
+        assert {
+            "candidate_sha",
+            "dependency_sha256",
+            "impact_json",
+            "risk_json",
+            "risk_level",
+            "affected_count",
+            "record_sha256",
+        }.issubset(columns)
+
+
 def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path: Path) -> None:
     root = tmp_path / "data"
     root.mkdir()
@@ -82,7 +103,7 @@ def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path:
         store._connection.execute("PRAGMA user_version = 25")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (30,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"
@@ -98,7 +119,7 @@ def test_schema_28_migrates_transactionally_to_dependency_checkpoint(tmp_path: P
         store._connection.execute("PRAGMA user_version = 28")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (29,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (30,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_dependency_checkpoint'"
