@@ -6,7 +6,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_version_includes_candidate_orchestration() -> None:
-    assert SCHEMA_VERSION == 31
+    assert SCHEMA_VERSION == 32
 
 
 def test_fresh_state_has_candidate_orchestration_table(tmp_path: Path) -> None:
@@ -116,6 +116,32 @@ def test_fresh_state_has_candidate_static_checkpoint_table(tmp_path: Path) -> No
         }.issubset(columns)
 
 
+def test_fresh_state_has_candidate_semantic_checkpoint_table(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        columns = {
+            str(row[1])
+            for row in store._connection.execute(
+                "PRAGMA table_info(candidate_semantic_checkpoint)"
+            ).fetchall()
+        }
+        assert {
+            "candidate_sha",
+            "orchestration_sha256",
+            "fetch_stage_sha256",
+            "integrity_sha256",
+            "dependency_sha256",
+            "risk_sha256",
+            "static_sha256",
+            "stage_manifest_sha256",
+            "core_version",
+            "semantic_json",
+            "phase",
+            "record_sha256",
+        }.issubset(columns)
+
+
 def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path: Path) -> None:
     root = tmp_path / "data"
     root.mkdir()
@@ -124,7 +150,7 @@ def test_schema_25_migrates_transactionally_to_candidate_orchestration(tmp_path:
         store._connection.execute("PRAGMA user_version = 25")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (31,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_orchestration'"
@@ -140,9 +166,25 @@ def test_schema_28_migrates_transactionally_to_dependency_checkpoint(tmp_path: P
         store._connection.execute("PRAGMA user_version = 28")
 
     with StateStore(root) as migrated:
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (31,)
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
         table = migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'candidate_dependency_checkpoint'"
         ).fetchone()
         assert table == ("candidate_dependency_checkpoint",)
+
+
+def test_schema_31_migrates_transactionally_to_semantic_authority(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    with StateStore(root) as store:
+        store._connection.execute("DROP TABLE candidate_semantic_checkpoint")
+        store._connection.execute("PRAGMA user_version = 31")
+
+    with StateStore(root) as migrated:
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (32,)
+        table = migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'candidate_semantic_checkpoint'"
+        ).fetchone()
+        assert table == ("candidate_semantic_checkpoint",)

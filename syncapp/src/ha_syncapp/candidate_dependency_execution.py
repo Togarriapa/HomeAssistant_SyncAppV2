@@ -207,7 +207,13 @@ def load_candidate_dependency_checkpoint(
             or (
                 result.phase == "completed"
                 and current.phase
-                not in {"dependencies_analyzed", "risk_classified", "static_validated", "blocked"}
+                not in {
+                    "dependencies_analyzed",
+                    "risk_classified",
+                    "static_validated",
+                    "semantically_validated",
+                    "blocked",
+                }
             )
         ):
             _invalid()
