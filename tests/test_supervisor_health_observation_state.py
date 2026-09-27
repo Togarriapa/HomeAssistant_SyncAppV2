@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_current_schema_contains_supervisor_health_observation_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 30
+    assert SCHEMA_VERSION == 31
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"

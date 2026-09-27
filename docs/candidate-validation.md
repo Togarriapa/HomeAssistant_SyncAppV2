@@ -30,6 +30,20 @@ The separate semantic gate below checks an isolated copy of the same integrity-b
 
 This gate does not execute automations, scripts, templates, custom components, or candidate Python code. It performs no Home Assistant writes, service calls, reloads, restarts, backups, Apply, observation, promotion, rejection, or rollback. Failures return path/reason identifiers only; candidate file contents and secrets are not copied into exception messages.
 
+## Durable orchestration checkpoint
+
+Schema v31 persists a journal-before-validation checkpoint bound to the exact
+orchestration, Fetch/Stage, integrity, dependency, and risk record digests. The
+executor revalidates the complete upstream chain and atomically stores its canonical,
+content-free outcome with the orchestration successor. Success advances only to
+`static_validated/validate_semantics`. Invalid results atomically move the exact
+candidate and its work item to `blocked/none`, preventing deterministic retry loops.
+
+Completed outcomes replay without credentials, network access, or another Stage read.
+Retrigger recovers stale claims and performs at most one eligible static validation per
+cycle. Runtime diagnostics expose only planned/completed counts, valid/invalid totals,
+aggregate invalid/unvalidated path counts, and the latest timestamp.
+
 ## Exact-version semantic gate
 
 `candidate_semantics.validate_candidate_semantics()` requires a successful complete static

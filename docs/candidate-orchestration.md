@@ -23,6 +23,7 @@ The initial state is deliberately narrow:
 | `integrity_verified` | `analyze_dependencies` | Canonical change evidence and integrity success are durably checkpointed for the exact Stage. |
 | `dependencies_analyzed` | `classify_risk` | Canonical runtime and dependency evidence are durably checkpointed for the exact candidate. |
 | `risk_classified` | `validate` | Canonical impact and deployment-risk evidence are durably checkpointed for the exact dependency/runtime snapshot. |
+| `static_validated` | `validate_semantics` | Static validation succeeded for the exact Stage and upstream evidence chain. |
 | `completed` | `none` | Reserved terminal state for a later evidence-driven transition. |
 | `blocked` | `none` | Reserved deterministic terminal state for a later evidence-driven transition. |
 
@@ -35,7 +36,8 @@ promote, or roll back a deployment.
 
 `candidate_orchestration` was introduced by schema v26, expanded for Fetch/Stage
 by schema v27, expanded for the integrity-analysis successor by schema v28, and
-expanded for the dependency-analysis successor by schema v29.
+expanded for the dependency-analysis successor by schema v29, risk evidence by
+schema v30, and static-validation evidence by schema v31.
 Each row is bound by composite
 foreign key to `work_kind=candidate` plus the exact work key/SHA, and by foreign
 key to the pinned repository target. The canonical integrity digest covers the
@@ -57,7 +59,7 @@ It is the bounded discovery seam for a later Retrigger worker.
 `candidate_orchestration_runtime_evidence` exposes only phase, next action, and
 update time. Repository targets and candidate SHAs are intentionally absent.
 The top-level runtime publication aggregates Fetch/Stage, integrity-analysis,
-and dependency-analysis checkpoints into the existing recovery document
+dependency-analysis, risk, and static-validation checkpoints into the existing recovery document
 without publishing repository, candidate, baseline, changed-path, runtime
 payload, or reference identity.
 

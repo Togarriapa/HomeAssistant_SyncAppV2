@@ -24,7 +24,7 @@ def _columns(path: Path) -> tuple[str, ...]:
 
 
 def test_current_schema_contains_durable_live_apply_intent_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 30
+    assert SCHEMA_VERSION == 31
     with StateStore(tmp_path):
         pass
 

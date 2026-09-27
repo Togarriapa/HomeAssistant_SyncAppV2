@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_schema_v17_contains_startup_error_observation_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 30
+    assert SCHEMA_VERSION == 31
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"

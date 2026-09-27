@@ -26,6 +26,11 @@ from .candidate_risk_execution import (
     CandidateRiskRuntimeEvidence,
     candidate_risk_runtime_evidence,
 )
+from .candidate_static_execution import (
+    CandidateStaticExecutionError,
+    CandidateStaticRuntimeEvidence,
+    candidate_static_runtime_evidence,
+)
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
@@ -78,12 +83,14 @@ def collect_retrigger_runtime_inventory(
         integrity_evidence = candidate_integrity_runtime_evidence(store)
         dependency_evidence = candidate_dependency_runtime_evidence(store)
         risk_evidence = candidate_risk_runtime_evidence(store)
+        static_evidence = candidate_static_runtime_evidence(store)
     except (
         StateError,
         CandidateFetchStageExecutionError,
         CandidateIntegrityExecutionError,
         CandidateDependencyExecutionError,
         CandidateRiskExecutionError,
+        CandidateStaticExecutionError,
     ):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
@@ -105,6 +112,10 @@ def collect_retrigger_runtime_inventory(
     )
     recovery["candidate_risk"] = render_candidate_risk_runtime_status(
         risk_evidence,
+        reference_time=reference_time,
+    )
+    recovery["candidate_static"] = render_candidate_static_runtime_status(
+        static_evidence,
         reference_time=reference_time,
     )
     return RuntimeInventoryInput(
@@ -308,6 +319,60 @@ def render_candidate_risk_runtime_status(
         "phases": phases,
         "levels": levels,
         "affected_entities": affected,
+        "latest_updated_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_candidate_static_runtime_status(
+    evidence: Iterable[CandidateStaticRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate static checkpoints without identities, paths, contents, or reasons."""
+    reference = _utc(reference_time, "candidate static reference time is invalid")
+    phases = {"completed": 0, "planned": 0}
+    outcomes = {"valid": 0, "invalid": 0}
+    invalid_paths = 0
+    unvalidated_paths = 0
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError("candidate static evidence exceeds the limit")
+        if type(row) is not CandidateStaticRuntimeEvidence or row.phase not in phases:
+            raise RetriggerRuntimeStatusError("candidate static evidence is invalid")
+        planned = _utc(row.planned_at, "candidate static evidence is invalid")
+        completed = (
+            None
+            if row.completed_at is None
+            else _utc(row.completed_at, "candidate static evidence is invalid")
+        )
+        done = row.phase == "completed"
+        if (
+            planned > reference
+            or done != (completed is not None)
+            or done != (row.syntax_valid is not None)
+            or done != (row.invalid_count is not None)
+            or done != (row.unvalidated_count is not None)
+            or (row.invalid_count is not None and row.invalid_count < 0)
+            or (row.unvalidated_count is not None and row.unvalidated_count < 0)
+            or (completed is not None and (completed < planned or completed > reference))
+        ):
+            raise RetriggerRuntimeStatusError("candidate static evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        if row.syntax_valid is not None:
+            outcomes["valid" if row.syntax_valid else "invalid"] += 1
+        invalid_paths += row.invalid_count or 0
+        unvalidated_paths += row.unvalidated_count or 0
+        observed = completed or planned
+        latest = observed if latest is None or observed > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "outcomes": outcomes,
+        "invalid_paths": invalid_paths,
+        "unvalidated_paths": unvalidated_paths,
         "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 
