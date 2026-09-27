@@ -69,7 +69,10 @@ claiming, controlled transient backoff and deterministic blocked states remain
 authoritative. The schedule never invokes administrative retry.
 
 Candidate recovery cannot bypass candidate integrity/dependency/risk/semantic/Home
-Assistant validation, pre-deployment backup, controlled Apply, observation,
+Assistant validation. Candidate backup execution is schema-v33 checkpointed,
+journaled before mutation, and reconciled by exact request identity; uncertain
+outcomes cannot trigger a blind replacement backup. Recovery cannot bypass
+controlled Apply, observation,
 promotion or rollback safeguards. Known bad candidate SHAs and other deterministic
 failures remain blocked until their work identity changes or an explicit
 administrative retry is requested.
