@@ -31,6 +31,7 @@ _CREATE_PATH: Final = "/backups/new/full"
 _DEFAULT_TIMEOUT_SECONDS: Final = 60.0
 _DEFAULT_MAX_RESPONSE_BYTES: Final = 64 * 1024
 _MAX_BACKUP_INVENTORY: Final = 64
+_MAX_BACKUP_INVENTORY_FIELDS: Final = 32
 _BACKUP_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
@@ -384,7 +385,7 @@ def _reconciled_backup_slug(
     for item in backups:
         if not isinstance(item, dict) or item.get("name") != request_name:
             continue
-        if set(item) != {"slug", "name", "date"}:
+        if not {"slug", "name", "date"}.issubset(item) or len(item) > _MAX_BACKUP_INVENTORY_FIELDS:
             raise CandidateBackupError("Supervisor backup inventory is invalid")
         slug = item.get("slug")
         created = item.get("date")
