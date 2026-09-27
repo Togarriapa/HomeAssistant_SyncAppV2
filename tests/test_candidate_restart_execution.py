@@ -9,7 +9,7 @@ from ha_syncapp.core_restart_transport import (
 )
 from test_core_restart_transport import TOKEN, _authorized
 
-NOW = datetime(2026, 9, 27, 23, 45, tzinfo=UTC)
+NOW = datetime(2026, 9, 27, 23, 0, tzinfo=UTC)
 
 
 def _claimed(tmp_path, monkeypatch):
@@ -21,16 +21,20 @@ def _claimed(tmp_path, monkeypatch):
     return store, authorization, item
 
 
-def test_acknowledged_restart_atomically_schedules_observation(
-    tmp_path, monkeypatch
-) -> None:
+def test_acknowledged_restart_atomically_schedules_observation(tmp_path, monkeypatch) -> None:
     store, authorization, item = _claimed(tmp_path, monkeypatch)
     calls: list[str] = []
 
     def transport(*_args):
         calls.append("restart")
         assert store._get_work("candidate_restart", item.work_key).status == "running"
-        assert store._get_work("candidate_observe", item.work_key) is None
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe' AND work_key=?",
+                (item.work_key,),
+            ).fetchone()[0]
+            == 0
+        )
         return CoreRestartResponse(200, "application/json", b'{"result":"ok","data":{}}')
 
     try:
@@ -54,9 +58,7 @@ def test_acknowledged_restart_atomically_schedules_observation(
         store.__exit__(None, None, None)
 
 
-def test_acknowledged_crash_replay_needs_no_credential_or_network(
-    tmp_path, monkeypatch
-) -> None:
+def test_acknowledged_crash_replay_needs_no_credential_or_network(tmp_path, monkeypatch) -> None:
     store, authorization, item = _claimed(tmp_path, monkeypatch)
     from ha_syncapp.core_restart_transport import request_core_restart_once
 
