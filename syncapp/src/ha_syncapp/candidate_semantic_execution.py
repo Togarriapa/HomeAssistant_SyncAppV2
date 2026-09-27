@@ -107,15 +107,13 @@ def execute_candidate_semantic_once(
         dependency = load_candidate_dependency_checkpoint(store, current.candidate_sha)
         risk_checkpoint = load_candidate_risk_checkpoint(store, current.candidate_sha)
         static_checkpoint = load_candidate_static_checkpoint(store, current.candidate_sha)
-        if any(
-            evidence is None
-            for evidence in (integrity_checkpoint, dependency, risk_checkpoint, static_checkpoint)
+        if (
+            integrity_checkpoint is None
+            or dependency is None
+            or risk_checkpoint is None
+            or static_checkpoint is None
         ):
             _invalid()
-        assert integrity_checkpoint is not None
-        assert dependency is not None
-        assert risk_checkpoint is not None
-        assert static_checkpoint is not None
         integrity: CandidateIntegrity = _integrity_from_checkpoint(
             integrity_checkpoint, integrity_checkpoint.changes()
         )

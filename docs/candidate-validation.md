@@ -48,7 +48,7 @@ aggregate invalid/unvalidated path counts, and the latest timestamp.
 
 `candidate_semantics.validate_candidate_semantics()` requires a successful complete static
 result, the identical upstream evidence, and a Core version bound to the runtime snapshot.
-The image bundles the official Core **2026.9.1** runtime. Other running versions remain
+The image bundles the official Core **2026.9.3** runtime. Other running versions remain
 blocked until an image with their exact validator is built and verified; there is no
 `stable` fallback or runtime package installation. App dependencies use a separate virtual
 environment, preserving the Core image's dependency set.
@@ -64,6 +64,21 @@ Successful evidence binds repository identity, baseline and candidate commits, S
 runtime digests, risk and exact Core version. It is a trusted in-process result, not a
 signed certificate or an artifact to accept from Repo B. It does not by itself authorize
 backup, Apply, reload, restart or promotion. Those transaction stages remain separate.
+
+## Durable semantic checkpoint and recovery
+
+Schema v32 persists a journal before launching the isolated Core validator. The checkpoint
+is bound to the exact orchestration, Fetch/Stage, integrity, dependency, risk and static
+record digests, plus the runtime fingerprint and exact Core version. A successful result is
+reverified against the complete evidence chain, persisted atomically, and advances only to
+`semantically_validated/prepare_backup`; backup remains a separate authorization boundary.
+
+Platform and validator-availability failures leave the exact plan retryable under the
+normal bounded backoff policy. Unsupported candidates, version mismatch, invalid input and
+other deterministic failures atomically block the exact candidate and its work item.
+Completed and blocked records replay without launching Core again. Retrigger performs at
+most one eligible semantic action per cycle, while runtime diagnostics expose only aggregate
+planned/completed/blocked and succeeded/blocked counts and timestamps.
 
 ## Validator isolation and supported scope
 
@@ -122,6 +137,6 @@ OS installation remains a separate on-device verification requirement.
 
 Implementation references: [Home Assistant AppArmor guidance](https://developers.home-assistant.io/docs/apps/presentation/#apparmor),
 [official Core check_config CLI](https://www.home-assistant.io/docs/tools/check_config/),
-[Core 2026.9.1 checker](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/scripts/check_config.py),
+[Core 2026.9.3 checker](https://github.com/home-assistant/core/blob/2026.9.3/homeassistant/scripts/check_config.py),
 [Landlock filesystem restrictions](https://docs.kernel.org/userspace-api/landlock.html),
 and [seccomp filters](https://docs.kernel.org/userspace-api/seccomp_filter.html).
