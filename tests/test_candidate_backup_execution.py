@@ -136,12 +136,14 @@ def test_success_journals_before_mutation_and_finishes_atomically(tmp_path, monk
             now=NOW + timedelta(seconds=5),
         )
         assert result.checkpoint.phase == "completed"
-        assert result.orchestration.phase == "completed"
-        assert result.orchestration.next_action == "none"
+        assert result.orchestration.phase == "backup_prepared"
+        assert result.orchestration.next_action == "authorize_apply"
         assert result.prepared.evidence == _evidence(semantic)
         assert store.prepared_deployment(result.prepared.deployment_id) == result.prepared
         assert len(calls) == 1
-        assert store._get_work("candidate", orchestration.candidate_sha).status == "succeeded"
+        work = store._get_work("candidate", orchestration.candidate_sha)
+        assert work.status == "retry"
+        assert work.next_attempt_at == NOW + timedelta(seconds=5)
     finally:
         store.__exit__(None, None, None)
 
