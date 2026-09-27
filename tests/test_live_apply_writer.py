@@ -18,12 +18,12 @@ from ha_syncapp.live_apply_preconditions import (
     LiveApplyPreconditionEvidence,
     prove_live_apply_preconditions,
 )
+from ha_syncapp.live_apply_progress_store import discover_live_apply_progress
+from ha_syncapp.live_apply_reconciliation import reconcile_live_apply_operation
 from ha_syncapp.live_apply_recovery_preconditions import (
     LiveApplyRecoveryPreconditionError,
     recover_live_apply_precondition_evidence,
 )
-from ha_syncapp.live_apply_progress_store import discover_live_apply_progress
-from ha_syncapp.live_apply_reconciliation import reconcile_live_apply_operation
 from ha_syncapp.live_apply_writer import LiveApplyWriterError, apply_live_operation
 from ha_syncapp.prepared_deployment import PreparedDeployment
 from ha_syncapp.stage_prewrite_reproof import StagePrewriteEvidence
