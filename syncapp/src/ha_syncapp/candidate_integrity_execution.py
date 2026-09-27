@@ -212,7 +212,14 @@ def load_candidate_integrity_checkpoint(
             or (result.phase == "planned" and current.record_sha256 != result.orchestration_sha256)
             or (
                 result.phase == "completed"
-                and current.phase not in {"integrity_verified", "dependencies_analyzed"}
+                and current.phase
+                not in {
+                    "integrity_verified",
+                    "dependencies_analyzed",
+                    "risk_classified",
+                    "static_validated",
+                    "blocked",
+                }
             )
         ):
             _invalid()
