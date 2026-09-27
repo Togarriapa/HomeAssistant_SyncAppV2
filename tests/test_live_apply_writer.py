@@ -229,13 +229,9 @@ def test_exact_retry_after_verified_is_idempotent(tmp_path: Path, monkeypatch) -
 def test_completed_apply_recovers_chain_without_rechecking_old_baseline(
     tmp_path: Path, monkeypatch
 ) -> None:
-    store, authorization, stage_evidence, stage, plan, preconditions = _chain(
-        tmp_path, monkeypatch
-    )
+    store, authorization, stage_evidence, stage, plan, preconditions = _chain(tmp_path, monkeypatch)
     try:
-        advance_live_apply_once(
-            store, authorization, stage_evidence, stage, plan, preconditions
-        )
+        advance_live_apply_once(store, authorization, stage_evidence, stage, plan, preconditions)
 
         recovered = recover_live_apply_precondition_evidence(
             store, authorization, stage_evidence, plan
@@ -267,9 +263,7 @@ def test_recovery_preconditions_reject_rebound_backup_authority(
             LiveApplyRecoveryPreconditionError,
             match="recovery authority does not match durable intent",
         ):
-            recover_live_apply_precondition_evidence(
-                store, rebound, stage_evidence, plan
-            )
+            recover_live_apply_precondition_evidence(store, rebound, stage_evidence, plan)
     finally:
         _close(store)
 

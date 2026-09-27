@@ -28,9 +28,7 @@ def _admitted(tmp_path, monkeypatch):
         *chain,
         recorded_at=NOW + timedelta(seconds=7),
     )
-    claimed = store.claim_work_kind(
-        "candidate_apply_execute", now=NOW + timedelta(seconds=8)
-    )
+    claimed = store.claim_work_kind("candidate_apply_execute", now=NOW + timedelta(seconds=8))
     assert claimed is not None
     monkeypatch.setattr(
         "ha_syncapp.candidate_apply_execution.load_candidate_backup_authority",
@@ -66,8 +64,9 @@ def test_one_verified_operation_is_deferred_as_normal_incomplete_work(
     calls: list[str] = []
     monkeypatch.setattr(
         "ha_syncapp.candidate_apply_execution.advance_live_apply_once",
-        lambda *args: calls.append("advance")
-        or LiveApplyControllerResult("operation_verified", 0, "a" * 64),
+        lambda *args: (
+            calls.append("advance") or LiveApplyControllerResult("operation_verified", 0, "a" * 64)
+        ),
     )
     try:
         result = execute_candidate_apply_once(
@@ -90,9 +89,7 @@ def test_one_verified_operation_is_deferred_as_normal_incomplete_work(
         store.__exit__(None, None, None)
 
 
-def test_complete_apply_authorizes_restart_before_finishing_work(
-    tmp_path, monkeypatch
-) -> None:
+def test_complete_apply_authorizes_restart_before_finishing_work(tmp_path, monkeypatch) -> None:
     store, prepared, _authority, claimed, _chain_value = _admitted(tmp_path, monkeypatch)
     order: list[str] = []
     monkeypatch.setattr(
@@ -101,8 +98,10 @@ def test_complete_apply_authorizes_restart_before_finishing_work(
     )
     monkeypatch.setattr(
         "ha_syncapp.candidate_apply_execution.authorize_post_apply_activation",
-        lambda *args, **kwargs: order.append("authorize")
-        or PostApplyActivationResult("restart_core", object(), replayed=False),
+        lambda *args, **kwargs: (
+            order.append("authorize")
+            or PostApplyActivationResult("restart_core", object(), replayed=False)
+        ),
     )
     original_enqueue = store.enqueue_work
 

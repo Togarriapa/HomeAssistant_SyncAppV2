@@ -196,9 +196,7 @@ def test_cycle_advances_apply_execution_only_after_admission_is_idle(
     store = _store(tmp_path)
     calls: list[str] = []
 
-    def execute(
-        *args: object, **kwargs: object
-    ) -> CandidateApplyExecutionRetriggerResult:
+    def execute(*args: object, **kwargs: object) -> CandidateApplyExecutionRetriggerResult:
         calls.append("candidate_apply_execution")
         assert kwargs["github_token"] == "github-token"
         assert kwargs["supervisor_token"] is None

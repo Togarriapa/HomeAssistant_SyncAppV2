@@ -90,9 +90,7 @@ def test_work_transition_failure_rolls_back_new_apply_intent(tmp_path, monkeypat
             store._get_work("candidate_apply_execute", prepared.deployment_id)
 
 
-def test_conflicting_apply_execution_successor_rolls_back_admission(
-    tmp_path, monkeypatch
-) -> None:
+def test_conflicting_apply_execution_successor_rolls_back_admission(tmp_path, monkeypatch) -> None:
     prepared = _prepared()
     chain = _chain(tmp_path, prepared, monkeypatch)
     with StateStore(tmp_path) as store:
