@@ -219,6 +219,7 @@ def load_candidate_integrity_checkpoint(
                     "risk_classified",
                     "static_validated",
                     "semantically_validated",
+                    "completed",
                     "blocked",
                 }
             )

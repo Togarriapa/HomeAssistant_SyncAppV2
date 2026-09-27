@@ -17,6 +17,10 @@ from .prepared_deployment import PreparedDeployment, PreparedDeploymentError
 class PreApplyFreshnessError(RuntimeError):
     """Fresh trusted Repo B heads could not be proven for the prepared candidate."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 _FRESHNESS_PRODUCER = object()
 
@@ -136,8 +140,11 @@ def reprove_preapply_repo_heads(
         return PreApplyFreshnessEvidence._from_reproof(expected)
     except PreApplyFreshnessError:
         raise
-    except RepositoryVerificationError:
-        raise PreApplyFreshnessError("trusted repository freshness could not be verified") from None
+    except RepositoryVerificationError as error:
+        raise PreApplyFreshnessError(
+            "trusted repository freshness could not be verified",
+            transient=error.transient,
+        ) from None
     except Exception:
         raise PreApplyFreshnessError(
             "pre-Apply repository freshness could not be established"

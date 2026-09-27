@@ -16,6 +16,10 @@ _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 class RepositoryVerificationError(RuntimeError):
     """Repo B could not be proven private and identical to the configured target."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True)
 class RepoIdentity:
@@ -79,11 +83,13 @@ def _read_json(request: Request, *, allow_not_found: bool = False) -> object | N
         if allow_not_found and error.code == 404:
             return None
         raise RepositoryVerificationError(
-            f"GitHub repository verification failed with HTTP {error.code}"
+            f"GitHub repository verification failed with HTTP {error.code}",
+            transient=error.code in {408, 429} or error.code >= 500,
         ) from None
     except (URLError, TimeoutError, OSError):
         raise RepositoryVerificationError(
-            "GitHub repository verification transport failed"
+            "GitHub repository verification transport failed",
+            transient=True,
         ) from None
 
     if len(raw) > MAX_METADATA_BYTES:

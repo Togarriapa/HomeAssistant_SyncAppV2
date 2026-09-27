@@ -327,6 +327,22 @@ def _load_authority(
     )
 
 
+def load_candidate_backup_authority(
+    store: StateStore,
+    current: CandidateOrchestration,
+    *,
+    staging_root: Path,
+    home_assistant_root: Path,
+) -> CandidateBackupAuthority:
+    """Reconstruct the exact validated authority used by backup and Apply gates."""
+    return _load_authority(
+        store,
+        current,
+        staging_root=staging_root,
+        home_assistant_root=home_assistant_root,
+    )
+
+
 def _record_plan(
     store: StateStore,
     current: CandidateOrchestration,
@@ -478,6 +494,12 @@ def _finish_atomically(
             db.execute(
                 "INSERT INTO prepared_deployment VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 prepared_values,
+            )
+            completed_at = finished.completed_at.astimezone(UTC).isoformat()
+            db.execute(
+                "INSERT INTO work (work_kind,work_key,status,attempts,created_at,updated_at,"
+                "next_attempt_at) VALUES ('candidate_apply',?,'pending',0,?,?,?)",
+                (finished.deployment_id, completed_at, completed_at, completed_at),
             )
         second = db.execute(
             "UPDATE candidate_orchestration SET phase=?,next_action=?,updated_at=?,record_sha256=? "

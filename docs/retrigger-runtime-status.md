@@ -28,6 +28,8 @@ The recovery file exposes:
 - bounded total and maximum attempt counts;
 - ready work and scheduled-backoff counts with the earliest next-attempt time;
 - the same aggregates per validated work kind, in deterministic order.
+- `candidate_apply` admission work as those same content-free lifecycle, attempt,
+  readiness and backoff aggregates; deployment IDs and candidate SHAs remain omitted.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
@@ -36,6 +38,12 @@ The recovery file exposes:
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
 no candidate SHA or retry capability is published.
+
+A successful `candidate_apply` item means only that the complete admission chain was
+freshly re-proven and an immutable live Apply intent was durably recorded. It does not
+mean that a live file operation, reload, restart, observation, promotion or rollback
+was performed. Retry and blocked counts preserve the distinction between transient
+proof failures and deterministic rejection without publishing nested error text.
 
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,

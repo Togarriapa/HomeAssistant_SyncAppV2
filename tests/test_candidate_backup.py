@@ -385,7 +385,7 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
     def transport(*_args):
         return _json_response({"slug": "other", "type": "full", "homeassistant": "2026.9.3"})
 
-    with pytest.raises(backup.CandidateBackupError):
+    with pytest.raises(backup.CandidateBackupError) as caught:
         backup.reprove_prepared_candidate_backup(
             prepared,
             authorization,
@@ -393,6 +393,26 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
             token="secret-token",
             transport=transport,
         )
+
+    assert not caught.value.transient
+
+
+def test_preapply_reproof_transport_failure_is_retryable(tmp_path, monkeypatch):
+    inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
+
+    def transport(*_args):
+        raise TimeoutError("offline")
+
+    with pytest.raises(backup.CandidateBackupError) as caught:
+        backup.reprove_prepared_candidate_backup(
+            prepared,
+            authorization,
+            *inputs,
+            token="secret-token",
+            transport=transport,
+        )
+
+    assert caught.value.transient
 
 
 def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(tmp_path, monkeypatch):

@@ -17,7 +17,7 @@ from .live_apply_plan import LiveApplyPlan
 from .live_apply_preconditions import LiveApplyPreconditionEvidence
 from .prepared_deployment import PreparedDeploymentError, validate_deployment_id
 from .stage_prewrite_reproof import StagePrewriteEvidence
-from .state import StateError, StateStore
+from .state import StateError, StateStore, WorkItem
 
 _COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -192,6 +192,82 @@ def record_live_apply_intent(
         raise
     except sqlite3.Error:
         raise StateError("Unable to persist live Apply intent") from None
+
+
+def record_candidate_apply_admission(
+    store: StateStore,
+    item: WorkItem,
+    authorization: ApplyAuthorization,
+    stage_evidence: StagePrewriteEvidence,
+    plan: LiveApplyPlan,
+    preconditions: LiveApplyPreconditionEvidence,
+    *,
+    recorded_at: datetime | None = None,
+) -> PersistedLiveApplyIntent:
+    """Atomically persist an Apply intent and complete its exact claimed work."""
+    if type(store) is not StateStore:
+        raise StateError("Invalid live Apply intent store")
+    if (
+        type(item) is not WorkItem
+        or item.work_kind != "candidate_apply"
+        or item.status != "running"
+        or item.attempts < 1
+    ):
+        raise StateError("Candidate Apply admission requires claimed Apply work")
+    try:
+        intent = derive_live_apply_intent(authorization, stage_evidence, plan, preconditions)
+    except Exception:
+        raise StateError("Live Apply intent evidence chain is invalid") from None
+    if item.work_key != intent.deployment_id:
+        raise StateError("Candidate Apply work binding is invalid")
+    _revalidate_prepared_binding(store, intent)
+    when = _timestamp(recorded_at)
+    expected = PersistedLiveApplyIntent.from_intent(intent, when)
+    try:
+        with store._connection as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = store._get_work(item.work_kind, item.work_key)
+            if current != item:
+                raise StateError("Candidate Apply claimed work changed unexpectedly")
+            _revalidate_prepared_binding(store, intent)
+            existing = _select_intent_row(db, intent.deployment_id)
+            if existing is None:
+                try:
+                    db.execute(
+                        "INSERT INTO live_apply_intent (deployment_id, target, repository_id, "
+                        "baseline_sha, candidate_sha, stage_manifest_sha256, backup_slug, "
+                        "homeassistant_root, operations_sha256, recorded_at, record_sha256) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        expected.database_values(),
+                    )
+                except sqlite3.IntegrityError:
+                    raise StateError("Live Apply intent cannot be rebound") from None
+            else:
+                persisted = _parse_and_revalidate(store, existing)
+                if not _same_intent(persisted, expected):
+                    raise StateError("Live Apply intent cannot be rebound")
+            result = db.execute(
+                "UPDATE work SET status = 'succeeded', updated_at = ?, "
+                "next_attempt_at = NULL WHERE work_kind = 'candidate_apply' "
+                "AND work_key = ? AND status = 'running' AND attempts = ?",
+                (when.isoformat(), item.work_key, item.attempts),
+            )
+            if result.rowcount != 1:
+                raise StateError("Candidate Apply work transition changed unexpectedly")
+        loaded = load_live_apply_intent(store, intent.deployment_id)
+        completed = store._get_work(item.work_kind, item.work_key)
+        if (
+            loaded is None
+            or not _same_intent(loaded, expected)
+            or completed.status != "succeeded"
+            or completed.next_attempt_at is not None
+        ):
+            raise StateError("Candidate Apply admission was not persisted")
+        return loaded
+    except StateError:
+        raise
+    except sqlite3.Error:
+        raise StateError("Unable to persist candidate Apply admission") from None
 
 
 def load_live_apply_intent(
