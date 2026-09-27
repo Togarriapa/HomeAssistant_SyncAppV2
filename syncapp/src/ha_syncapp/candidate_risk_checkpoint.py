@@ -246,7 +246,8 @@ class CandidateRiskCheckpoint:
         ):
             _invalid()
         if completed:
-            assert self.impact_json is not None and self.risk_json is not None
+            if self.impact_json is None or self.risk_json is None:
+                _invalid()
             if (
                 len(self.impact_json.encode()) > _MAX_EVIDENCE_BYTES
                 or len(self.risk_json.encode()) > _MAX_EVIDENCE_BYTES

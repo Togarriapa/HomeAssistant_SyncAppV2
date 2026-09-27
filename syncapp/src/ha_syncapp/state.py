@@ -855,18 +855,21 @@ class StateStore:
         StateStore._create_candidate_fetch_stage_checkpoint_table(db)
         StateStore._create_candidate_integrity_checkpoint_table(db)
         StateStore._create_candidate_dependency_checkpoint_table(db)
-        for table in (
-            "candidate_fetch_stage_checkpoint",
-            "candidate_integrity_checkpoint",
-            "candidate_dependency_checkpoint",
-        ):
-            db.execute(f"INSERT INTO {table} SELECT * FROM {table}_v29")
-        for table in (
-            "candidate_dependency_checkpoint_v29",
-            "candidate_integrity_checkpoint_v29",
-            "candidate_fetch_stage_checkpoint_v29",
-        ):
-            db.execute(f"DROP TABLE {table}")
+        db.execute(
+            "INSERT INTO candidate_fetch_stage_checkpoint "
+            "SELECT * FROM candidate_fetch_stage_checkpoint_v29"
+        )
+        db.execute(
+            "INSERT INTO candidate_integrity_checkpoint "
+            "SELECT * FROM candidate_integrity_checkpoint_v29"
+        )
+        db.execute(
+            "INSERT INTO candidate_dependency_checkpoint "
+            "SELECT * FROM candidate_dependency_checkpoint_v29"
+        )
+        db.execute("DROP TABLE candidate_dependency_checkpoint_v29")
+        db.execute("DROP TABLE candidate_integrity_checkpoint_v29")
+        db.execute("DROP TABLE candidate_fetch_stage_checkpoint_v29")
         db.execute("DROP TABLE candidate_orchestration_v29")
 
     def _open_database(self) -> None:
