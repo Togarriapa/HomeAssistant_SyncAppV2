@@ -11,7 +11,7 @@ from ha_syncapp.candidate_backup_checkpoint import (
 
 NOW = datetime(2026, 9, 27, 10, 0, tzinfo=UTC)
 CANDIDATE = "b" * 40
-DEPLOYMENT = "0e9eef73-915f-5acd-b90f-1b828aab55ac"
+DEPLOYMENT = "4af750ad-0b61-5fcf-be7c-66b5258f8194"
 
 
 def _plan() -> CandidateBackupCheckpoint:
