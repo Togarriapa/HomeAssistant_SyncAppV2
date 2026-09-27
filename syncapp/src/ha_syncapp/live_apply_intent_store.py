@@ -246,21 +246,32 @@ def record_candidate_apply_admission(
                 persisted = _parse_and_revalidate(store, existing)
                 if not _same_intent(persisted, expected):
                     raise StateError("Live Apply intent cannot be rebound")
+            timestamp = when.isoformat()
+            db.execute(
+                "INSERT INTO work (work_kind, work_key, status, attempts, created_at, "
+                "updated_at, next_attempt_at) VALUES "
+                "('candidate_apply_execute', ?, 'pending', 0, ?, ?, ?)",
+                (item.work_key, timestamp, timestamp, timestamp),
+            )
             result = db.execute(
                 "UPDATE work SET status = 'succeeded', updated_at = ?, "
                 "next_attempt_at = NULL WHERE work_kind = 'candidate_apply' "
                 "AND work_key = ? AND status = 'running' AND attempts = ?",
-                (when.isoformat(), item.work_key, item.attempts),
+                (timestamp, item.work_key, item.attempts),
             )
             if result.rowcount != 1:
                 raise StateError("Candidate Apply work transition changed unexpectedly")
         loaded = load_live_apply_intent(store, intent.deployment_id)
         completed = store._get_work(item.work_kind, item.work_key)
+        successor = store._get_work("candidate_apply_execute", item.work_key)
         if (
             loaded is None
             or not _same_intent(loaded, expected)
             or completed.status != "succeeded"
             or completed.next_attempt_at is not None
+            or successor.status != "pending"
+            or successor.attempts != 0
+            or successor.next_attempt_at != when
         ):
             raise StateError("Candidate Apply admission was not persisted")
         return loaded
