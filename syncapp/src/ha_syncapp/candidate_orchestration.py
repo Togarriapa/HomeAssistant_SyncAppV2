@@ -128,6 +128,7 @@ class CandidateOrchestration:
                 "integrity_verified",
                 "dependencies_analyzed",
                 "risk_classified",
+                "static_validated",
                 "completed",
                 "blocked",
             }
@@ -138,6 +139,7 @@ class CandidateOrchestration:
                 "analyze_dependencies",
                 "classify_risk",
                 "validate",
+                "validate_semantics",
                 "none",
             }
             or (self.phase == "detected") != (self.next_action == "fetch_stage")
@@ -145,6 +147,7 @@ class CandidateOrchestration:
             or (self.phase == "integrity_verified") != (self.next_action == "analyze_dependencies")
             or (self.phase == "dependencies_analyzed") != (self.next_action == "classify_risk")
             or (self.phase == "risk_classified") != (self.next_action == "validate")
+            or (self.phase == "static_validated") != (self.next_action == "validate_semantics")
             or terminal != (self.next_action == "none")
             or self.registered_at.tzinfo is None
             or self.registered_at.utcoffset() is None
@@ -301,6 +304,53 @@ def risk_classified_candidate_orchestration(
         current.repository_id,
         "risk_classified",
         "validate",
+        current.registered_at,
+        when,
+        _digest(values),
+    )
+    result.validate()
+    return result
+
+
+def static_validated_candidate_orchestration(
+    current: CandidateOrchestration, *, updated_at: datetime
+) -> CandidateOrchestration:
+    """Advance a successful static result only to semantic validation."""
+    return _static_successor(current, "static_validated", "validate_semantics", updated_at)
+
+
+def static_blocked_candidate_orchestration(
+    current: CandidateOrchestration, *, updated_at: datetime
+) -> CandidateOrchestration:
+    """Block the exact candidate after deterministic static invalidity."""
+    return _static_successor(current, "blocked", "none", updated_at)
+
+
+def _static_successor(
+    current: CandidateOrchestration, phase: str, action: str, updated_at: datetime
+) -> CandidateOrchestration:
+    current.validate()
+    if current.phase != "risk_classified" or current.next_action != "validate":
+        _invalid()
+    when = _timestamp(updated_at)
+    values: tuple[object, ...] = (
+        _WORK_KIND,
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        phase,
+        action,
+        current.registered_at.astimezone(UTC).isoformat(),
+        when.isoformat(),
+    )
+    result = CandidateOrchestration(
+        current.candidate_sha,
+        current.schema_version,
+        current.target,
+        current.repository_id,
+        phase,
+        action,
         current.registered_at,
         when,
         _digest(values),

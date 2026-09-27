@@ -31,6 +31,11 @@ from ha_syncapp.candidate_risk_retrigger import (
     CandidateRiskRetriggerResult,
     run_candidate_risk_retrigger_pass,
 )
+from ha_syncapp.candidate_static_retrigger import (
+    CandidateStaticRetriggerError,
+    CandidateStaticRetriggerResult,
+    run_candidate_static_retrigger_pass,
+)
 from ha_syncapp.database_retention_work import (
     DatabaseRetentionPassResult,
     DatabaseRetentionWorkError,
@@ -94,6 +99,7 @@ class RetriggerCycleResult:
     candidate_integrity: CandidateIntegrityRetriggerResult
     candidate_dependencies: CandidateDependencyRetriggerResult
     candidate_risk: CandidateRiskRetriggerResult
+    candidate_static: CandidateStaticRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -248,6 +254,20 @@ def run_retrigger_cycle(
             )
         else:
             candidate_risk = CandidateRiskRetriggerResult(0, 0, None)
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+            and candidate_risk.processed is None
+        ):
+            candidate_static = run_candidate_static_retrigger_pass(
+                store,
+                staging_root=snapshot_staging_root / "candidate-stage",
+                home_assistant_root=home_assistant_root,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_static = CandidateStaticRetriggerResult(0, 0, None)
 
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
@@ -280,6 +300,7 @@ def run_retrigger_cycle(
         CandidateIntegrityRetriggerError,
         CandidateDependencyRetriggerError,
         CandidateRiskRetriggerError,
+        CandidateStaticRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -295,6 +316,7 @@ def run_retrigger_cycle(
         candidate_integrity=candidate_integrity,
         candidate_dependencies=candidate_dependencies,
         candidate_risk=candidate_risk,
+        candidate_static=candidate_static,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

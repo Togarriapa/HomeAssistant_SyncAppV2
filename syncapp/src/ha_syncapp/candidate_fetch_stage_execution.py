@@ -402,6 +402,8 @@ def load_candidate_fetch_stage_checkpoint(
                     "staged",
                     "integrity_verified",
                     "dependencies_analyzed",
+                    "risk_classified",
+                    "static_validated",
                     "completed",
                     "blocked",
                 }

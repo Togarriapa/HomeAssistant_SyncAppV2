@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -614,9 +614,11 @@ class StateStore:
             "target TEXT NOT NULL, repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
             "phase TEXT NOT NULL CHECK (phase IN ('detected', 'staged', "
             "'integrity_verified', 'dependencies_analyzed', 'risk_classified', "
+            "'static_validated', "
             "'completed', 'blocked')), "
             "next_action TEXT NOT NULL CHECK (next_action IN ('fetch_stage', 'analyze', "
-            "'analyze_dependencies', 'classify_risk', 'validate', 'none')), "
+            "'analyze_dependencies', 'classify_risk', 'validate', 'validate_semantics', "
+            "'none')), "
             "registered_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, "
             "FOREIGN KEY (work_kind, candidate_sha) REFERENCES work(work_kind, work_key), "
             "FOREIGN KEY (target) REFERENCES repository_binding(target))"
@@ -763,6 +765,27 @@ class StateStore:
         )
 
     @staticmethod
+    def _create_candidate_static_checkpoint_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_static_checkpoint ("
+            "candidate_sha TEXT PRIMARY KEY NOT NULL, schema_version INTEGER NOT NULL "
+            "CHECK (schema_version = 1), orchestration_sha256 TEXT NOT NULL, "
+            "fetch_stage_sha256 TEXT NOT NULL, integrity_sha256 TEXT NOT NULL, "
+            "dependency_sha256 TEXT NOT NULL, risk_sha256 TEXT NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), baseline_sha TEXT NOT NULL, "
+            "stage_manifest_sha256 TEXT NOT NULL, phase TEXT NOT NULL "
+            "CHECK (phase IN ('planned','completed')), validation_json TEXT, syntax_valid INTEGER "
+            "CHECK (syntax_valid IS NULL OR syntax_valid IN (0,1)), invalid_count INTEGER "
+            "CHECK (invalid_count IS NULL OR invalid_count >= 0), unvalidated_count INTEGER "
+            "CHECK (unvalidated_count IS NULL OR unvalidated_count >= 0), "
+            "planned_at TEXT NOT NULL, "
+            "completed_at TEXT, record_sha256 TEXT NOT NULL, FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_orchestration(candidate_sha), FOREIGN KEY (candidate_sha) "
+            "REFERENCES candidate_risk_checkpoint(candidate_sha), FOREIGN KEY (target) "
+            "REFERENCES repository_binding(target))"
+        )
+
+    @staticmethod
     def _expand_candidate_orchestration_table_v29(db: sqlite3.Connection) -> None:
         db.execute(
             "CREATE TABLE candidate_orchestration_v29 ("
@@ -872,6 +895,62 @@ class StateStore:
         db.execute("DROP TABLE candidate_fetch_stage_checkpoint_v29")
         db.execute("DROP TABLE candidate_orchestration_v29")
 
+    @staticmethod
+    def _expand_candidate_orchestration_table_v31(db: sqlite3.Connection) -> None:
+        db.execute("ALTER TABLE candidate_orchestration RENAME TO candidate_orchestration_v30")
+        db.execute(
+            "CREATE TABLE candidate_orchestration (work_kind TEXT NOT NULL "
+            "CHECK (work_kind='candidate'), candidate_sha TEXT PRIMARY KEY NOT NULL, "
+            "schema_version INTEGER NOT NULL CHECK (schema_version=1), target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id>0), phase TEXT NOT NULL CHECK "
+            "(phase IN ('detected','staged','integrity_verified','dependencies_analyzed',"
+            "'risk_classified','static_validated','completed','blocked')), "
+            "next_action TEXT NOT NULL "
+            "CHECK (next_action IN ('fetch_stage','analyze','analyze_dependencies','classify_risk',"
+            "'validate','validate_semantics','none')), registered_at TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL, record_sha256 TEXT NOT NULL, FOREIGN KEY "
+            "(work_kind,candidate_sha) REFERENCES work(work_kind,work_key), FOREIGN KEY (target) "
+            "REFERENCES repository_binding(target))"
+        )
+        db.execute("INSERT INTO candidate_orchestration SELECT * FROM candidate_orchestration_v30")
+        db.execute(
+            "ALTER TABLE candidate_fetch_stage_checkpoint RENAME TO "
+            "candidate_fetch_stage_checkpoint_v30"
+        )
+        db.execute(
+            "ALTER TABLE candidate_integrity_checkpoint RENAME TO "
+            "candidate_integrity_checkpoint_v30"
+        )
+        db.execute(
+            "ALTER TABLE candidate_dependency_checkpoint RENAME TO "
+            "candidate_dependency_checkpoint_v30"
+        )
+        db.execute("ALTER TABLE candidate_risk_checkpoint RENAME TO candidate_risk_checkpoint_v30")
+        StateStore._create_candidate_fetch_stage_checkpoint_table(db)
+        StateStore._create_candidate_integrity_checkpoint_table(db)
+        StateStore._create_candidate_dependency_checkpoint_table(db)
+        StateStore._create_candidate_risk_checkpoint_table(db)
+        db.execute(
+            "INSERT INTO candidate_fetch_stage_checkpoint SELECT * FROM "
+            "candidate_fetch_stage_checkpoint_v30"
+        )
+        db.execute(
+            "INSERT INTO candidate_integrity_checkpoint SELECT * FROM "
+            "candidate_integrity_checkpoint_v30"
+        )
+        db.execute(
+            "INSERT INTO candidate_dependency_checkpoint SELECT * FROM "
+            "candidate_dependency_checkpoint_v30"
+        )
+        db.execute(
+            "INSERT INTO candidate_risk_checkpoint SELECT * FROM candidate_risk_checkpoint_v30"
+        )
+        db.execute("DROP TABLE candidate_risk_checkpoint_v30")
+        db.execute("DROP TABLE candidate_dependency_checkpoint_v30")
+        db.execute("DROP TABLE candidate_integrity_checkpoint_v30")
+        db.execute("DROP TABLE candidate_fetch_stage_checkpoint_v30")
+        db.execute("DROP TABLE candidate_orchestration_v30")
+
     def _open_database(self) -> None:
         path = self._root / "state.sqlite3"
         for suffix in ("-journal", "-wal", "-shm"):
@@ -939,6 +1018,7 @@ class StateStore:
                 self._create_candidate_integrity_checkpoint_table(db)
                 self._create_candidate_dependency_checkpoint_table(db)
                 self._create_candidate_risk_checkpoint_table(db)
+                self._create_candidate_static_checkpoint_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -975,6 +1055,8 @@ class StateStore:
                 26,
                 27,
                 28,
+                29,
+                30,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1155,6 +1237,13 @@ class StateStore:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_candidate_orchestration_table_v30(db)
                     self._create_candidate_risk_checkpoint_table(db)
+                    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                version = 30
+            if version == 30:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._expand_candidate_orchestration_table_v31(db)
+                    self._create_candidate_static_checkpoint_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 

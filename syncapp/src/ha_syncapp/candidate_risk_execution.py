@@ -141,7 +141,10 @@ def load_candidate_risk_checkpoint(
             or result.target != current.target
             or result.repository_id != current.repository_id
             or (result.phase == "planned" and result.orchestration_sha256 != current.record_sha256)
-            or (result.phase == "completed" and current.phase != "risk_classified")
+            or (
+                result.phase == "completed"
+                and current.phase not in {"risk_classified", "static_validated", "blocked"}
+            )
         ):
             _invalid()
         if result.phase == "completed":
