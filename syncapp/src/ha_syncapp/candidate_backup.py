@@ -8,6 +8,7 @@ import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Final
 
 from .candidate_dependencies import CandidateDependencyAnalysis
@@ -29,6 +30,7 @@ _CREATE_URL: Final = f"{_SUPERVISOR_ROOT}/backups/new/full"
 _CREATE_PATH: Final = "/backups/new/full"
 _DEFAULT_TIMEOUT_SECONDS: Final = 60.0
 _DEFAULT_MAX_RESPONSE_BYTES: Final = 64 * 1024
+_MAX_BACKUP_INVENTORY: Final = 64
 _BACKUP_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
@@ -77,6 +79,7 @@ def create_candidate_backup(
     runtime: RuntimeInventoryInput,
     version: CoreVersionEvidence,
     *,
+    backup_name: str | None = None,
     token: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
@@ -89,11 +92,17 @@ def create_candidate_backup(
         )
         bearer = _resolve_token(token)
         _validate_limits(timeout_seconds, max_response_bytes)
+        request_name = (
+            f"SyncApp candidate {semantic.candidate_sha[:12]}"
+            if backup_name is None
+            else backup_name
+        )
+        _validate_backup_name(request_name)
         sender = transport or _default_transport
 
         request_body = json.dumps(
             {
-                "name": f"SyncApp candidate {semantic.candidate_sha[:12]}",
+                "name": request_name,
                 "background": False,
             },
             separators=(",", ":"),
@@ -136,6 +145,74 @@ def create_candidate_backup(
         raise
     except Exception:
         raise CandidateBackupError("candidate backup evidence could not be established") from None
+
+
+def reconcile_candidate_backup(
+    semantic: CandidateSemanticValidation,
+    static: CandidateStaticValidation,
+    integrity: CandidateIntegrity,
+    stage: CandidateStage,
+    dependencies: CandidateDependencyAnalysis,
+    impact: CandidateImpactAnalysis,
+    risk: CandidateRiskClassification,
+    runtime: RuntimeInventoryInput,
+    version: CoreVersionEvidence,
+    *,
+    request_name: str,
+    started_at: datetime,
+    token: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    transport: SupervisorBackupTransport | None = None,
+) -> CandidateBackupEvidence:
+    """Reconcile one uncertain create from bounded inventory without another mutation."""
+    try:
+        _verify_semantic(
+            semantic, static, integrity, stage, dependencies, impact, risk, runtime, version
+        )
+        _validate_backup_name(request_name)
+        when = _aware_timestamp(started_at)
+        bearer = _resolve_token(token)
+        _validate_limits(timeout_seconds, max_response_bytes)
+        sender = transport or _default_transport
+        inventory = _request_json(
+            "GET",
+            f"{_SUPERVISOR_ROOT}/backups",
+            bearer,
+            None,
+            timeout_seconds,
+            max_response_bytes,
+            sender,
+        )
+        slug = _reconciled_backup_slug(inventory, request_name, when)
+        info = _request_json(
+            "GET",
+            f"{_SUPERVISOR_ROOT}/backups/{slug}/info",
+            bearer,
+            None,
+            timeout_seconds,
+            max_response_bytes,
+            sender,
+        )
+        _verify_backup_info(info, slug, semantic.core_version)
+        _verify_semantic(
+            semantic, static, integrity, stage, dependencies, impact, risk, runtime, version
+        )
+        return CandidateBackupEvidence(
+            target=semantic.target,
+            repository_id=semantic.repository_id,
+            baseline_sha=semantic.baseline_sha,
+            candidate_sha=semantic.candidate_sha,
+            stage_manifest_sha256=semantic.stage_manifest_sha256,
+            runtime_sha256=semantic.runtime_sha256,
+            risk_level=semantic.risk_level,
+            core_version=semantic.core_version,
+            backup_slug=slug,
+        )
+    except CandidateBackupError:
+        raise
+    except Exception:
+        raise CandidateBackupError("candidate backup reconciliation failed") from None
 
 
 def reprove_prepared_candidate_backup(
@@ -295,6 +372,38 @@ def _verify_backup_info(payload: dict[str, object], slug: str, core_version: str
         raise CandidateBackupError("Supervisor backup does not contain Home Assistant")
 
 
+def _reconciled_backup_slug(
+    payload: dict[str, object], request_name: str, started_at: datetime
+) -> str:
+    if set(payload) != {"backups"}:
+        raise CandidateBackupError("Supervisor backup inventory is invalid")
+    backups = payload.get("backups")
+    if not isinstance(backups, list) or len(backups) > _MAX_BACKUP_INVENTORY:
+        raise CandidateBackupError("Supervisor backup inventory is invalid")
+    matches: list[str] = []
+    for item in backups:
+        if not isinstance(item, dict) or item.get("name") != request_name:
+            continue
+        if set(item) != {"slug", "name", "date"}:
+            raise CandidateBackupError("Supervisor backup inventory is invalid")
+        slug = item.get("slug")
+        created = item.get("date")
+        if not isinstance(slug, str) or _BACKUP_SLUG.fullmatch(slug) is None:
+            raise CandidateBackupError("Supervisor backup inventory is invalid")
+        if not isinstance(created, str):
+            raise CandidateBackupError("Supervisor backup inventory is invalid")
+        try:
+            created_at = _aware_timestamp(datetime.fromisoformat(created))
+        except ValueError:
+            raise CandidateBackupError("Supervisor backup inventory is invalid") from None
+        if created_at < started_at:
+            raise CandidateBackupError("Supervisor backup inventory is stale")
+        matches.append(slug)
+    if len(matches) != 1:
+        raise CandidateBackupError("Supervisor backup inventory is ambiguous")
+    return matches[0]
+
+
 def _default_transport(
     method: str,
     url: str,
@@ -305,6 +414,8 @@ def _default_transport(
 ) -> SupervisorBackupResponse:
     if method == "POST" and url == _CREATE_URL:
         path = _CREATE_PATH
+    elif method == "GET" and url == f"{_SUPERVISOR_ROOT}/backups":
+        path = "/backups"
     elif method == "GET" and url.startswith(f"{_SUPERVISOR_ROOT}/backups/"):
         suffix = url.removeprefix(_SUPERVISOR_ROOT)
         parts = suffix.split("/")
@@ -348,6 +459,22 @@ def _resolve_token(token: str | None) -> str:
     if any(ord(character) < 0x20 or ord(character) == 0x7F for character in candidate):
         raise CandidateBackupError("Supervisor backup credential is invalid")
     return candidate
+
+
+def _validate_backup_name(value: str) -> None:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 128
+        or value != value.strip()
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise CandidateBackupError("Supervisor backup name is invalid")
+
+
+def _aware_timestamp(value: datetime) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise CandidateBackupError("Supervisor backup timestamp is invalid")
+    return value.astimezone(UTC)
 
 
 def _validate_limits(timeout_seconds: float, max_response_bytes: int) -> None:
