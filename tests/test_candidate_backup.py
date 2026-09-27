@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import ha_syncapp.candidate_backup as backup
@@ -59,6 +59,39 @@ def test_success_creates_full_backup_and_binds_exact_candidate(tmp_path, monkeyp
     assert calls[1][1] == "http://supervisor/backups/abc123/info"
     assert calls[0][2]["Authorization"] == "Bearer secret-token"
     assert b'"background":false' in calls[0][3]
+
+
+def test_creation_uses_exact_journaled_request_name(tmp_path, monkeypatch):
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+    request_name = "SyncApp candidate 0123456789ab 11111111-1111-4111-8111-111111111111"
+    calls = []
+
+    def transport(method, _url, _headers, body, *_args):
+        calls.append((method, body))
+        if method == "POST":
+            return _json_response({"slug": "abc123"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.3"})
+
+    backup.create_candidate_backup(
+        authorization,
+        *inputs,
+        backup_name=request_name,
+        token="secret-token",
+        transport=transport,
+    )
+    assert request_name.encode() in calls[0][1]
+
+
+def test_invalid_journaled_request_name_never_calls_supervisor(tmp_path, monkeypatch):
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+    with pytest.raises(backup.CandidateBackupError):
+        backup.create_candidate_backup(
+            authorization,
+            *inputs,
+            backup_name="secret\nname",
+            token="secret-token",
+            transport=lambda *_args: pytest.fail("must not call Supervisor"),
+        )
 
 
 def test_invalid_semantic_evidence_never_calls_supervisor(tmp_path, monkeypatch):
@@ -151,6 +184,85 @@ def test_transport_exception_is_sanitized(tmp_path, monkeypatch):
     assert "secret-token" not in str(caught.value)
     assert "candidate-content-canary" not in str(caught.value)
     assert caught.value.__suppress_context__ is True
+
+
+def test_uncertain_creation_reconciles_unique_fresh_named_backup_without_post(
+    tmp_path, monkeypatch
+):
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+    started_at = datetime(2026, 9, 27, 10, 0, tzinfo=UTC)
+    request_name = "SyncApp candidate 0123456789ab 11111111-1111-4111-8111-111111111111"
+    calls = []
+
+    def transport(method, url, *_args):
+        calls.append((method, url))
+        if url.endswith("/backups"):
+            return _json_response(
+                {
+                    "backups": [
+                        {
+                            "slug": "abc123",
+                            "name": request_name,
+                            "date": (started_at + timedelta(seconds=1)).isoformat(),
+                        }
+                    ]
+                }
+            )
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.3"})
+
+    evidence = backup.reconcile_candidate_backup(
+        authorization,
+        *inputs,
+        request_name=request_name,
+        started_at=started_at,
+        token="secret-token",
+        transport=transport,
+    )
+    assert evidence.backup_slug == "abc123"
+    assert [call[0] for call in calls] == ["GET", "GET"]
+
+
+@pytest.mark.parametrize(
+    "backups",
+    [
+        [],
+        [
+            {
+                "slug": "abc123",
+                "name": "REQUEST",
+                "date": "2026-09-27T09:59:59+00:00",
+            }
+        ],
+        [
+            {"slug": "abc123", "name": "REQUEST", "date": "2026-09-27T10:00:01+00:00"},
+            {"slug": "def456", "name": "REQUEST", "date": "2026-09-27T10:00:02+00:00"},
+        ],
+        [{"slug": "../escape", "name": "REQUEST", "date": "2026-09-27T10:00:01+00:00"}],
+    ],
+)
+def test_uncertain_creation_reconciliation_fails_closed(tmp_path, monkeypatch, backups):
+    inputs, authorization = _inputs_and_semantic(tmp_path, monkeypatch)
+    started_at = datetime(2026, 9, 27, 10, 0, tzinfo=UTC)
+    request_name = "REQUEST"
+    materialized = [
+        {**entry, "name": request_name if entry.get("name") == "REQUEST" else entry.get("name")}
+        for entry in backups
+    ]
+
+    def transport(method, url, *_args):
+        assert method == "GET"
+        assert url.endswith("/backups")
+        return _json_response({"backups": materialized})
+
+    with pytest.raises(backup.CandidateBackupError):
+        backup.reconcile_candidate_backup(
+            authorization,
+            *inputs,
+            request_name=request_name,
+            started_at=started_at,
+            token="secret-token",
+            transport=transport,
+        )
 
 
 def test_semantic_drift_after_backup_discards_success(tmp_path, monkeypatch):
