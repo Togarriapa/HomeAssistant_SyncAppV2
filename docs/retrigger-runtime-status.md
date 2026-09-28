@@ -130,6 +130,13 @@ the exact work item finished. Repository identity, candidate and baseline SHAs,
 known-good tag, backup slug, finalization digest, credential, remote response,
 and nested error details are excluded.
 
+`candidate_rollback` is exposed through the same aggregate-only work projection.
+Its success means only that immutable rollback intent and recovery authority were
+persisted and the exact authorization handoff finished. It does not mean a restore
+was requested or completed. Deployment identity, repository and backup identity,
+candidate and baseline SHAs, finalization and authority digests, credentials,
+remote responses, and nested error details are excluded.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,

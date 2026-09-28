@@ -32,6 +32,7 @@ from ha_syncapp.candidate_resource_observation_retrigger import (
     CandidateResourceObservationRetriggerResult,
 )
 from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
+from ha_syncapp.candidate_rollback_retrigger import CandidateRollbackRetriggerResult
 from ha_syncapp.candidate_startup_error_observation_retrigger import (
     CandidateStartupErrorObservationRetriggerResult,
 )
@@ -622,6 +623,39 @@ def test_cycle_runs_promotion_only_after_finalization_is_idle(
     assert calls == ["candidate_promotion"]
     assert result.candidate_finalization.processed is None
     assert result.candidate_promotion.processed == "promotion_completed"
+
+
+def test_cycle_runs_rollback_handoff_only_after_promotion_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def rollback(*args: object, **kwargs: object) -> CandidateRollbackRetriggerResult:
+        calls.append("candidate_rollback")
+        assert args[1] == "github-token"
+        assert args[2] == "core-token"
+        return CandidateRollbackRetriggerResult(0, 1, "rollback_authorized")
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_rollback_retrigger_pass",
+        rollback,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_rollback"]
+    assert result.candidate_promotion.processed is None
+    assert result.candidate_rollback.processed == "rollback_authorized"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
