@@ -66,10 +66,7 @@ def test_two_point_window_advances_one_action_per_invocation_and_hands_off_atomi
         assert started.work.next_attempt_at == NOW + timedelta(seconds=301)
         assert calls == 1
 
-        assert (
-            store.claim_work_kind("candidate_observe", now=NOW + timedelta(seconds=300))
-            is None
-        )
+        assert store.claim_work_kind("candidate_observe", now=NOW + timedelta(seconds=300)) is None
         item = store.claim_work_kind("candidate_observe", now=NOW + timedelta(seconds=301))
         assert item is not None
         completed = execute_candidate_core_observation_once(
@@ -155,8 +152,11 @@ def test_tampered_health_window_fails_deterministically_without_successor(
                 now=NOW + timedelta(seconds=301),
             )
         assert caught.value.transient is False
-        assert store._connection.execute(
-            "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_supervisor'"
-        ).fetchone()[0] == 0
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_supervisor'"
+            ).fetchone()[0]
+            == 0
+        )
     finally:
         store.__exit__(None, None, None)
