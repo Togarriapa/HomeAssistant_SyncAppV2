@@ -41,6 +41,13 @@ subsequent bounded API-root proof is documented in
 timeout, connection failure, invalid response, or interruption after the request leaves
 `request_started`, because the mutation outcome is uncertain.
 
+The bounded Retrigger restart lane consumes the exact `candidate_restart` work item.
+After a fresh or replayed `request_acknowledged` result, it atomically marks that work
+succeeded and creates the pending `candidate_observe` successor. If the journal is
+still `request_started`, Retrigger deterministically blocks the exact work item and
+does not send another POST or create observation work. An explicit operator decision
+is required before any later retry can be authorized.
+
 ## Authority boundary
 
 This slice performs at most one authorized Supervisor restart request. It does not

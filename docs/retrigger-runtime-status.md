@@ -32,6 +32,8 @@ The recovery file exposes:
   readiness and backoff aggregates; deployment IDs and candidate SHAs remain omitted.
 - `candidate_apply_execute` live Apply progress as the same content-free work
   aggregates, without deployment IDs, paths, operation indexes or commit identities.
+- `candidate_restart` execution progress as the same content-free work aggregates,
+  without deployment IDs, authorization digests, credentials or request evidence.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
@@ -51,6 +53,12 @@ A successful `candidate_apply_execute` item means that the exact ordered Apply p
 reached durable completion and, for a non-empty plan, activation authority was
 persisted before restart work was scheduled. It does not mean restart, observation,
 promotion, or rollback has occurred.
+
+A successful `candidate_restart` item means only that the exact authorized restart
+request was durably acknowledged and its observation successor was atomically
+scheduled. A blocked item can represent an uncertain request outcome or invalid
+authority; runtime status does not expose which deployment, token, digest, response,
+or nested failure produced that aggregate.
 
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
