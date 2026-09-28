@@ -18,6 +18,20 @@ persisted. Both valid and deterministic invalid-state outcomes replay without
 network access so an unchanged deployment cannot enter a retry loop. Transport,
 protocol, size, and persistence failures remain incomplete and fail closed.
 
+Production recovery reconstructs the exact target from persisted candidate
+dependency/runtime and impact/risk evidence. It requires the preceding resource
+availability proof to contain every expected entity; durable missing-resource
+evidence cannot authorize a state request. Session/transport unavailability is
+bounded-retryable. Invalid credentials or configuration, malformed or duplicate
+state records, missing expected states, tampering, rebinding, and conflicting
+successors are deterministic and block unchanged work.
+
+A durable `valid` outcome atomically schedules
+`candidate_observe_automation_scripts`. A durable `invalid_states` outcome
+atomically schedules `candidate_finalize` and never automation/script
+observation. Retrigger processes at most one such candidate action per cycle and
+replays either outcome without credentials or a network request.
+
 The command contract follows Home Assistant Core:
 <https://github.com/home-assistant/core/blob/949a484720ac3ebd2f474ce7e408a800c6c4ebdc/homeassistant/components/websocket_api/commands.py>.
 

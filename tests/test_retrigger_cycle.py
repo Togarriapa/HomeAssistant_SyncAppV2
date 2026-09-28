@@ -11,10 +11,10 @@ from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_core_observation_retrigger import (
     CandidateCoreObservationRetriggerResult,
 )
+from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_entity_observation_retrigger import (
     CandidateEntityObservationRetriggerResult,
 )
-from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
