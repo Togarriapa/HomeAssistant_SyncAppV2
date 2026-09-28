@@ -14,8 +14,9 @@ integrity-valid, temporally ordered, and successful. The resulting authority is
 
 A deterministic failure is finalized at the first failed predicate that has a
 complete successful prerequisite chain. Supported terminal stages are startup
-errors, affected-entity state validation, automation/script loading, and
-post-deployment assertions. Evidence for predicates after that failure must be
+errors, changed-resource availability, affected-entity state validation,
+automation/script loading, and post-deployment assertions. Evidence for
+predicates after that failure must be
 absent. The resulting authority is `rollback`, and the exact candidate SHA is
 queryably blocked. An incomplete or transiently failed chain produces no
 record and grants `none` authority, so normal bounded retry/backoff remains in
@@ -29,6 +30,10 @@ terminal evidence digest, complete chain digest, outcome, terminal stage,
 bounded predicate counts, and finalization time. It contains no entity IDs,
 state values, response bodies, credentials, exception details, or other live
 payloads.
+
+Application state schema v34 expands the terminal-stage constraint to include
+`resource_availability` while preserving every existing finalization row in a
+single crash-safe migration.
 
 Every load recomputes the decision through the public integrity-validating
 observation loaders. Replays are credential-free and network-free. Tampering,
@@ -44,3 +49,13 @@ candidate remains blocked and cannot become a blind retry. Any explicit
 administrative retry remains subject to the existing durable work-item
 administration, validation, backup, observation, and rollback safeguards; this
 decision record itself is never overwritten or bypassed.
+
+Production recovery claims only exact `candidate_finalize` work and rederives
+the canonical plan from durable candidate evidence. Incomplete evidence is
+retryable; invalid, tampered, contradictory, or rebound evidence is blocked.
+A successful immutable decision atomically schedules one inert
+`candidate_promote` handoff. A failed decision atomically schedules one inert
+`candidate_rollback` handoff. The transaction rejects either successor if any
+promotion/rollback handoff already exists, and this stage itself performs no
+network or live mutation. Completed decisions replay without credentials or
+duplicate work.

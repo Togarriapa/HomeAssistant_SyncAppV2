@@ -42,6 +42,7 @@ _OUTCOMES = {"success", "failure"}
 _FAILURE_STAGES = {
     "none",
     "startup_errors",
+    "resource_availability",
     "entity_states",
     "automation_script_load",
     "post_deployment_assertions",
@@ -64,6 +65,10 @@ _DOWNSTREAM_QUERIES = {
 
 class DeploymentFinalizationError(RuntimeError):
     """A deployment cannot be finalized from the available trusted evidence."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -185,6 +190,7 @@ class DeploymentFinalization:
         expected_count = {
             "none": 5,
             "startup_errors": 1,
+            "resource_availability": 2,
             "entity_states": 3,
             "automation_script_load": 4,
             "post_deployment_assertions": 5,
@@ -286,11 +292,11 @@ def finalize_deployment_once(
         PreparedDeploymentError,
         ResourceAvailabilityError,
         StartupErrorObservationError,
-        StateError,
-        sqlite3.Error,
         AttributeError,
     ):
         _invalid_state()
+    except (StateError, sqlite3.Error):
+        _unavailable()
 
 
 def load_deployment_finalization(
@@ -389,6 +395,24 @@ def _decision(store: StateStore, plan: PostDeploymentAssertionPlan) -> _Decision
     if availability is None:
         _incomplete()
     digests.append(availability.record_sha256)
+    if availability.available_count != availability.expected_count:
+        _require_absent(
+            store,
+            target.deployment_id,
+            (
+                "entity_state_observation",
+                "automation_script_observation",
+                "post_deployment_assertion_observation",
+            ),
+        )
+        return _make_decision(
+            prepared,
+            target.target_sha256,
+            digests,
+            availability.observed_at,
+            "resource_availability",
+            2,
+        )
 
     entity = load_entity_state_observation(store, target)
     if entity is None:
@@ -498,8 +522,16 @@ def _text(value: object) -> str:
 
 
 def _incomplete() -> NoReturn:
-    raise DeploymentFinalizationError("deployment finalization evidence is incomplete")
+    raise DeploymentFinalizationError(
+        "deployment finalization evidence is incomplete", transient=True
+    )
 
 
 def _invalid_state() -> NoReturn:
     raise DeploymentFinalizationError("deployment finalization state is invalid") from None
+
+
+def _unavailable() -> NoReturn:
+    raise DeploymentFinalizationError(
+        "deployment finalization persistence is unavailable", transient=True
+    ) from None

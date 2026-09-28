@@ -155,6 +155,15 @@ Incomplete resource availability, malformed or missing states, invalid
 credentials, rebinding, tampering, and successor conflicts block unchanged work;
 transport unavailability uses bounded backoff. Completed outcomes replay offline.
 
+The finalization pass accepts only `candidate_finalize` after every earlier
+candidate lane is idle. It reconstructs the immutable evidence chain and
+persists exactly one promotion or rollback authority. Missing changed resources
+are a deterministic `resource_availability` failure, so the unchanged candidate
+is blocked instead of looping. Success atomically schedules `candidate_promote`;
+failure atomically schedules `candidate_rollback`. Neither successor is executed
+by this lane. Stale running work is recovered, incomplete evidence backs off,
+invalid evidence blocks, and at most one finalization is processed per cycle.
+
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
 ## Cron-invocable same-owner trigger

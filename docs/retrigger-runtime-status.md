@@ -118,6 +118,12 @@ only. It excludes deployment/entity identities, state values, attributes,
 credentials, response content, evidence digests, paths, and nested errors. This
 read-only stage grants no mutation, promotion, restore, or rollback authority.
 
+`candidate_finalize` is exposed through the same aggregate-only work projection.
+Success means only that immutable authority was persisted and exactly one inert
+promotion or rollback successor was scheduled. Deployment identity, candidate
+SHA, backup slug, evidence digests, terminal payloads, credentials, and nested
+errors are never selected into runtime output.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,

@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -544,7 +544,8 @@ class StateStore:
             "target_sha256 TEXT NOT NULL, terminal_evidence_sha256 TEXT NOT NULL, "
             "chain_sha256 TEXT NOT NULL, outcome TEXT NOT NULL "
             "CHECK (outcome IN ('success', 'failure')), failure_stage TEXT NOT NULL "
-            "CHECK (failure_stage IN ('none', 'startup_errors', 'entity_states', "
+            "CHECK (failure_stage IN ('none', 'startup_errors', 'resource_availability', "
+            "'entity_states', "
             "'automation_script_load', 'post_deployment_assertions')), "
             "completed_predicate_count INTEGER NOT NULL "
             "CHECK (completed_predicate_count >= 1 AND completed_predicate_count <= 5), "
@@ -552,6 +553,13 @@ class StateStore:
             "CHECK (failed_predicate_count IN (0, 1)), finalized_at TEXT NOT NULL, "
             "record_sha256 TEXT NOT NULL)"
         )
+
+    @classmethod
+    def _expand_deployment_finalization_table_v34(cls, db: sqlite3.Connection) -> None:
+        db.execute("ALTER TABLE deployment_finalization RENAME TO deployment_finalization_v33")
+        cls._create_deployment_finalization_table(db)
+        db.execute("INSERT INTO deployment_finalization SELECT * FROM deployment_finalization_v33")
+        db.execute("DROP TABLE deployment_finalization_v33")
 
     @staticmethod
     def _create_deployment_promotion_table(db: sqlite3.Connection) -> None:
@@ -1167,6 +1175,7 @@ class StateStore:
                 30,
                 31,
                 32,
+                33,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1367,6 +1376,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_candidate_backup_checkpoint_table(db)
+                    db.execute("PRAGMA user_version = 33")
+                version = 33
+            if version == 33:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._expand_deployment_finalization_table_v34(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 

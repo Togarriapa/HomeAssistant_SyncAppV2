@@ -96,7 +96,7 @@ def test_rejects_malformed_or_ambiguous_log_responses(response, message) -> None
 def test_rejects_oversize_response_before_normalization() -> None:
     def transport(*args, **kwargs):
         del args, kwargs
-        return SupervisorLogResponse(200, "text/plain", b"x" * 33)
+        return SupervisorLogResponse(200, "text/plain", b"x" * 34)
 
     with pytest.raises(SupervisorLogError, match="exceeds size limit"):
         collect_supervisor_logs(
