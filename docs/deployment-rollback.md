@@ -14,6 +14,16 @@ Rollback authorization is derived from the persisted prepared deployment and imm
 
 Callers cannot select a different backup slug or use rollback to restore an unrelated backup. Repository divergence, invalid backup evidence, invalid finalization authority, and deterministic restore rejection fail closed.
 
+The candidate pipeline reaches this boundary only through exact
+`candidate_rollback` work created atomically by failed deployment finalization.
+That bounded handoff reconstructs the candidate-bound assertion plan and delegates
+to the same authorization function; it does not restore a backup. Authorization
+persists immutable intent and reconstructable recovery authority atomically, then
+completes only the handoff item. The existing deployment-rollback discovery pass
+creates and owns recovery work on a later cycle, preserving its reconciliation,
+health-proof, and terminal-state safeguards. A completed authorization replays
+without credentials or network access.
+
 ## Journal-before-mutation
 
 The rollback state machine persists intent before the Supervisor restore mutation. Restore attempts carry durable attempt state and bounded identifiers so a process crash, Home Assistant restart, Raspberry Pi reboot, network failure, or timeout does not erase whether mutation may have started.
@@ -63,4 +73,9 @@ The failed candidate remains rejected throughout every state. Rollback cannot cl
 
 ## Verification
 
-RED-before-GREEN tests cover authorization, exact backup binding, journal-before-mutation, uncertain-outcome reconciliation, deterministic blocking, post-restore Core/Supervisor health proof, idempotent replay, Retrigger recovery/backoff, cycle ordering and sanitized runtime exposure. Merge still requires exact reviewed-head Ruff format/lint, strict mypy, Bandit, full pytest, and native amd64/aarch64 CI.
+RED-before-GREEN tests cover candidate handoff authorization, exact backup binding,
+journal-before-mutation, uncertain-outcome reconciliation, deterministic blocking,
+post-restore Core/Supervisor health proof, idempotent replay, Retrigger
+recovery/backoff, cycle ordering and sanitized runtime exposure. Merge still
+requires exact reviewed-head Ruff format/lint, strict mypy, Bandit, full pytest,
+and native amd64/aarch64 CI.

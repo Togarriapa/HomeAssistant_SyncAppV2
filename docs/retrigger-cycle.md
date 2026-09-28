@@ -27,8 +27,19 @@ One cycle runs, in deterministic order:
     health-window action;
 18. if every earlier candidate lane performed no action, one bounded Supervisor-health
     observation;
-19. trusted candidate detection;
-20. optional fresh Supervisor log collection.
+19. if every earlier candidate lane performed no action, one bounded integration
+    initialization observation;
+20. under the same condition, one bounded startup-error observation;
+21. under the same condition, one bounded changed-resource availability observation;
+22. under the same condition, one bounded affected-entity state observation;
+23. under the same condition, one bounded automation/script load observation;
+24. under the same condition, one bounded post-deployment assertion observation;
+25. under the same condition, one bounded deployment finalization pass;
+26. under the same condition, one bounded successful-candidate promotion pass;
+27. under the same condition, one bounded failed-candidate rollback-authorization
+    handoff;
+28. trusted candidate detection;
+29. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -173,6 +184,19 @@ exact work item offline. Stale work and transient GitHub failures use bounded
 retry/backoff, while invalid authentication, authority, tampering, repository
 identity, or ref divergence blocks deterministically. At most one promotion is
 processed per cycle.
+
+The rollback-authorization handoff accepts only `candidate_rollback` created by
+failed finalization and runs only after promotion and every earlier candidate lane
+are idle. It reconstructs the exact candidate-bound plan, re-proves the immutable
+failed finalization and blocked candidate, and verifies the exact private Repo B
+baseline plus exact full Home Assistant backup. It then atomically persists the
+rollback intent and recovery authority before completing the exact handoff work.
+It never restores a backup and never inserts `deployment_rollback` work directly;
+the existing rollback discovery pass owns restore request, reconciliation,
+post-restore health observation, and completion on later cycles. Durable authority
+replays without credentials or network calls. Repository/backup transport failure
+uses bounded backoff, while invalid credentials, evidence, identity, backup, or
+repository proof blocks deterministically.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
