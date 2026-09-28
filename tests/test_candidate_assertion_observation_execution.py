@@ -39,9 +39,7 @@ def test_passed_assertions_atomically_schedule_finalization(tmp_path, monkeypatc
             token=TOKEN,
             session_factory=_factory(
                 FakeSession(
-                    _responses(
-                        [{"entity_id": "light.kitchen", "state": "on", "attributes": {}}]
-                    )
+                    _responses([{"entity_id": "light.kitchen", "state": "on", "attributes": {}}])
                 )
             ),
             now=now,
