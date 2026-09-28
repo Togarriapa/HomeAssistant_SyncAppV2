@@ -96,6 +96,14 @@ deployment and entity identities, states, attributes, candidate evidence, creden
 response content, paths, and nested errors. The observation itself grants no mutation,
 promotion, restore, or rollback authority.
 
+A successful `candidate_observe_entities` item means only that content-free
+valid/invalid aggregate evidence was persisted and the exact authorized
+automation/script-observation or finalization successor was scheduled atomically.
+Runtime output contains aggregate work status, attempts, readiness, and backoff
+only. It excludes deployment/entity identities, state values, attributes,
+credentials, response content, evidence digests, paths, and nested errors. This
+read-only stage grants no mutation, promotion, restore, or rollback authority.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,

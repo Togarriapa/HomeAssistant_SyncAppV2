@@ -128,6 +128,16 @@ resources missing durably schedules `candidate_finalize` and never entity observ
 Both outcomes replay offline. Transport failure backs off, while invalid credentials,
 malformed evidence, rebinding, tampering, and successor conflicts are blocked.
 
+The affected-entity observation pass accepts only `candidate_observe_entities`
+work created after complete resource availability. It rederives the exact target
+from persisted trusted evidence and makes at most one bounded read-only
+`get_states` request. Valid states atomically schedule
+`candidate_observe_automation_scripts`; durable `unknown` or `unavailable`
+states schedule `candidate_finalize` and never automation/script observation.
+Incomplete resource availability, malformed or missing states, invalid
+credentials, rebinding, tampering, and successor conflicts block unchanged work;
+transport unavailability uses bounded backoff. Completed outcomes replay offline.
+
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
 ## Cron-invocable same-owner trigger
