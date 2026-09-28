@@ -22,6 +22,7 @@ from ha_syncapp.candidate_entity_observation_retrigger import (
     CandidateEntityObservationRetriggerResult,
 )
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
+from ha_syncapp.candidate_finalization_retrigger import CandidateFinalizationRetriggerResult
 from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
 )
@@ -557,6 +558,37 @@ def test_cycle_runs_assertion_observation_only_after_automation_observation_is_i
     assert calls == ["candidate_assertion_observation"]
     assert result.candidate_automation_observation.processed is None
     assert result.candidate_assertion_observation.processed == "finalization_scheduled"
+
+
+def test_cycle_runs_finalization_only_after_assertion_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def finalize(*args: object, **kwargs: object) -> CandidateFinalizationRetriggerResult:
+        calls.append("candidate_finalization")
+        return CandidateFinalizationRetriggerResult(0, 1, "promotion_scheduled")
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_finalization_retrigger_pass",
+        finalize,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_finalization"]
+    assert result.candidate_assertion_observation.processed is None
+    assert result.candidate_finalization.processed == "promotion_scheduled"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

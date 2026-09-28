@@ -56,6 +56,11 @@ from ha_syncapp.candidate_fetch_stage_retrigger import (
     CandidateFetchStageRetriggerResult,
     run_candidate_fetch_stage_retrigger_pass,
 )
+from ha_syncapp.candidate_finalization_retrigger import (
+    CandidateFinalizationRetriggerError,
+    CandidateFinalizationRetriggerResult,
+    run_candidate_finalization_retrigger_pass,
+)
 from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerError,
     CandidateIntegrationObservationRetriggerResult,
@@ -178,6 +183,7 @@ class RetriggerCycleResult:
     candidate_entity_observation: CandidateEntityObservationRetriggerResult
     candidate_automation_observation: CandidateAutomationObservationRetriggerResult
     candidate_assertion_observation: CandidateAssertionObservationRetriggerResult
+    candidate_finalization: CandidateFinalizationRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -643,6 +649,33 @@ def run_retrigger_cycle(
                 0, 0, None
             )
 
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+            and candidate_risk.processed is None
+            and candidate_static.processed is None
+            and candidate_semantic.processed is None
+            and candidate_backup.processed is None
+            and candidate_apply.processed is None
+            and candidate_apply_execution.processed is None
+            and candidate_restart.processed is None
+            and candidate_core_observation.processed is None
+            and candidate_supervisor_observation.processed is None
+            and candidate_integration_observation.processed is None
+            and candidate_startup_error_observation.processed is None
+            and candidate_resource_observation.processed is None
+            and candidate_entity_observation.processed is None
+            and candidate_automation_observation.processed is None
+            and candidate_assertion_observation.processed is None
+        ):
+            candidate_finalization = run_candidate_finalization_retrigger_pass(
+                store,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_finalization = CandidateFinalizationRetriggerResult(0, 0, None)
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -688,6 +721,7 @@ def run_retrigger_cycle(
         CandidateEntityObservationRetriggerError,
         CandidateAutomationObservationRetriggerError,
         CandidateAssertionObservationRetriggerError,
+        CandidateFinalizationRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -717,6 +751,7 @@ def run_retrigger_cycle(
         candidate_entity_observation=candidate_entity_observation,
         candidate_automation_observation=candidate_automation_observation,
         candidate_assertion_observation=candidate_assertion_observation,
+        candidate_finalization=candidate_finalization,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

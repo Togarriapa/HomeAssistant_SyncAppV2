@@ -208,6 +208,22 @@ def test_candidate_assertion_observation_is_visible_without_deployment_identity(
     assert deployment_id not in json.dumps(recovery, sort_keys=True)
 
 
+def test_candidate_finalization_is_visible_without_deployment_identity(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        deployment_id = "deployment-secret-finalization"
+        store.enqueue_work("candidate_finalize", deployment_id, now=NOW)
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    recovery = inventory.analysis["recovery"]
+    kinds = {item["kind"]: item for item in recovery["kinds"]}
+    assert kinds["candidate_finalize"]["statuses"]["pending"] == 1
+    assert kinds["candidate_finalize"]["ready"] == 1
+    assert deployment_id not in json.dumps(recovery, sort_keys=True)
+
+
 def test_candidate_restart_is_visible_without_deployment_identity(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:

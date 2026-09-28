@@ -20,13 +20,17 @@ from ha_syncapp.post_deployment_assertion_observation import (
     derive_post_deployment_assertion_plan,
     evaluate_post_deployment_assertions_once,
 )
-from ha_syncapp.resource_availability_observation import ResourceAvailabilityTarget
+from ha_syncapp.resource_availability_observation import (
+    ResourceAvailabilityTarget,
+    observe_changed_resources_once,
+)
 from ha_syncapp.startup_error_observation import observe_startup_errors_once
 from test_automation_script_observation import _valid as _valid_automation
 from test_core_health_window import START, TOKEN
 from test_entity_state_observation import _available
 from test_integration_observation import FakeSession, _factory
 from test_post_deployment_assertion_observation import _ready
+from test_resource_availability_observation import _ready as _resource_ready
 from test_resource_availability_observation import _responses
 from test_startup_error_observation import (
     StartupSession,
@@ -178,6 +182,29 @@ def test_startup_failure_is_the_terminal_predicate(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
+def test_missing_resource_is_the_terminal_predicate_and_blocks_candidate(tmp_path, monkeypatch):
+    chain, _authorization, prepared = _resource_ready(tmp_path, monkeypatch)
+    store = chain[0]
+    target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
+    observe_changed_resources_once(
+        store,
+        target,
+        token=TOKEN,
+        observed_at=START + timedelta(seconds=304),
+        session_factory=_factory(FakeSession(_responses([]))),
+    )
+    plan = derive_post_deployment_assertion_plan(derive_automation_script_target(target))
+    try:
+        result = finalize_deployment_once(store, plan, finalized_at=START + timedelta(seconds=305))
+        assert result.outcome == "failure"
+        assert result.failure_stage == "resource_availability"
+        assert result.completed_predicate_count == 2
+        assert result.authority == "rollback"
+        assert result.candidate_blocked is True
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_automation_failure_is_the_terminal_predicate(tmp_path, monkeypatch):
     chain, target = _valid_automation(tmp_path, monkeypatch, ("automation.arrival",))
     store = chain[0]
@@ -214,8 +241,9 @@ def test_incomplete_chain_never_becomes_success_or_failure(tmp_path, monkeypatch
     chain, plan = _ready(tmp_path, monkeypatch, ())
     store = chain[0]
     try:
-        with pytest.raises(DeploymentFinalizationError, match="incomplete"):
+        with pytest.raises(DeploymentFinalizationError, match="incomplete") as error:
             finalize_deployment_once(store, plan)
+        assert error.value.transient is True
         assert load_deployment_finalization(store, plan) is None
         assert candidate_finalization_authority(store, plan) == "none"
     finally:
@@ -265,13 +293,14 @@ def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
         "BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
     )
     try:
-        with pytest.raises(DeploymentFinalizationError, match="state is invalid") as error:
+        with pytest.raises(DeploymentFinalizationError, match="unavailable") as error:
             finalize_deployment_once(
                 store,
                 plan,
                 finalized_at=START + timedelta(seconds=308),
             )
         assert "secret-storage-detail" not in str(error.value)
+        assert error.value.transient is True
         assert load_deployment_finalization(store, plan) is None
     finally:
         store.__exit__(None, None, None)
@@ -308,7 +337,7 @@ def test_tampering_rebinding_temporal_order_and_schema_21_migration(tmp_path, mo
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 33
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_finalization'"
         ).fetchone() == ("deployment_finalization",)
