@@ -35,6 +35,10 @@ _MAX_DISCOVERABLE_PROMOTIONS = 64
 class DeploymentPromotionError(RuntimeError):
     """A known-good promotion could not proceed safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class PromotionRemoteState:
@@ -511,4 +515,6 @@ def _blocked() -> NoReturn:
 
 
 def _unavailable() -> NoReturn:
-    raise DeploymentPromotionError("deployment promotion transport is unavailable") from None
+    raise DeploymentPromotionError(
+        "deployment promotion transport is unavailable", transient=True
+    ) from None

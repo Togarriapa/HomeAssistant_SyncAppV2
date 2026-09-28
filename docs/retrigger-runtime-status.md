@@ -124,6 +124,12 @@ promotion or rollback successor was scheduled. Deployment identity, candidate
 SHA, backup slug, evidence digests, terminal payloads, credentials, and nested
 errors are never selected into runtime output.
 
+`candidate_promote` is exposed through the same aggregate-only work projection.
+Its success means only that durable promotion evidence reached `completed` and
+the exact work item finished. Repository identity, candidate and baseline SHAs,
+known-good tag, backup slug, finalization digest, credential, remote response,
+and nested error details are excluded.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,

@@ -27,6 +27,7 @@ from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
 )
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
+from ha_syncapp.candidate_promotion_retrigger import CandidatePromotionRetriggerResult
 from ha_syncapp.candidate_resource_observation_retrigger import (
     CandidateResourceObservationRetriggerResult,
 )
@@ -589,6 +590,38 @@ def test_cycle_runs_finalization_only_after_assertion_observation_is_idle(
     assert calls == ["candidate_finalization"]
     assert result.candidate_assertion_observation.processed is None
     assert result.candidate_finalization.processed == "promotion_scheduled"
+
+
+def test_cycle_runs_promotion_only_after_finalization_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def promote(*args: object, **kwargs: object) -> CandidatePromotionRetriggerResult:
+        calls.append("candidate_promotion")
+        assert args[1] == "github-token"
+        return CandidatePromotionRetriggerResult(0, 1, "promotion_completed")
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_promotion_retrigger_pass",
+        promote,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_promotion"]
+    assert result.candidate_finalization.processed is None
+    assert result.candidate_promotion.processed == "promotion_completed"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

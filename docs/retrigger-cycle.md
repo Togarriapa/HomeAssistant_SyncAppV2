@@ -164,6 +164,16 @@ failure atomically schedules `candidate_rollback`. Neither successor is executed
 by this lane. Stale running work is recovered, incomplete evidence backs off,
 invalid evidence blocks, and at most one finalization is processed per cycle.
 
+The promotion pass accepts only `candidate_promote` created by successful
+finalization and runs only after finalization and every earlier candidate lane
+are idle. It re-proves authority, journals intent before any Git request, and
+uses the guarded non-force publication contract. Safe partial publication is
+reconciled without repeating completed writes; completed evidence finishes the
+exact work item offline. Stale work and transient GitHub failures use bounded
+retry/backoff, while invalid authentication, authority, tampering, repository
+identity, or ref divergence blocks deterministically. At most one promotion is
+processed per cycle.
+
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
 ## Cron-invocable same-owner trigger

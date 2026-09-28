@@ -40,3 +40,19 @@ Concurrent divergence, a moved candidate, or a conflicting tag is never
 merged, overwritten, or deleted. Promotion performs no Home Assistant,
 Supervisor, backup, Apply, restart, observation, or rollback mutation and does
 not erase rejected-candidate history.
+
+## Production recovery
+
+Retrigger claims only exact `candidate_promote` work created atomically by a
+successful immutable finalization. The executor reconstructs the canonical
+candidate-bound plan and re-proves prepared deployment and finalization before
+the promotion primitive can read GitHub. A completed durable promotion then
+completes the exact work item in a separate guarded transaction; a crash in
+between replays without credentials or network access.
+
+Stale running work is recovered under the shared bounded backoff policy, and at
+most one promotion is considered after every earlier candidate lane is idle.
+Transport and timeout failures remain retryable. Invalid credentials, authority,
+evidence, repository identity, or ref divergence block the unchanged work. The
+recovery result contains only fixed status/action fields and never returns the
+repository, candidate SHA, tag, credential, response body, or nested error.
