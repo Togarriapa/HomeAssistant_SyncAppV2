@@ -224,6 +224,24 @@ def test_candidate_integration_observation_is_visible_without_deployment_identit
     assert deployment_id not in json.dumps(recovery, sort_keys=True)
 
 
+def test_candidate_startup_error_observation_is_visible_without_deployment_identity(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    try:
+        deployment_id = "deployment-secret-identity"
+        store.enqueue_work("candidate_observe_startup_errors", deployment_id, now=NOW)
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    recovery = inventory.analysis["recovery"]
+    kinds = {item["kind"]: item for item in recovery["kinds"]}
+    assert kinds["candidate_observe_startup_errors"]["statuses"]["pending"] == 1
+    assert kinds["candidate_observe_startup_errors"]["ready"] == 1
+    assert deployment_id not in json.dumps(recovery, sort_keys=True)
+
+
 def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:
