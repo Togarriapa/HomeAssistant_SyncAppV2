@@ -11,6 +11,9 @@ from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_core_observation_retrigger import (
     CandidateCoreObservationRetriggerResult,
 )
+from ha_syncapp.candidate_entity_observation_retrigger import (
+    CandidateEntityObservationRetriggerResult,
+)
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integration_observation_retrigger import (
@@ -443,6 +446,43 @@ def test_cycle_runs_resource_observation_only_after_startup_observation_is_idle(
     assert calls == ["candidate_resource_observation"]
     assert result.candidate_startup_error_observation.processed is None
     assert result.candidate_resource_observation.processed == ("entity_observation_scheduled")
+    assert result.candidate_entity_observation.processed is None
+
+
+def test_cycle_runs_entity_observation_only_after_resource_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateEntityObservationRetriggerResult:
+        calls.append("candidate_entity_observation")
+        assert kwargs["token"] is None
+        return CandidateEntityObservationRetriggerResult(
+            0, 1, "automation_script_observation_scheduled"
+        )
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_entity_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_entity_observation"]
+    assert result.candidate_resource_observation.processed is None
+    assert result.candidate_entity_observation.processed == (
+        "automation_script_observation_scheduled"
+    )
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
