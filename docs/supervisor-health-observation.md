@@ -44,3 +44,13 @@ authorize Repo B promotion, tagging, rollback, or backup restore. Those remain
 separate ordered gates from the initial V2 README. Recurring Retrigger recovery
 remains enabled and must advance this gate only through the same exact evidence and
 bounded request boundary.
+
+## Retrigger handoff
+
+Production recovery claims only the exact `candidate_observe_supervisor` successor
+created after Core-window completion. The worker revalidates activation, acknowledged
+restart, and completed Core-window evidence before delegating to this read-only probe.
+Exact success atomically creates `candidate_observe_integrations` before Supervisor
+work completes. Persisted success replays without credentials or network access.
+Transport or unhealthy responses use bounded backoff; invalid configuration and
+tampered, malformed, or rebound authority are deterministically blocked.

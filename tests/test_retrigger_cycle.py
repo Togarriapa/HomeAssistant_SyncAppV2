@@ -15,6 +15,9 @@ from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateOb
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
 from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
+from ha_syncapp.candidate_supervisor_observation_retrigger import (
+    CandidateSupervisorObservationRetriggerResult,
+)
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
@@ -287,6 +290,43 @@ def test_cycle_runs_core_observation_only_after_restart_is_idle(
     assert calls == ["candidate_core_observation"]
     assert result.candidate_restart.processed is None
     assert result.candidate_core_observation.processed == "initial_health_recorded"
+    assert result.candidate_supervisor_observation.processed is None
+
+
+def test_cycle_runs_supervisor_observation_only_after_core_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateSupervisorObservationRetriggerResult:
+        calls.append("candidate_supervisor_observation")
+        assert kwargs["token"] is None
+        return CandidateSupervisorObservationRetriggerResult(
+            0, 1, "integration_observation_scheduled"
+        )
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_supervisor_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_supervisor_observation"]
+    assert result.candidate_core_observation.processed is None
+    assert result.candidate_supervisor_observation.processed == (
+        "integration_observation_scheduled"
+    )
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
