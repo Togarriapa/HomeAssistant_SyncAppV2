@@ -63,9 +63,7 @@ def test_failure_classification_controls_retry(tmp_path, transient, expected_sta
         store.enqueue_work("candidate_observe_supervisor", "deployment-1", now=NOW)
 
         def fail(*_args, **_kwargs):
-            raise CandidateSupervisorObservationExecutionError(
-                "sanitized", transient=transient
-            )
+            raise CandidateSupervisorObservationExecutionError("sanitized", transient=transient)
 
         with pytest.raises(CandidateSupervisorObservationRetriggerError) as caught:
             run_candidate_supervisor_observation_retrigger_pass(
@@ -78,4 +76,3 @@ def test_failure_classification_controls_retry(tmp_path, transient, expected_sta
         assert work.status == expected_status
         if transient:
             assert work.next_attempt_at == NOW + timedelta(seconds=60)
-

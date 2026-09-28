@@ -25,8 +25,10 @@ One cycle runs, in deterministic order:
     restart execution or reconciliation pass;
 17. if every earlier candidate lane performed no action, one bounded post-restart Core
     health-window action;
-18. trusted candidate detection;
-19. optional fresh Supervisor log collection.
+18. if every earlier candidate lane performed no action, one bounded Supervisor-health
+    observation;
+19. trusted candidate detection;
+20. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -86,6 +88,14 @@ At or after the deadline, one fresh exact Core proof is required. Completion ato
 creates `candidate_observe_supervisor` before the Core observation work succeeds.
 Transport unavailability receives bounded retry/backoff; corrupt, rebound, or malformed
 authority is blocked unchanged.
+
+The Supervisor observation pass accepts only `candidate_observe_supervisor` work
+created atomically after the completed Core window. It re-proves activation, restart,
+and Core-window authority, performs at most one bounded authenticated read, and accepts
+only exact `healthy: true` plus `supported: true` evidence. Success atomically creates
+`candidate_observe_integrations` before completing Supervisor work. Completed evidence
+replays without credentials or network access. Transport/unhealthy results back off;
+invalid credentials and corrupt or rebound evidence are blocked.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 

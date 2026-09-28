@@ -36,6 +36,8 @@ The recovery file exposes:
   without deployment IDs, authorization digests, credentials or request evidence.
 - `candidate_observe` Core health-window progress as the same content-free aggregates,
   without deployment IDs, deadlines, health digests, credentials or response content.
+- `candidate_observe_supervisor` health progress as the same content-free aggregates,
+  without deployment IDs, evidence digests, credentials or Supervisor response data.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
@@ -66,6 +68,10 @@ A successful `candidate_observe` item means only that exact Core API health was 
 at both ends of the configured interval and the Supervisor-observation successor was
 atomically scheduled. It does not mean that Supervisor, integrations, resources,
 entities, automations, assertions, promotion, or rollback have been evaluated.
+
+A successful `candidate_observe_supervisor` item means only that exact healthy and
+supported Supervisor evidence was persisted and integration observation was scheduled.
+It grants no finalization, promotion, restore, or rollback authority.
 
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
