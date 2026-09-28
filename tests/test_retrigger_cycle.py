@@ -8,6 +8,9 @@ from ha_syncapp.candidate_apply_execution_retrigger import (
 )
 from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
 from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
+from ha_syncapp.candidate_core_observation_retrigger import (
+    CandidateCoreObservationRetriggerResult,
+)
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
@@ -250,6 +253,40 @@ def test_cycle_runs_restart_only_after_all_candidate_apply_lanes_are_idle(
     assert calls == ["candidate_restart"]
     assert result.candidate_apply_execution.processed is None
     assert result.candidate_restart.processed == "observation_scheduled"
+    assert result.candidate_core_observation.processed is None
+
+
+def test_cycle_runs_core_observation_only_after_restart_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateCoreObservationRetriggerResult:
+        calls.append("candidate_core_observation")
+        assert kwargs["observation_seconds"] == 300
+        assert kwargs["token"] is None
+        return CandidateCoreObservationRetriggerResult(0, 1, "initial_health_recorded")
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_core_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_core_observation"]
+    assert result.candidate_restart.processed is None
+    assert result.candidate_core_observation.processed == "initial_health_recorded"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
