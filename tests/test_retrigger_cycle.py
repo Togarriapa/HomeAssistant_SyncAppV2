@@ -14,6 +14,9 @@ from ha_syncapp.candidate_core_observation_retrigger import (
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
+from ha_syncapp.candidate_integration_observation_retrigger import (
+    CandidateIntegrationObservationRetriggerResult,
+)
 from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_supervisor_observation_retrigger import (
     CandidateSupervisorObservationRetriggerResult,
@@ -326,6 +329,43 @@ def test_cycle_runs_supervisor_observation_only_after_core_observation_is_idle(
     assert result.candidate_core_observation.processed is None
     assert result.candidate_supervisor_observation.processed == (
         "integration_observation_scheduled"
+    )
+    assert result.candidate_integration_observation.processed is None
+
+
+def test_cycle_runs_integration_observation_only_after_supervisor_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateIntegrationObservationRetriggerResult:
+        calls.append("candidate_integration_observation")
+        assert kwargs["token"] is None
+        return CandidateIntegrationObservationRetriggerResult(
+            0, 1, "startup_error_observation_scheduled"
+        )
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_integration_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_integration_observation"]
+    assert result.candidate_supervisor_observation.processed is None
+    assert result.candidate_integration_observation.processed == (
+        "startup_error_observation_scheduled"
     )
 
 
