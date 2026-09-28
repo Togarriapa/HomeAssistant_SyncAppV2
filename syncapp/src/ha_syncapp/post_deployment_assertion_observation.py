@@ -32,6 +32,10 @@ _INVALID_STATES = {"unknown", "unavailable"}
 class PostDeploymentAssertionObservationError(RuntimeError):
     """Post-deployment assertions could not be evaluated safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True, init=False)
 class PostDeploymentAssertion:
@@ -294,8 +298,8 @@ def evaluate_post_deployment_assertions_once(
     if plan.assertions:
         try:
             states = _probe_states(token, timeout_seconds, max_message_bytes, session_factory)
-        except ResourceAvailabilityError:
-            _unavailable()
+        except ResourceAvailabilityError as error:
+            _unavailable(error.transient)
         for assertion in plan.assertions:
             matches = [
                 item
@@ -360,13 +364,10 @@ def load_post_deployment_assertion_observation(
         return result
     except PostDeploymentAssertionObservationError:
         raise
-    except (
-        AutomationScriptObservationError,
-        ResourceAvailabilityError,
-        StateError,
-        sqlite3.Error,
-    ):
+    except (AutomationScriptObservationError, ResourceAvailabilityError):
         _invalid_state()
+    except (StateError, sqlite3.Error):
+        _unavailable(True)
 
 
 def _record(
@@ -399,13 +400,10 @@ def _record(
         return _result(requested, False)
     except PostDeploymentAssertionObservationError:
         raise
-    except (
-        AutomationScriptObservationError,
-        ResourceAvailabilityError,
-        StateError,
-        sqlite3.Error,
-    ):
+    except (AutomationScriptObservationError, ResourceAvailabilityError):
         _invalid_state()
+    except (StateError, sqlite3.Error):
+        _unavailable(True)
 
 
 def _prerequisite(
@@ -493,7 +491,8 @@ def _invalid_state() -> NoReturn:
     ) from None
 
 
-def _unavailable() -> NoReturn:
+def _unavailable(transient: bool = False) -> NoReturn:
     raise PostDeploymentAssertionObservationError(
-        "post-deployment assertion observation is unavailable"
+        "post-deployment assertion observation is unavailable",
+        transient=transient,
     ) from None

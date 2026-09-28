@@ -106,6 +106,13 @@ that content-free load evidence was persisted and exactly one assertion or
 finalization successor was scheduled atomically. The projection exposes no
 deployment identity, entity ID, state, token, response body, digest, or mutation
 authority.
+
+`candidate_observe_assertions` is projected through the same bounded work
+counters and pending/ready aggregates. Success means only that content-free
+assertion counts were persisted and exact finalization work was scheduled. The
+projection excludes deployment identity, entity IDs, states, assertion JSON,
+credentials, response content, digests, and every promotion or rollback
+decision.
 Runtime output contains aggregate work status, attempts, readiness, and backoff
 only. It excludes deployment/entity identities, state values, attributes,
 credentials, response content, evidence digests, paths, and nested errors. This

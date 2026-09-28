@@ -143,6 +143,14 @@ proof schedules `candidate_observe_assertions`; a durable load failure schedules
 `candidate_finalize`. Empty subsets and completed outcomes replay offline. This
 lane runs only when every earlier candidate lane was idle, preserving the
 one-candidate-action-per-cycle boundary.
+
+The assertion-observation pass then accepts only `candidate_observe_assertions`,
+reconstructs the canonical assertion plan from the complete trusted evidence
+chain, and executes at most one bounded read-only state request. Both durable
+passed and failed results schedule `candidate_finalize` atomically; neither
+result directly grants promotion or rollback authority. Empty plans and
+completed outcomes replay offline. The lane runs only after automation/script
+observation is idle and preserves the one-candidate-action boundary.
 Incomplete resource availability, malformed or missing states, invalid
 credentials, rebinding, tampering, and successor conflicts block unchanged work;
 transport unavailability uses bounded backoff. Completed outcomes replay offline.
