@@ -21,8 +21,10 @@ One cycle runs, in deterministic order:
     admission pass;
 15. if admission performed no action, one bounded admitted candidate Apply execution
     or reconciliation pass;
-16. trusted candidate detection;
-17. optional fresh Supervisor log collection.
+16. if every earlier candidate lane performed no action, one bounded authorized Core
+    restart execution or reconciliation pass;
+17. trusted candidate detection;
+18. optional fresh Supervisor log collection.
 
 Each lane preserves its own durable success, deterministic block, and bounded transient retry semantics. The cycle requires the live Home Assistant root, Recorder database path, isolated staging/workspace roots for every lane, Repo B target, GitHub credential, and optional Home Assistant Core API credential as explicit inputs. It does not discover paths or credentials.
 
@@ -57,6 +59,21 @@ controller. A cycle can perform at most one live operation or one read-only
 reconciliation. Partial success is deferred as normal pending work; deterministic
 blocks are not retried unchanged. Completion persists activation authority before
 any restart successor is enqueued. The lane never calls a restart API itself.
+
+The candidate restart pass accepts only the exact `candidate_restart` successor and
+the integrity-protected activation authorization persisted by completed Apply. It
+recovers interrupted ledger claims, processes at most one restart item, and delegates
+the mutation exclusively to the journal-before-POST restart transport. A fresh exact
+Supervisor acknowledgement atomically completes restart work and creates the pending
+`candidate_observe` successor. An already acknowledged restart replays to the same
+transition without credentials or network access.
+
+A journal left at `request_started` is an uncertain mutation outcome, not transient
+retry authority. Retrigger blocks that exact restart item without issuing another
+request; malformed, tampered, or rebound authority is blocked in the same fail-closed
+way. No observation work is created from a blocked outcome. This keeps the one-action
+candidate ordering intact and prevents automatic backoff from repeating a Core
+restart whose result is unknown.
 
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
