@@ -191,9 +191,7 @@ def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
-def test_transport_and_invalid_credential_have_typed_sanitized_failures(
-    tmp_path, monkeypatch
-):
+def test_transport_and_invalid_credential_have_typed_sanitized_failures(tmp_path, monkeypatch):
     chain, target = _valid(tmp_path, monkeypatch, ("automation.arrival",))
     store = chain[0]
     try:
@@ -214,9 +212,7 @@ def test_transport_and_invalid_credential_have_typed_sanitized_failures(
                 store,
                 target,
                 token=" invalid ",
-                session_factory=lambda *_args: pytest.fail(
-                    "invalid credential opened a session"
-                ),
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
             )
         assert deterministic.value.transient is False
     finally:

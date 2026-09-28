@@ -130,9 +130,7 @@ def test_transport_retries_but_invalid_credential_blocks(tmp_path, monkeypatch) 
                 store,
                 item,
                 token=" invalid ",
-                session_factory=lambda *_args: pytest.fail(
-                    "invalid credential opened a session"
-                ),
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
                 now=now,
             )
         assert deterministic.value.transient is False
@@ -140,9 +138,7 @@ def test_transport_retries_but_invalid_credential_blocks(tmp_path, monkeypatch) 
         store.__exit__(None, None, None)
 
 
-def test_cross_branch_successor_conflict_rolls_back_completion(
-    tmp_path, monkeypatch
-) -> None:
+def test_cross_branch_successor_conflict_rolls_back_completion(tmp_path, monkeypatch) -> None:
     chain, _target, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     original = execution.observe_automation_scripts_once

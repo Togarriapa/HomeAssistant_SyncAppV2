@@ -31,6 +31,10 @@ _LOADED_STATES = {"on", "off"}
 class AutomationScriptObservationError(RuntimeError):
     """Automation/script loading could not be proved safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True, init=False)
 class AutomationScriptTarget:
@@ -230,8 +234,8 @@ def observe_automation_scripts_once(
     if target.entity_ids:
         try:
             states = _probe_states(token, timeout_seconds, max_message_bytes, session_factory)
-        except ResourceAvailabilityError:
-            _unavailable()
+        except ResourceAvailabilityError as error:
+            _unavailable(error.transient)
         for entity in target.entity_ids:
             matches = [
                 item for item in states if type(item) is dict and item.get("entity_id") == entity
@@ -360,5 +364,7 @@ def _invalid_state() -> NoReturn:
     ) from None
 
 
-def _unavailable() -> NoReturn:
-    raise AutomationScriptObservationError("automation/script observation is unavailable") from None
+def _unavailable(transient: bool = False) -> NoReturn:
+    raise AutomationScriptObservationError(
+        "automation/script observation is unavailable", transient=transient
+    ) from None
