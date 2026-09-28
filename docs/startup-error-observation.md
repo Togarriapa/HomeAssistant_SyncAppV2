@@ -34,3 +34,17 @@ The transaction re-proves the exact integration and restart bindings before
 writing. Both clear and significant-error results replay without credentials or
 network access. This observer is read-only: it cannot clear logs, change logger
 configuration, restart Core, mutate Home Assistant state, or write Git refs.
+
+## Retrigger handoff
+
+Retrigger recovers stale `candidate_observe_startup_errors` claims and processes at
+most one ready item per cycle. It re-proves the complete post-Apply evidence chain
+before invoking this observer. A clear result atomically completes the current work
+and creates `candidate_observe_resources`; a significant-error result instead creates
+`candidate_finalize` and never resource work. Conflicting successors fail closed.
+
+Transient session failures use the existing bounded retry/backoff policy. Invalid or
+rejected credentials, malformed configuration, corrupt evidence, and invalid result
+shapes are deterministically blocked. Runtime inventory exposes only content-free
+aggregate lifecycle counts, and persisted clear or failed observations replay without
+credentials or another network request.

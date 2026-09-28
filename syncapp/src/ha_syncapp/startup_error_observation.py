@@ -51,6 +51,10 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 class StartupErrorObservationError(RuntimeError):
     """Startup error evidence could not be observed or validated safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True, init=False)
 class StartupErrorObservation:
@@ -327,6 +331,8 @@ def _probe_system_log(
                 _unavailable()
             _send_json(session, {"type": "auth", "access_token": bearer}, max_message_bytes)
             authenticated = _receive_json(session, timeout_seconds, max_message_bytes)
+            if type(authenticated) is dict and authenticated.get("type") == "auth_invalid":
+                _invalid_input()
             if type(authenticated) is not dict or authenticated.get("type") != "auth_ok":
                 _unavailable()
             _send_json(session, {"id": 1, "type": "system_log/list"}, max_message_bytes)
@@ -479,7 +485,7 @@ def _resolve_token(token: str | None) -> str:
         or candidate != candidate.strip()
         or any(ord(character) < 0x20 or ord(character) == 0x7F for character in candidate)
     ):
-        _unavailable()
+        _invalid_input()
     return candidate
 
 
@@ -492,7 +498,7 @@ def _validate_limits(timeout_seconds: float, max_message_bytes: int) -> None:
         or type(max_message_bytes) is not int
         or not 0 < max_message_bytes <= 16 * 1024 * 1024
     ):
-        _unavailable()
+        _invalid_input()
 
 
 def _epoch(value: object) -> datetime:
@@ -554,7 +560,14 @@ def _text(value: object) -> str:
 
 
 def _unavailable() -> NoReturn:
-    raise StartupErrorObservationError("Startup error observation is unavailable") from None
+    raise StartupErrorObservationError(
+        "Startup error observation is unavailable",
+        transient=True,
+    ) from None
+
+
+def _invalid_input() -> NoReturn:
+    raise StartupErrorObservationError("Startup error observation input is invalid") from None
 
 
 def _invalid_state() -> NoReturn:

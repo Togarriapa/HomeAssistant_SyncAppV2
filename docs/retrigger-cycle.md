@@ -107,6 +107,17 @@ evidence replays without credentials or network access. Session or initializatio
 unavailability receives bounded backoff; invalid inputs and corrupt authority are
 blocked.
 
+The startup-error observation pass accepts only `candidate_observe_startup_errors`
+work created atomically after integration initialization. It freshly re-proves the
+activation, acknowledged restart, completed Core window, Supervisor health, and
+integration evidence chain before one bounded read-only `system_log/list` request.
+Only records in the acknowledged-restart interval are inspected. New warnings are
+counted; new `ERROR` or `CRITICAL` entries durably schedule `candidate_finalize` and
+can never enter resource observation. A clear outcome atomically schedules
+`candidate_observe_resources`. Both outcomes replay without credentials or network
+access. Session unavailability receives bounded backoff, while invalid credentials,
+configuration, or evidence are blocked unchanged.
+
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
 ## Cron-invocable same-owner trigger

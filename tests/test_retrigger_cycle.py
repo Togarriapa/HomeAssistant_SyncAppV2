@@ -18,6 +18,9 @@ from ha_syncapp.candidate_integration_observation_retrigger import (
 )
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
 from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
+from ha_syncapp.candidate_startup_error_observation_retrigger import (
+    CandidateStartupErrorObservationRetriggerResult,
+)
 from ha_syncapp.candidate_supervisor_observation_retrigger import (
     CandidateSupervisorObservationRetriggerResult,
 )
@@ -366,6 +369,43 @@ def test_cycle_runs_integration_observation_only_after_supervisor_observation_is
     assert result.candidate_supervisor_observation.processed is None
     assert result.candidate_integration_observation.processed == (
         "startup_error_observation_scheduled"
+    )
+    assert result.candidate_startup_error_observation.processed is None
+
+
+def test_cycle_runs_startup_error_observation_only_after_integration_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateStartupErrorObservationRetriggerResult:
+        calls.append("candidate_startup_error_observation")
+        assert kwargs["token"] is None
+        return CandidateStartupErrorObservationRetriggerResult(
+            0, 1, "resource_observation_scheduled"
+        )
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_startup_error_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_startup_error_observation"]
+    assert result.candidate_integration_observation.processed is None
+    assert result.candidate_startup_error_observation.processed == (
+        "resource_observation_scheduled"
     )
 
 
