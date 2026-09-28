@@ -171,7 +171,7 @@ def _finish(
             current = when.isoformat()
             db.execute(
                 "INSERT INTO work (work_kind,work_key,status,attempts,created_at,updated_at,"
-                "next_attempt_at) VALUES (? ,?,'pending',0,?,?,?)",
+                "next_attempt_at) VALUES (?,?,'pending',0,?,?,?)",
                 (successor_kind, item.work_key, current, current, current),
             )
             changed = db.execute(

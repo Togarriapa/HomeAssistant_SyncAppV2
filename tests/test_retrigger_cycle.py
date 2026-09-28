@@ -16,11 +16,11 @@ from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetrig
 from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
 )
+from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
+from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_startup_error_observation_retrigger import (
     CandidateStartupErrorObservationRetriggerResult,
 )
-from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
-from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_supervisor_observation_retrigger import (
     CandidateSupervisorObservationRetriggerResult,
 )
@@ -380,9 +380,7 @@ def test_cycle_runs_startup_error_observation_only_after_integration_observation
     store = _store(tmp_path)
     calls: list[str] = []
 
-    def observe(
-        *args: object, **kwargs: object
-    ) -> CandidateStartupErrorObservationRetriggerResult:
+    def observe(*args: object, **kwargs: object) -> CandidateStartupErrorObservationRetriggerResult:
         calls.append("candidate_startup_error_observation")
         assert kwargs["token"] is None
         return CandidateStartupErrorObservationRetriggerResult(

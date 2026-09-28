@@ -80,6 +80,14 @@ work status, attempts, readiness, and backoff; it excludes deployment and config
 identities, credentials, response content, and nested errors. This evidence grants no
 finalization, promotion, restore, rollback, or mutation authority.
 
+A successful `candidate_observe_startup_errors` item means only that a durable clear
+or significant-error outcome was bound to the exact prerequisite chain and the
+corresponding resource-observation or finalization successor was atomically scheduled.
+Runtime output exposes only aggregate work status, attempts, readiness, and backoff;
+it excludes deployment identities, log messages, logger names, paths, credentials,
+response content, evidence digests, and nested errors. This read-only stage grants no
+direct mutation, promotion, restore, or rollback authority.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,
