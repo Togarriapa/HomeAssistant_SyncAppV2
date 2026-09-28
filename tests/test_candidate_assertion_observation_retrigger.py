@@ -68,9 +68,7 @@ def test_failure_classification_controls_retry(
         store.enqueue_work("candidate_observe_assertions", "deployment-1", now=NOW)
 
         def fail(*_args, **_kwargs):
-            raise CandidateAssertionObservationExecutionError(
-                "sanitized", transient=transient
-            )
+            raise CandidateAssertionObservationExecutionError("sanitized", transient=transient)
 
         with pytest.raises(CandidateAssertionObservationRetriggerError) as caught:
             run_candidate_assertion_observation_retrigger_pass(

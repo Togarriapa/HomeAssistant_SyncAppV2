@@ -41,3 +41,12 @@ Completed pass and deterministic-failure outcomes replay without credentials or
 network access and reject deployment, target, prerequisite, or assertion-set
 rebinding. This observer grants no Apply, restart, promotion, tagging, rollback,
 Supervisor, Home Assistant, backup, or Git mutation authority.
+
+Production recovery claims only exact `candidate_observe_assertions` work.
+Stale `running` work is returned to retry eligibility transactionally, and one
+pass processes at most one due deployment. Both durable passed and failed
+outcomes atomically schedule `candidate_finalize`; finalization reads the
+persisted outcome and remains solely responsible for granting promotion or
+rollback authority. Transport, session, and storage interruption use bounded
+retry, while invalid credentials/configuration, prerequisite rebinding,
+tampering, noncanonical plans, and successor conflicts block unchanged work.

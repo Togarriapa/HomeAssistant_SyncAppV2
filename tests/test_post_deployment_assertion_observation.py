@@ -243,9 +243,7 @@ def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
         "BEGIN SELECT RAISE(ABORT, 'secret-storage-detail'); END"
     )
     try:
-        with pytest.raises(
-            PostDeploymentAssertionObservationError, match="unavailable"
-        ) as error:
+        with pytest.raises(PostDeploymentAssertionObservationError, match="unavailable") as error:
             evaluate_post_deployment_assertions_once(
                 store,
                 plan,

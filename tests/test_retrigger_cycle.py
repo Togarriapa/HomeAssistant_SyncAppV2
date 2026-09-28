@@ -537,9 +537,7 @@ def test_cycle_runs_assertion_observation_only_after_automation_observation_is_i
     def observe(*args: object, **kwargs: object) -> CandidateAssertionObservationRetriggerResult:
         calls.append("candidate_assertion_observation")
         assert kwargs["token"] is None
-        return CandidateAssertionObservationRetriggerResult(
-            0, 1, "finalization_scheduled"
-        )
+        return CandidateAssertionObservationRetriggerResult(0, 1, "finalization_scheduled")
 
     monkeypatch.setattr(
         retrigger_cycle,
