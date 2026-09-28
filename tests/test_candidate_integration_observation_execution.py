@@ -131,9 +131,7 @@ def test_invalid_credential_is_deterministic_and_network_free(tmp_path, monkeypa
         store.__exit__(None, None, None)
 
 
-def test_tampered_supervisor_proof_is_deterministic_and_network_free(
-    tmp_path, monkeypatch
-) -> None:
+def test_tampered_supervisor_proof_is_deterministic_and_network_free(tmp_path, monkeypatch) -> None:
     chain, _authorization, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     store._connection.execute(
