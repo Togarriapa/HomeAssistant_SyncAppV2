@@ -184,6 +184,32 @@ def test_resource_availability_proof_is_required(tmp_path, monkeypatch):
         store.__exit__(None, None, None)
 
 
+def test_missing_resource_evidence_cannot_authorize_entity_probe(tmp_path, monkeypatch):
+    chain, _authorization, prepared = _ready(tmp_path, monkeypatch)
+    store = chain[0]
+    target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
+    observe_changed_resources_once(
+        store,
+        target,
+        token=TOKEN,
+        observed_at=START + timedelta(seconds=304),
+        session_factory=_factory(FakeSession(_responses([]))),
+    )
+    try:
+        with pytest.raises(EntityStateObservationError) as caught:
+            observe_entity_states_once(
+                store,
+                target,
+                session_factory=lambda *_args: pytest.fail(
+                    "missing resource evidence opened a state probe"
+                ),
+            )
+        assert caught.value.transient is False
+        assert load_entity_state_observation(store, target) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_rebinding_tampering_and_temporal_drift_fail_closed(tmp_path, monkeypatch):
     chain, authorization, target = _available(tmp_path, monkeypatch, ())
     store = chain[0]
