@@ -106,7 +106,6 @@ def test_empty_target_and_completed_replay_need_no_credentials_or_network(tmp_pa
 @pytest.mark.parametrize(
     "states",
     [
-        [],
         [
             {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
             {"entity_id": "light.kitchen", "state": "off", "attributes": {}},
@@ -120,7 +119,7 @@ def test_missing_duplicate_or_malformed_state_persists_no_success(tmp_path, monk
     store = chain[0]
     target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
     try:
-        with pytest.raises(ResourceAvailabilityError, match="unavailable"):
+        with pytest.raises(ResourceAvailabilityError, match="input is invalid") as error:
             observe_changed_resources_once(
                 store,
                 target,
@@ -128,7 +127,77 @@ def test_missing_duplicate_or_malformed_state_persists_no_success(tmp_path, monk
                 observed_at=START + timedelta(seconds=304),
                 session_factory=_factory(FakeSession(_responses(states))),
             )
+        assert error.value.transient is False
         assert load_resource_availability_observation(store, target) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_valid_missing_resource_is_durable_and_replays_without_network(tmp_path, monkeypatch):
+    chain, authorization, prepared = _ready(tmp_path, monkeypatch)
+    store = chain[0]
+    target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen", "sensor.outside"))
+    try:
+        first = observe_changed_resources_once(
+            store,
+            target,
+            token=TOKEN,
+            observed_at=START + timedelta(seconds=304),
+            session_factory=_factory(
+                FakeSession(
+                    _responses(
+                        [
+                            {
+                                "entity_id": "light.kitchen",
+                                "state": "on",
+                                "attributes": {},
+                            }
+                        ]
+                    )
+                )
+            ),
+        )
+        replay = observe_changed_resources_once(
+            store,
+            target,
+            session_factory=lambda *_args: pytest.fail("replay opened a session"),
+        )
+        assert first.status == "missing_resources"
+        assert first.expected_count == 2
+        assert first.available_count == 1
+        assert replay.status == "missing_resources"
+        assert replay.replayed is True
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_transport_failure_is_typed_transient_and_invalid_credential_is_deterministic(
+    tmp_path, monkeypatch
+):
+    chain, _authorization, prepared = _ready(tmp_path, monkeypatch)
+    store = chain[0]
+    target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
+    try:
+        with pytest.raises(ResourceAvailabilityError) as unavailable:
+            observe_changed_resources_once(
+                store,
+                target,
+                token=TOKEN,
+                session_factory=lambda *_args: (_ for _ in ()).throw(
+                    TimeoutError("private transport detail")
+                ),
+            )
+        assert unavailable.value.transient is True
+        assert "private" not in str(unavailable.value).lower()
+
+        with pytest.raises(ResourceAvailabilityError) as invalid:
+            observe_changed_resources_once(
+                store,
+                target,
+                token=" invalid ",
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
+            )
+        assert invalid.value.transient is False
     finally:
         store.__exit__(None, None, None)
 

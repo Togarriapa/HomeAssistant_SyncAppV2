@@ -88,6 +88,14 @@ it excludes deployment identities, log messages, logger names, paths, credential
 response content, evidence digests, and nested errors. This read-only stage grants no
 direct mutation, promotion, restore, or rollback authority.
 
+A successful `candidate_observe_resources` item means only that exact derived-resource
+availability or missing-resource evidence was persisted and its corresponding
+entity-observation or finalization successor was atomically scheduled. Runtime output
+contains only aggregate work status, attempts, readiness, and backoff. It excludes
+deployment and entity identities, states, attributes, candidate evidence, credentials,
+response content, paths, and nested errors. The observation itself grants no mutation,
+promotion, restore, or rollback authority.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,
