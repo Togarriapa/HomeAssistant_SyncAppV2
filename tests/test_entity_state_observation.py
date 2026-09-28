@@ -117,13 +117,13 @@ def test_empty_target_and_success_replay_are_credential_and_network_free(tmp_pat
         store.__exit__(None, None, None)
 
 
-def test_missing_or_malformed_expected_state_is_transport_failure_not_durable(
+def test_missing_or_malformed_expected_state_is_deterministic_and_not_durable(
     tmp_path, monkeypatch
 ):
     chain, authorization, target = _available(tmp_path, monkeypatch)
     store = chain[0]
     try:
-        with pytest.raises(EntityStateObservationError, match="unavailable"):
+        with pytest.raises(EntityStateObservationError, match="unavailable") as caught:
             observe_entity_states_once(
                 store,
                 target,
@@ -131,7 +131,40 @@ def test_missing_or_malformed_expected_state_is_transport_failure_not_durable(
                 observed_at=START + timedelta(seconds=305),
                 session_factory=_factory(FakeSession(_responses([]))),
             )
+        assert caught.value.transient is False
         assert load_entity_state_observation(store, target) is None
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_transport_and_credential_failures_are_typed_without_leaking_details(
+    tmp_path, monkeypatch
+):
+    chain, _authorization, target = _available(tmp_path, monkeypatch)
+    store = chain[0]
+    try:
+        with pytest.raises(EntityStateObservationError) as transient:
+            observe_entity_states_once(
+                store,
+                target,
+                token=TOKEN,
+                session_factory=lambda *_args: (_ for _ in ()).throw(
+                    TimeoutError("private transport detail")
+                ),
+            )
+        assert transient.value.transient is True
+        assert "private" not in str(transient.value).lower()
+
+        with pytest.raises(EntityStateObservationError) as deterministic:
+            observe_entity_states_once(
+                store,
+                target,
+                token=" invalid ",
+                session_factory=lambda *_args: pytest.fail(
+                    "invalid credential opened a session"
+                ),
+            )
+        assert deterministic.value.transient is False
     finally:
         store.__exit__(None, None, None)
 
