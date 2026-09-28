@@ -7,6 +7,9 @@ from ha_syncapp.candidate_apply_execution_retrigger import (
     CandidateApplyExecutionRetriggerResult,
 )
 from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
+from ha_syncapp.candidate_assertion_observation_retrigger import (
+    CandidateAssertionObservationRetriggerResult,
+)
 from ha_syncapp.candidate_automation_observation_retrigger import (
     CandidateAutomationObservationRetriggerResult,
 )
@@ -521,6 +524,41 @@ def test_cycle_runs_automation_observation_only_after_entity_observation_is_idle
     assert calls == ["candidate_automation_observation"]
     assert result.candidate_entity_observation.processed is None
     assert result.candidate_automation_observation.processed == ("assertion_observation_scheduled")
+    assert result.candidate_assertion_observation.processed is None
+
+
+def test_cycle_runs_assertion_observation_only_after_automation_observation_is_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def observe(*args: object, **kwargs: object) -> CandidateAssertionObservationRetriggerResult:
+        calls.append("candidate_assertion_observation")
+        assert kwargs["token"] is None
+        return CandidateAssertionObservationRetriggerResult(
+            0, 1, "finalization_scheduled"
+        )
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_candidate_assertion_observation_retrigger_pass",
+        observe,
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_assertion_observation"]
+    assert result.candidate_automation_observation.processed is None
+    assert result.candidate_assertion_observation.processed == "finalization_scheduled"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
