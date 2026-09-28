@@ -257,6 +257,8 @@ def _probe_integrations(
                 _unavailable()
             _send_json(session, {"type": "auth", "access_token": bearer}, max_message_bytes)
             authenticated = _receive_json(session, timeout_seconds, max_message_bytes)
+            if type(authenticated) is dict and authenticated.get("type") == "auth_invalid":
+                _invalid_input()
             if type(authenticated) is not dict or authenticated.get("type") != "auth_ok":
                 _unavailable()
             _send_json(session, {"id": 1, "type": "config_entries/get"}, max_message_bytes)

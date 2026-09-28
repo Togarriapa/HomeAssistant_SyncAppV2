@@ -31,3 +31,14 @@ evidence fails closed and cannot authorize a later deployment gate.
 
 This gate is observational only. It cannot enable an integration, retry setup,
 change configuration, restart Core, or mutate a Git repository.
+
+## Retrigger handoff
+
+Production recovery claims only the exact `candidate_observe_integrations` successor
+created after Supervisor-health completion. The worker revalidates activation,
+acknowledged restart, completed Core-window, and Supervisor evidence before delegating
+to this observer. Exact success atomically creates `candidate_observe_startup_errors`
+before integration work completes. Persisted success replays without credentials or a
+network session. Session or initialization unavailability uses bounded backoff; invalid
+inputs and tampered, malformed, or rebound prerequisite authority are deterministically
+blocked.

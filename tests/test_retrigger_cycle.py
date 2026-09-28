@@ -13,10 +13,10 @@ from ha_syncapp.candidate_core_observation_retrigger import (
 )
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
-from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
 from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
 )
+from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
 from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_supervisor_observation_retrigger import (
     CandidateSupervisorObservationRetriggerResult,

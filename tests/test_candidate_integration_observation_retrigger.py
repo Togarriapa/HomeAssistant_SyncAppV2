@@ -65,9 +65,7 @@ def test_failure_classification_controls_retry(tmp_path, transient, expected_sta
         store.enqueue_work("candidate_observe_integrations", "deployment-1", now=NOW)
 
         def fail(*_args, **_kwargs):
-            raise CandidateIntegrationObservationExecutionError(
-                "sanitized", transient=transient
-            )
+            raise CandidateIntegrationObservationExecutionError("sanitized", transient=transient)
 
         with pytest.raises(CandidateIntegrationObservationRetriggerError) as caught:
             run_candidate_integration_observation_retrigger_pass(

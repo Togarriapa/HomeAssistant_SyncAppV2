@@ -73,6 +73,13 @@ A successful `candidate_observe_supervisor` item means only that exact healthy a
 supported Supervisor evidence was persisted and integration observation was scheduled.
 It grants no finalization, promotion, restore, or rollback authority.
 
+A successful `candidate_observe_integrations` item means only that every enabled
+config entry reported exact state `loaded`, disabled entries were safely excluded,
+and startup-error observation was scheduled. Runtime output includes only aggregate
+work status, attempts, readiness, and backoff; it excludes deployment and config-entry
+identities, credentials, response content, and nested errors. This evidence grants no
+finalization, promotion, restore, rollback, or mutation authority.
+
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,
 Supervisor job UUIDs or record digests. It contains only phase, reconciliation state,

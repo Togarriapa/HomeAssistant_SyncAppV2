@@ -41,6 +41,11 @@ from ha_syncapp.candidate_fetch_stage_retrigger import (
     CandidateFetchStageRetriggerResult,
     run_candidate_fetch_stage_retrigger_pass,
 )
+from ha_syncapp.candidate_integration_observation_retrigger import (
+    CandidateIntegrationObservationRetriggerError,
+    CandidateIntegrationObservationRetriggerResult,
+    run_candidate_integration_observation_retrigger_pass,
+)
 from ha_syncapp.candidate_integrity_retrigger import (
     CandidateIntegrityRetriggerError,
     CandidateIntegrityRetriggerResult,
@@ -142,6 +147,7 @@ class RetriggerCycleResult:
     candidate_restart: CandidateRestartRetriggerResult
     candidate_core_observation: CandidateCoreObservationRetriggerResult
     candidate_supervisor_observation: CandidateSupervisorObservationRetriggerResult
+    candidate_integration_observation: CandidateIntegrationObservationRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -448,6 +454,32 @@ def run_retrigger_cycle(
                 0, 0, None
             )
 
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+            and candidate_risk.processed is None
+            and candidate_static.processed is None
+            and candidate_semantic.processed is None
+            and candidate_backup.processed is None
+            and candidate_apply.processed is None
+            and candidate_apply_execution.processed is None
+            and candidate_restart.processed is None
+            and candidate_core_observation.processed is None
+            and candidate_supervisor_observation.processed is None
+        ):
+            candidate_integration_observation = (
+                run_candidate_integration_observation_retrigger_pass(
+                    store,
+                    token=None,
+                    reference_time=recovery_reference_time or datetime.now(UTC),
+                )
+            )
+        else:
+            candidate_integration_observation = CandidateIntegrationObservationRetriggerResult(
+                0, 0, None
+            )
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -487,6 +519,7 @@ def run_retrigger_cycle(
         CandidateRestartRetriggerError,
         CandidateCoreObservationRetriggerError,
         CandidateSupervisorObservationRetriggerError,
+        CandidateIntegrationObservationRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -510,6 +543,7 @@ def run_retrigger_cycle(
         candidate_restart=candidate_restart,
         candidate_core_observation=candidate_core_observation,
         candidate_supervisor_observation=candidate_supervisor_observation,
+        candidate_integration_observation=candidate_integration_observation,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

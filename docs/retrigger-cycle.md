@@ -97,6 +97,16 @@ only exact `healthy: true` plus `supported: true` evidence. Success atomically c
 replays without credentials or network access. Transport/unhealthy results back off;
 invalid credentials and corrupt or rebound evidence are blocked.
 
+The integration observation pass accepts only `candidate_observe_integrations` work
+created atomically after the exact Supervisor proof. It re-proves the complete
+activation, restart, Core-window, and Supervisor chain before opening one bounded
+authenticated Core WebSocket session. Every enabled config entry must report exact
+state `loaded`; explicitly disabled entries are counted but excluded. Success atomically
+creates `candidate_observe_startup_errors` before integration work completes. Completed
+evidence replays without credentials or network access. Session or initialization
+unavailability receives bounded backoff; invalid inputs and corrupt authority are
+blocked.
+
 If an earlier lane cannot complete its bounded pass safely, the cycle fails closed before starting later lanes. A Local-sync failure prevents both database and runtime work. A database failure prevents runtime work. Returned errors are sanitized rather than forwarding nested exception text or credentials.
 
 ## Cron-invocable same-owner trigger
