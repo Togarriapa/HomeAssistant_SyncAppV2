@@ -184,6 +184,7 @@ def test_transport_failure_is_incomplete_retryable_and_sanitized(tmp_path, monke
                 session_factory=_factory(FakeSession([RuntimeError("secret-transport")])),
             )
         assert "secret-transport" not in str(error.value)
+        assert error.value.transient is True
         assert load_post_deployment_assertion_observation(store, plan) is None
     finally:
         store.__exit__(None, None, None)
@@ -251,6 +252,7 @@ def test_persistence_failure_is_sanitized_and_retryable(tmp_path, monkeypatch):
                 observed_at=START + timedelta(seconds=307),
             )
         assert "secret-storage-detail" not in str(error.value)
+        assert error.value.transient is True
         assert load_post_deployment_assertion_observation(store, plan) is None
     finally:
         store.__exit__(None, None, None)
