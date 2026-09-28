@@ -8,6 +8,7 @@ from ha_syncapp.candidate_apply_execution_retrigger import (
 )
 from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
 from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
+from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_fetch_stage_retrigger import CandidateFetchStageRetriggerResult
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
@@ -220,6 +221,35 @@ def test_cycle_advances_apply_execution_only_after_admission_is_idle(
     assert calls == ["candidate_apply_execution"]
     assert result.candidate_apply.processed is None
     assert result.candidate_apply_execution.processed == "operation_verified"
+    assert result.candidate_restart.processed is None
+
+
+def test_cycle_runs_restart_only_after_all_candidate_apply_lanes_are_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    calls: list[str] = []
+
+    def restart(*args: object, **kwargs: object) -> CandidateRestartRetriggerResult:
+        calls.append("candidate_restart")
+        assert kwargs["token"] is None
+        return CandidateRestartRetriggerResult(0, 1, "observation_scheduled")
+
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_restart_retrigger_pass", restart)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        result = _run(store, tmp_path)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert calls == ["candidate_restart"]
+    assert result.candidate_apply_execution.processed is None
+    assert result.candidate_restart.processed == "observation_scheduled"
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(
