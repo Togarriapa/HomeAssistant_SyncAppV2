@@ -73,4 +73,3 @@ def test_failure_classification_controls_retry(tmp_path, transient, expected_sta
         assert work.status == expected_status
         if transient:
             assert work.next_attempt_at == NOW + timedelta(seconds=60)
-
