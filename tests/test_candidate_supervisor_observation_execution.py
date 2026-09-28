@@ -96,9 +96,12 @@ def test_unavailable_supervisor_is_transient_and_sanitized(tmp_path, monkeypatch
             )
         assert caught.value.transient is True
         assert "private" not in str(caught.value).lower()
-        assert store._connection.execute(
-            "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_integrations'"
-        ).fetchone()[0] == 0
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_integrations'"
+            ).fetchone()[0]
+            == 0
+        )
     finally:
         store.__exit__(None, None, None)
 

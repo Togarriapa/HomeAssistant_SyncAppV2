@@ -31,6 +31,10 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 class SupervisorHealthError(RuntimeError):
     """The exact Supervisor health proof could not be established safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class SupervisorHealthResponse:
@@ -241,7 +245,7 @@ def probe_supervisor_health(
         )
         _validate_response(response, max_response_bytes)
     except Exception:
-        raise SupervisorHealthError("Supervisor health is unavailable") from None
+        raise SupervisorHealthError("Supervisor health is unavailable", transient=True) from None
 
 
 def _validate_response(response: SupervisorHealthResponse, max_response_bytes: int) -> None:
