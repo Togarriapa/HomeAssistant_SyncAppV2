@@ -99,6 +99,13 @@ promotion, restore, or rollback authority.
 A successful `candidate_observe_entities` item means only that content-free
 valid/invalid aggregate evidence was persisted and the exact authorized
 automation/script-observation or finalization successor was scheduled atomically.
+
+`candidate_observe_automation_scripts` is projected through the same bounded
+work counters and pending/ready aggregates. Its successful state means only
+that content-free load evidence was persisted and exactly one assertion or
+finalization successor was scheduled atomically. The projection exposes no
+deployment identity, entity ID, state, token, response body, digest, or mutation
+authority.
 Runtime output contains aggregate work status, attempts, readiness, and backoff
 only. It excludes deployment/entity identities, state values, attributes,
 credentials, response content, evidence digests, paths, and nested errors. This

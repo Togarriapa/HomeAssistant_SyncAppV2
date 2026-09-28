@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import retrigger_cycle
-from ha_syncapp.candidate_automation_observation_retrigger import (
-    CandidateAutomationObservationRetriggerResult,
-)
 from ha_syncapp.candidate_apply_execution_retrigger import (
     CandidateApplyExecutionRetriggerResult,
 )
 from ha_syncapp.candidate_apply_retrigger import CandidateApplyRetriggerResult
+from ha_syncapp.candidate_automation_observation_retrigger import (
+    CandidateAutomationObservationRetriggerResult,
+)
 from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_core_observation_retrigger import (
     CandidateCoreObservationRetriggerResult,
@@ -496,9 +496,7 @@ def test_cycle_runs_automation_observation_only_after_entity_observation_is_idle
     store = _store(tmp_path)
     calls: list[str] = []
 
-    def observe(
-        *args: object, **kwargs: object
-    ) -> CandidateAutomationObservationRetriggerResult:
+    def observe(*args: object, **kwargs: object) -> CandidateAutomationObservationRetriggerResult:
         calls.append("candidate_automation_observation")
         assert kwargs["token"] is None
         return CandidateAutomationObservationRetriggerResult(
@@ -522,9 +520,7 @@ def test_cycle_runs_automation_observation_only_after_entity_observation_is_idle
 
     assert calls == ["candidate_automation_observation"]
     assert result.candidate_entity_observation.processed is None
-    assert result.candidate_automation_observation.processed == (
-        "assertion_observation_scheduled"
-    )
+    assert result.candidate_automation_observation.processed == ("assertion_observation_scheduled")
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

@@ -134,6 +134,15 @@ from persisted trusted evidence and makes at most one bounded read-only
 `get_states` request. Valid states atomically schedule
 `candidate_observe_automation_scripts`; durable `unknown` or `unavailable`
 states schedule `candidate_finalize` and never automation/script observation.
+
+The following automation/script observation pass accepts only
+`candidate_observe_automation_scripts`, revalidates its exact prerequisite
+chain, derives the automation/script subset from the authorized affected
+resources, and executes at most one bounded read-only state request. A loaded
+proof schedules `candidate_observe_assertions`; a durable load failure schedules
+`candidate_finalize`. Empty subsets and completed outcomes replay offline. This
+lane runs only when every earlier candidate lane was idle, preserving the
+one-candidate-action-per-cycle boundary.
 Incomplete resource availability, malformed or missing states, invalid
 credentials, rebinding, tampering, and successor conflicts block unchanged work;
 transport unavailability uses bounded backoff. Completed outcomes replay offline.

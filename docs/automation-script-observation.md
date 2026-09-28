@@ -13,6 +13,15 @@ deterministic load failure. Missing, duplicate, or malformed relevant entities
 also become durable deterministic load failures and are not retried unchanged.
 Transport and protocol failures remain incomplete and retryable.
 
+Production recovery accepts only the exact
+`candidate_observe_automation_scripts` work identity. A stale `running` item is
+returned to retry eligibility transactionally, and each Retrigger pass claims
+at most one due item. A successful `loaded` proof atomically schedules
+`candidate_observe_assertions`; a durable `load_failed` proof atomically
+schedules `candidate_finalize`. Transient execution failures use the shared
+bounded backoff, while deterministic failures are blocked from unchanged retry.
+Completed proofs replay without credentials or another Core request.
+
 Schema-v20 evidence stores prerequisite and target digests, observation time,
 and expected/loaded/failed counts only. It excludes identifiers, states,
 attributes, credentials, response bodies, and exception text. Empty sets and
