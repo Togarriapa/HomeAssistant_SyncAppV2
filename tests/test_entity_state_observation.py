@@ -132,14 +132,15 @@ def test_missing_or_malformed_expected_state_is_deterministic_and_not_durable(
                 session_factory=_factory(FakeSession(_responses([]))),
             )
         assert caught.value.transient is False
-        assert load_entity_state_observation(store, target) is None
+        assert (
+            store._connection.execute("SELECT COUNT(*) FROM entity_state_observation").fetchone()[0]
+            == 0
+        )
     finally:
         store.__exit__(None, None, None)
 
 
-def test_transport_and_credential_failures_are_typed_without_leaking_details(
-    tmp_path, monkeypatch
-):
+def test_transport_and_credential_failures_are_typed_without_leaking_details(tmp_path, monkeypatch):
     chain, _authorization, target = _available(tmp_path, monkeypatch)
     store = chain[0]
     try:
@@ -160,9 +161,7 @@ def test_transport_and_credential_failures_are_typed_without_leaking_details(
                 store,
                 target,
                 token=" invalid ",
-                session_factory=lambda *_args: pytest.fail(
-                    "invalid credential opened a session"
-                ),
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
             )
         assert deterministic.value.transient is False
     finally:
@@ -205,7 +204,10 @@ def test_missing_resource_evidence_cannot_authorize_entity_probe(tmp_path, monke
                 ),
             )
         assert caught.value.transient is False
-        assert load_entity_state_observation(store, target) is None
+        assert (
+            store._connection.execute("SELECT COUNT(*) FROM entity_state_observation").fetchone()[0]
+            == 0
+        )
     finally:
         store.__exit__(None, None, None)
 

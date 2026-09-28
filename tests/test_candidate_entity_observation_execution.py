@@ -38,9 +38,7 @@ def test_valid_states_atomically_schedule_automation_script_observation(
             token=TOKEN,
             session_factory=_factory(
                 FakeSession(
-                    _responses(
-                        [{"entity_id": "light.kitchen", "state": "on", "attributes": {}}]
-                    )
+                    _responses([{"entity_id": "light.kitchen", "state": "on", "attributes": {}}])
                 )
             ),
             now=now,
@@ -59,9 +57,7 @@ def test_valid_states_atomically_schedule_automation_script_observation(
 
 
 @pytest.mark.parametrize("state", ["unknown", "unavailable"])
-def test_invalid_states_atomically_schedule_finalization_only(
-    tmp_path, monkeypatch, state
-) -> None:
+def test_invalid_states_atomically_schedule_finalization_only(tmp_path, monkeypatch, state) -> None:
     chain, _authorization, _target, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     try:
@@ -71,9 +67,7 @@ def test_invalid_states_atomically_schedule_finalization_only(
             token=TOKEN,
             session_factory=_factory(
                 FakeSession(
-                    _responses(
-                        [{"entity_id": "light.kitchen", "state": state, "attributes": {}}]
-                    )
+                    _responses([{"entity_id": "light.kitchen", "state": state, "attributes": {}}])
                 )
             ),
             now=now,
@@ -84,8 +78,7 @@ def test_invalid_states_atomically_schedule_finalization_only(
         assert result.successor.work_kind == "candidate_finalize"
         assert (
             store._connection.execute(
-                "SELECT COUNT(*) FROM work "
-                "WHERE work_kind='candidate_observe_automation_scripts'"
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_automation_scripts'"
             ).fetchone()[0]
             == 0
         )
@@ -152,9 +145,7 @@ def test_transport_is_retryable_but_invalid_credential_is_deterministic(
                 store,
                 item,
                 token=" invalid ",
-                session_factory=lambda *_args: pytest.fail(
-                    "invalid credential opened a session"
-                ),
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
                 now=now,
             )
         assert deterministic.value.transient is False
@@ -189,9 +180,7 @@ def test_malformed_snapshot_cannot_authorize_finalization(tmp_path, monkeypatch)
         store.__exit__(None, None, None)
 
 
-def test_cross_branch_successor_conflict_rolls_back_completion(
-    tmp_path, monkeypatch
-) -> None:
+def test_cross_branch_successor_conflict_rolls_back_completion(tmp_path, monkeypatch) -> None:
     chain, _authorization, _target, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     original = execution.observe_entity_states_once
@@ -227,8 +216,7 @@ def test_cross_branch_successor_conflict_rolls_back_completion(
         assert store._get_work(item.work_kind, item.work_key).status == "running"
         assert (
             store._connection.execute(
-                "SELECT COUNT(*) FROM work "
-                "WHERE work_kind='candidate_observe_automation_scripts'"
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_automation_scripts'"
             ).fetchone()[0]
             == 0
         )

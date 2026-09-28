@@ -16,6 +16,7 @@ from .resource_availability_observation import (
     ResourceAvailabilityObservation,
     ResourceAvailabilityTarget,
     _probe_states,
+    _require_resources,
     load_resource_availability_observation,
 )
 from .state import StateError, StateStore
@@ -26,6 +27,10 @@ _INVALID_STATES = {"unknown", "unavailable"}
 
 class EntityStateObservationError(RuntimeError):
     """Affected entity state validity could not be established safely."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -180,7 +185,10 @@ def observe_entity_states_once(
     if target.entity_ids:
         try:
             states = _probe_states(token, timeout_seconds, max_message_bytes, session_factory)
-        except ResourceAvailabilityError:
+            available = _require_resources(states, target.entity_ids)
+        except ResourceAvailabilityError as error:
+            _unavailable(error.transient)
+        if available != len(target.entity_ids):
             _unavailable()
         by_entity: dict[str, dict[str, object]] = {}
         for item in states:
@@ -283,7 +291,11 @@ def _prerequisite(
         availability = load_resource_availability_observation(store, target)
     except ResourceAvailabilityError:
         _invalid_state()
-    if availability is None:
+    if (
+        availability is None
+        or availability.expected_count != len(target.entity_ids)
+        or availability.available_count != availability.expected_count
+    ):
         raise EntityStateObservationError("Exact resource availability proof is required")
     return availability
 
@@ -322,5 +334,7 @@ def _invalid_state() -> NoReturn:
     raise EntityStateObservationError("entity state observation state is invalid") from None
 
 
-def _unavailable() -> NoReturn:
-    raise EntityStateObservationError("entity state observation is unavailable") from None
+def _unavailable(transient: bool = False) -> NoReturn:
+    raise EntityStateObservationError(
+        "entity state observation is unavailable", transient=transient
+    ) from None
