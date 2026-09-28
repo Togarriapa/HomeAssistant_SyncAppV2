@@ -17,9 +17,7 @@ NOW = datetime(2031, 2, 3, 4, 15, tzinfo=UTC)
 
 
 def _complete(store, item, **kwargs):
-    successor = store.enqueue_work(
-        "candidate_observe_entities", item.work_key, now=kwargs["now"]
-    )
+    successor = store.enqueue_work("candidate_observe_entities", item.work_key, now=kwargs["now"])
     work = store.complete_work(item, now=kwargs["now"])
     return CandidateResourceObservationExecutionResult(
         item.work_key,
@@ -67,9 +65,7 @@ def test_failure_classification_controls_retry(
         store.enqueue_work("candidate_observe_resources", "deployment-1", now=NOW)
 
         def fail(*_args, **_kwargs):
-            raise CandidateResourceObservationExecutionError(
-                "sanitized", transient=transient
-            )
+            raise CandidateResourceObservationExecutionError("sanitized", transient=transient)
 
         with pytest.raises(CandidateResourceObservationRetriggerError) as caught:
             run_candidate_resource_observation_retrigger_pass(

@@ -17,10 +17,10 @@ from ha_syncapp.candidate_integration_observation_retrigger import (
     CandidateIntegrationObservationRetriggerResult,
 )
 from ha_syncapp.candidate_integrity_retrigger import CandidateIntegrityRetriggerResult
-from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_resource_observation_retrigger import (
     CandidateResourceObservationRetriggerResult,
 )
+from ha_syncapp.candidate_restart_retrigger import CandidateRestartRetriggerResult
 from ha_syncapp.candidate_startup_error_observation_retrigger import (
     CandidateStartupErrorObservationRetriggerResult,
 )
@@ -423,9 +423,7 @@ def test_cycle_runs_resource_observation_only_after_startup_observation_is_idle(
     def observe(*args: object, **kwargs: object) -> CandidateResourceObservationRetriggerResult:
         calls.append("candidate_resource_observation")
         assert kwargs["token"] is None
-        return CandidateResourceObservationRetriggerResult(
-            0, 1, "entity_observation_scheduled"
-        )
+        return CandidateResourceObservationRetriggerResult(0, 1, "entity_observation_scheduled")
 
     monkeypatch.setattr(
         retrigger_cycle,
@@ -444,9 +442,7 @@ def test_cycle_runs_resource_observation_only_after_startup_observation_is_idle(
 
     assert calls == ["candidate_resource_observation"]
     assert result.candidate_startup_error_observation.processed is None
-    assert result.candidate_resource_observation.processed == (
-        "entity_observation_scheduled"
-    )
+    assert result.candidate_resource_observation.processed == ("entity_observation_scheduled")
 
 
 def test_cycle_runs_rollback_recovery_before_new_candidate_intake(

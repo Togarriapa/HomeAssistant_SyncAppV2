@@ -198,3 +198,74 @@ def test_target_is_derived_from_exact_persisted_candidate_evidence(tmp_path, mon
         with pytest.raises(ResourceAvailabilityError) as caught:
             execution._load_target(store, prepared.deployment_id)
         assert caught.value.transient is False
+
+
+def test_malformed_snapshot_cannot_authorize_finalization(tmp_path, monkeypatch) -> None:
+    chain, _authorization, _target, item, now = _running(tmp_path, monkeypatch)
+    store = chain[0]
+    duplicate = [
+        {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
+        {"entity_id": "light.kitchen", "state": "off", "attributes": {}},
+    ]
+    try:
+        with pytest.raises(CandidateResourceObservationExecutionError) as caught:
+            execute_candidate_resource_observation_once(
+                store,
+                item,
+                token=TOKEN,
+                session_factory=_factory(FakeSession(_responses(duplicate))),
+                now=now,
+            )
+        assert caught.value.transient is False
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_finalize'"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_cross_branch_successor_conflict_rolls_back_completion(tmp_path, monkeypatch) -> None:
+    chain, _authorization, _target, item, now = _running(tmp_path, monkeypatch)
+    store = chain[0]
+    original = execution.observe_changed_resources_once
+
+    def conflict(*args, **kwargs):
+        observed = original(*args, **kwargs)
+        store.enqueue_work("candidate_finalize", item.work_key, now=now)
+        return observed
+
+    monkeypatch.setattr(execution, "observe_changed_resources_once", conflict)
+    try:
+        with pytest.raises(CandidateResourceObservationExecutionError) as caught:
+            execute_candidate_resource_observation_once(
+                store,
+                item,
+                token=TOKEN,
+                session_factory=_factory(
+                    FakeSession(
+                        _responses(
+                            [
+                                {
+                                    "entity_id": "light.kitchen",
+                                    "state": "on",
+                                    "attributes": {},
+                                }
+                            ]
+                        )
+                    )
+                ),
+                now=now,
+            )
+        assert caught.value.transient is False
+        assert store._get_work(item.work_kind, item.work_key).status == "running"
+        assert (
+            store._connection.execute(
+                "SELECT COUNT(*) FROM work WHERE work_kind='candidate_observe_entities'"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        store.__exit__(None, None, None)

@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import NoReturn
 
+from .candidate_dependency_checkpoint import CandidateDependencyCheckpointError
 from .candidate_dependency_execution import (
     CandidateDependencyExecutionError,
     load_candidate_dependency_checkpoint,
 )
+from .candidate_risk_checkpoint import CandidateRiskCheckpointError
 from .candidate_risk_execution import (
     CandidateRiskExecutionError,
     load_candidate_risk_checkpoint,
@@ -100,7 +102,9 @@ def execute_candidate_resource_observation_once(
     except ResourceAvailabilityError as error:
         _reject(error.transient)
     except (
+        CandidateDependencyCheckpointError,
         CandidateDependencyExecutionError,
+        CandidateRiskCheckpointError,
         CandidateRiskExecutionError,
         StateError,
         sqlite3.Error,
@@ -194,7 +198,9 @@ def _finish(
     except CandidateResourceObservationExecutionError:
         raise
     except (
+        CandidateDependencyCheckpointError,
         CandidateDependencyExecutionError,
+        CandidateRiskCheckpointError,
         CandidateRiskExecutionError,
         ResourceAvailabilityError,
         StateError,
