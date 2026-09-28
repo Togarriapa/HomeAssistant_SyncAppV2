@@ -41,6 +41,10 @@ _ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 class ResourceAvailabilityError(RuntimeError):
     """Changed-resource availability could not be proved safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True, init=False)
 class ResourceAvailabilityTarget:
@@ -282,7 +286,6 @@ def load_resource_availability_observation(
             result.startup_error_sha256 != startup.record_sha256
             or result.target_sha256 != target.target_sha256
             or result.expected_count != len(target.entity_ids)
-            or result.available_count != result.expected_count
             or result.observed_at < startup.observed_at
         ):
             _invalid_state()
@@ -345,10 +348,13 @@ def _probe_states(
         _limits(timeout, limit)
         with (factory or _default_factory)(_CORE_WEBSOCKET_URL, timeout, limit) as session:
             if _receive(session, timeout, limit).get("type") != "auth_required":
-                _unavailable()
+                _invalid_input()
             _send(session, {"type": "auth", "access_token": bearer}, limit)
-            if _receive(session, timeout, limit).get("type") != "auth_ok":
-                _unavailable()
+            authenticated = _receive(session, timeout, limit)
+            if authenticated.get("type") == "auth_invalid":
+                _invalid_input()
+            if authenticated.get("type") != "auth_ok":
+                _invalid_input()
             _send(session, {"id": 1, "type": "get_states"}, limit)
             response = _receive(session, timeout, limit)
             if (
@@ -358,10 +364,10 @@ def _probe_states(
                 or response.get("success") is not True
                 or type(response.get("result")) is not list
             ):
-                _unavailable()
+                _invalid_input()
             result = response.get("result")
             if type(result) is not list:
-                _unavailable()
+                _invalid_input()
             return result
     except ResourceAvailabilityError:
         raise
@@ -378,34 +384,42 @@ def _require_resources(states: list[object], expected: tuple[str, ...]) -> int:
             or "state" not in item
             or "attributes" not in item
         ):
-            _unavailable()
+            _invalid_input()
         entity = item.get("entity_id")
         if type(entity) is not str or _ENTITY_ID.fullmatch(entity) is None or entity in found:
-            _unavailable()
+            _invalid_input()
         found.add(entity)
-    if not set(expected).issubset(found):
-        _unavailable()
-    return len(expected)
+    return len(set(expected).intersection(found))
 
 
 def _receive(session: WebSocketSession, timeout: float, limit: int) -> dict[str, object]:
     message = session.recv(timeout=timeout)
     if type(message) is bytes:
         if len(message) > limit:
-            _unavailable()
-        message = message.decode("utf-8")
+            _invalid_input()
+        try:
+            message = message.decode("utf-8")
+        except UnicodeDecodeError:
+            _invalid_input()
     if type(message) is not str or len(message.encode()) > limit:
-        _unavailable()
-    value = json.loads(message, object_pairs_hook=_unique, parse_constant=lambda _: _unavailable())
+        _invalid_input()
+    try:
+        value = json.loads(
+            message,
+            object_pairs_hook=_unique,
+            parse_constant=lambda _: _invalid_input(),
+        )
+    except (json.JSONDecodeError, ValueError):
+        _invalid_input()
     if type(value) is not dict:
-        _unavailable()
+        _invalid_input()
     return value
 
 
 def _send(session: WebSocketSession, payload: dict[str, object], limit: int) -> None:
     message = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     if len(message.encode()) > limit:
-        _unavailable()
+        _invalid_input()
     session.send(message)
 
 
@@ -423,7 +437,7 @@ def _resolve_token(token: str | None) -> str:
         or value != value.strip()
         or any(ord(c) < 32 or ord(c) == 127 for c in value)
     ):
-        _unavailable()
+        _invalid_input()
     return value
 
 
@@ -435,7 +449,7 @@ def _limits(timeout: float, limit: int) -> None:
         or type(limit) is not int
         or not 0 < limit <= 16 * 1024 * 1024
     ):
-        _unavailable()
+        _invalid_input()
 
 
 def _canonical_entities(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -479,7 +493,10 @@ def _text(value: object) -> str:
 
 def _result(value: ResourceAvailabilityObservation, replayed: bool) -> ResourceAvailabilityResult:
     return ResourceAvailabilityResult(
-        "available", replayed, value.expected_count, value.available_count
+        "available" if value.available_count == value.expected_count else "missing_resources",
+        replayed,
+        value.expected_count,
+        value.available_count,
     )
 
 
@@ -488,4 +505,11 @@ def _invalid_state() -> NoReturn:
 
 
 def _unavailable() -> NoReturn:
-    raise ResourceAvailabilityError("changed resource availability is unavailable") from None
+    raise ResourceAvailabilityError(
+        "changed resource availability is unavailable",
+        transient=True,
+    ) from None
+
+
+def _invalid_input() -> NoReturn:
+    raise ResourceAvailabilityError("resource availability input is invalid") from None

@@ -119,7 +119,7 @@ def test_missing_duplicate_or_malformed_state_persists_no_success(tmp_path, monk
     store = chain[0]
     target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen",))
     try:
-        with pytest.raises(ResourceAvailabilityError, match="unavailable"):
+        with pytest.raises(ResourceAvailabilityError, match="input is invalid") as error:
             observe_changed_resources_once(
                 store,
                 target,
@@ -127,6 +127,7 @@ def test_missing_duplicate_or_malformed_state_persists_no_success(tmp_path, monk
                 observed_at=START + timedelta(seconds=304),
                 session_factory=_factory(FakeSession(_responses(states))),
             )
+        assert error.value.transient is False
         assert load_resource_availability_observation(store, target) is None
     finally:
         store.__exit__(None, None, None)
@@ -135,9 +136,7 @@ def test_missing_duplicate_or_malformed_state_persists_no_success(tmp_path, monk
 def test_valid_missing_resource_is_durable_and_replays_without_network(tmp_path, monkeypatch):
     chain, authorization, prepared = _ready(tmp_path, monkeypatch)
     store = chain[0]
-    target = ResourceAvailabilityTarget.create(
-        prepared, ("light.kitchen", "sensor.outside")
-    )
+    target = ResourceAvailabilityTarget.create(prepared, ("light.kitchen", "sensor.outside"))
     try:
         first = observe_changed_resources_once(
             store,
@@ -196,9 +195,7 @@ def test_transport_failure_is_typed_transient_and_invalid_credential_is_determin
                 store,
                 target,
                 token=" invalid ",
-                session_factory=lambda *_args: pytest.fail(
-                    "invalid credential opened a session"
-                ),
+                session_factory=lambda *_args: pytest.fail("invalid credential opened a session"),
             )
         assert invalid.value.transient is False
     finally:
