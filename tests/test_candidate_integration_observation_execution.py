@@ -131,6 +131,30 @@ def test_invalid_credential_is_deterministic_and_network_free(tmp_path, monkeypa
         store.__exit__(None, None, None)
 
 
+def test_rejected_credential_is_deterministic_and_sanitized(tmp_path, monkeypatch) -> None:
+    chain, _authorization, item, now = _running(tmp_path, monkeypatch)
+    store = chain[0]
+    session = FakeSession(
+        [
+            {"type": "auth_required"},
+            {"type": "auth_invalid", "message": "private credential detail"},
+        ]
+    )
+    try:
+        with pytest.raises(CandidateIntegrationObservationExecutionError) as caught:
+            execute_candidate_integration_observation_once(
+                store,
+                item,
+                token=TOKEN,
+                session_factory=_factory(session),
+                now=now,
+            )
+        assert caught.value.transient is False
+        assert "private" not in str(caught.value).lower()
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_tampered_supervisor_proof_is_deterministic_and_network_free(tmp_path, monkeypatch) -> None:
     chain, _authorization, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
