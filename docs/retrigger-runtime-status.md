@@ -34,6 +34,8 @@ The recovery file exposes:
   aggregates, without deployment IDs, paths, operation indexes or commit identities.
 - `candidate_restart` execution progress as the same content-free work aggregates,
   without deployment IDs, authorization digests, credentials or request evidence.
+- `candidate_observe` Core health-window progress as the same content-free aggregates,
+  without deployment IDs, deadlines, health digests, credentials or response content.
 - content-free rollback aggregates for every phase, reconciliation state and block
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
@@ -59,6 +61,11 @@ request was durably acknowledged and its observation successor was atomically
 scheduled. A blocked item can represent an uncertain request outcome or invalid
 authority; runtime status does not expose which deployment, token, digest, response,
 or nested failure produced that aggregate.
+
+A successful `candidate_observe` item means only that exact Core API health was proved
+at both ends of the configured interval and the Supervisor-observation successor was
+atomically scheduled. It does not mean that Supervisor, integrations, resources,
+entities, automations, assertions, promotion, or rollback have been evaluated.
 
 Rollback evidence is read through a second bounded StateStore projection that never
 selects deployment IDs, repository targets, baseline/candidate SHAs, backup slugs,

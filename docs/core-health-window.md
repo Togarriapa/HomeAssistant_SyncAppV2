@@ -24,6 +24,22 @@ deadline instead of sleeping, resetting the interval or producing catch-up reque
 Transient or unhealthy final probes leave the window incomplete and may be retried by a
 later controlled invocation.
 
+## Retrigger handoff
+
+The bounded candidate Core-observation lane owns the production progression of this
+window. It claims only `candidate_observe` work created after an acknowledged restart
+and performs at most one Core request per invocation. After the initial proof, window
+creation schedules the ledger item directly for the persisted deadline. A completed
+window atomically creates the exact `candidate_observe_supervisor` successor before
+marking Core observation successful. Existing completed evidence replays without a
+credential or network request; a conflicting successor or invalid authority fails
+closed.
+
+Core transport unavailability is explicitly transient and uses the work ledger's
+bounded retry/backoff. Invalid credentials/configuration and tampered, rebound,
+malformed, or temporally impossible evidence are deterministic and remain blocked until
+an explicit administrative retry is authorized.
+
 ## Durable integrity and authority
 
 Schema version 14 stores one content-free window per deployment. Its deployment ID,

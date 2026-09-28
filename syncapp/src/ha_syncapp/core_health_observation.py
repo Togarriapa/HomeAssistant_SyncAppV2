@@ -31,6 +31,10 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 class CoreHealthError(RuntimeError):
     """The post-restart Core health proof could not be established safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True)
 class CoreHealthResponse:
@@ -160,7 +164,7 @@ def probe_core_api_health(
         response = sender("GET", _CORE_API_URL, headers, timeout_seconds, max_response_bytes)
         _validate_response(response, max_response_bytes)
     except Exception:
-        raise CoreHealthError("Core API health is unavailable") from None
+        raise CoreHealthError("Core API health is unavailable", transient=True) from None
 
 
 def load_core_health_observation(

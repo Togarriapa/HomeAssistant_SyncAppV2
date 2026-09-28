@@ -28,6 +28,10 @@ _MAX_OBSERVATION_SECONDS = 3600
 class CoreHealthWindowError(RuntimeError):
     """The bounded Core health observation window cannot advance safely."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 @dataclass(frozen=True, slots=True, init=False)
 class CoreHealthWindow:
@@ -174,8 +178,10 @@ def advance_core_health_window_once(
             max_response_bytes=max_response_bytes,
             transport=transport,
         )
-    except CoreHealthError:
-        raise CoreHealthWindowError("Core health is unavailable") from None
+    except CoreHealthError as error:
+        raise CoreHealthWindowError(
+            "Core health is unavailable", transient=error.transient
+        ) from None
     completed, replayed = _record_completed(store, existing, when)
     return CoreHealthWindowResult("healthy", replayed, completed.deadline_at)
 

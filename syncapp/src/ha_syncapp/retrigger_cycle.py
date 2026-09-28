@@ -21,6 +21,11 @@ from ha_syncapp.candidate_backup_retrigger import (
     CandidateBackupRetriggerResult,
     run_candidate_backup_retrigger_pass,
 )
+from ha_syncapp.candidate_core_observation_retrigger import (
+    CandidateCoreObservationRetriggerError,
+    CandidateCoreObservationRetriggerResult,
+    run_candidate_core_observation_retrigger_pass,
+)
 from ha_syncapp.candidate_dependency_retrigger import (
     CandidateDependencyRetriggerError,
     CandidateDependencyRetriggerResult,
@@ -130,6 +135,7 @@ class RetriggerCycleResult:
     candidate_apply: CandidateApplyRetriggerResult
     candidate_apply_execution: CandidateApplyExecutionRetriggerResult
     candidate_restart: CandidateRestartRetriggerResult
+    candidate_core_observation: CandidateCoreObservationRetriggerResult
     candidate_detection: CandidateDetectionResult
     log_collection: LogCollectionResult | None
 
@@ -156,6 +162,7 @@ def run_retrigger_cycle(
     recorder_retention_days: int | None = None,
     retention_reference_time: datetime | None = None,
     recovery_reference_time: datetime | None = None,
+    deployment_observation_seconds: int = 300,
 ) -> RetriggerCycleResult:
     """Recover bounded work, detect candidate, then enqueue one fresh log artifact."""
     if type(store) is not StateStore:
@@ -391,6 +398,27 @@ def run_retrigger_cycle(
         else:
             candidate_restart = CandidateRestartRetriggerResult(0, 0, None)
 
+        if (
+            candidate_fetch_stage.processed is None
+            and candidate_integrity.processed is None
+            and candidate_dependencies.processed is None
+            and candidate_risk.processed is None
+            and candidate_static.processed is None
+            and candidate_semantic.processed is None
+            and candidate_backup.processed is None
+            and candidate_apply.processed is None
+            and candidate_apply_execution.processed is None
+            and candidate_restart.processed is None
+        ):
+            candidate_core_observation = run_candidate_core_observation_retrigger_pass(
+                store,
+                observation_seconds=deployment_observation_seconds,
+                token=None,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            candidate_core_observation = CandidateCoreObservationRetriggerResult(0, 0, None)
+
         candidate_detection = detect_and_enqueue_trusted_candidate(
             store,
             target,
@@ -428,6 +456,7 @@ def run_retrigger_cycle(
         CandidateApplyRetriggerError,
         CandidateApplyExecutionRetriggerError,
         CandidateRestartRetriggerError,
+        CandidateCoreObservationRetriggerError,
     ) as exc:
         raise RetriggerCycleError("retrigger cycle failed closed") from exc
 
@@ -449,6 +478,7 @@ def run_retrigger_cycle(
         candidate_apply=candidate_apply,
         candidate_apply_execution=candidate_apply_execution,
         candidate_restart=candidate_restart,
+        candidate_core_observation=candidate_core_observation,
         candidate_detection=candidate_detection,
         log_collection=log_collection,
     )

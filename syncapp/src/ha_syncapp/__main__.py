@@ -461,6 +461,7 @@ def _handle_retrigger_request(
             log_snapshot_root=log_snapshot_root,
             log_workspace_root=log_workspace_root,
             recorder_retention_days=config.recorder_retention_days,
+            deployment_observation_seconds=config.deployment_observation_seconds,
         )
     except RepositoryVerificationError:
         return "repo_b_untrusted"
