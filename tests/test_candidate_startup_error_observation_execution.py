@@ -28,9 +28,7 @@ def _running(tmp_path, monkeypatch):
     return chain, authorization, item, now
 
 
-def test_clear_observation_atomically_schedules_resource_observation(
-    tmp_path, monkeypatch
-) -> None:
+def test_clear_observation_atomically_schedules_resource_observation(tmp_path, monkeypatch) -> None:
     chain, authorization, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     session = StartupSession(_startup_responses([]))
@@ -54,9 +52,7 @@ def test_clear_observation_atomically_schedules_resource_observation(
         store.__exit__(None, None, None)
 
 
-def test_significant_errors_atomically_schedule_finalization_only(
-    tmp_path, monkeypatch
-) -> None:
+def test_significant_errors_atomically_schedule_finalization_only(tmp_path, monkeypatch) -> None:
     chain, authorization, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     session = StartupSession(
@@ -86,9 +82,7 @@ def test_significant_errors_atomically_schedule_finalization_only(
         store.__exit__(None, None, None)
 
 
-def test_failed_observation_replay_requires_no_credential_or_network(
-    tmp_path, monkeypatch
-) -> None:
+def test_failed_observation_replay_requires_no_credential_or_network(tmp_path, monkeypatch) -> None:
     chain, authorization = _prepared(tmp_path, monkeypatch)
     store = chain[0]
     now = START + timedelta(seconds=303)
@@ -156,9 +150,7 @@ def test_unavailable_session_is_transient_and_sanitized(tmp_path, monkeypatch) -
         ],
     ],
 )
-def test_invalid_or_rejected_credential_is_deterministic(
-    tmp_path, monkeypatch, responses
-) -> None:
+def test_invalid_or_rejected_credential_is_deterministic(tmp_path, monkeypatch, responses) -> None:
     chain, _authorization, item, now = _running(tmp_path, monkeypatch)
     store = chain[0]
     factory = (
