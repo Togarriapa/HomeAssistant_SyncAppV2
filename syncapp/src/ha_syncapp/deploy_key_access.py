@@ -40,8 +40,8 @@ _COMMIT_SHA = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 _OBSERVATION_SHA256 = re.compile(r"[0-9a-f]{64}")
 _TARGET = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/"
-    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/"
+    r"[A-Za-z0-9._-]{1,100}"
 )
 _SAFE_COMMAND_PATH = re.compile(r"/[A-Za-z0-9_./-]+")
 _TRANSIENT_MARKERS = (
@@ -180,8 +180,7 @@ def read_repo_b_deploy_key_references(
     """Read bounded canonical Git refs with one exact previously verified key generation."""
     _validate_access_proof(proof)
     if (
-        not isinstance(target, str)
-        or _TARGET.fullmatch(target) is None
+        not _valid_target(target)
         or type(expected_repository_id) is not int
         or expected_repository_id <= 0
         or proof.target.casefold() != target.casefold()
@@ -237,7 +236,7 @@ def _validate_access_proof(proof: DeployKeyAccessProof) -> None:
     with suppress(ValueError, AttributeError):
         canonical_generation = str(UUID(proof.generation_id)) == proof.generation_id
     if (
-        _TARGET.fullmatch(proof.target) is None
+        not _valid_target(proof.target)
         or type(proof.repository_id) is not int
         or proof.repository_id <= 0
         or _FINGERPRINT.fullmatch(proof.key_fingerprint) is None
@@ -247,6 +246,12 @@ def _validate_access_proof(proof: DeployKeyAccessProof) -> None:
         or _OBSERVATION_SHA256.fullmatch(proof.observation_sha256) is None
     ):
         raise DeployKeyAccessError("Deploy key access proof is invalid")
+
+
+def _valid_target(target: object) -> bool:
+    if not isinstance(target, str) or _TARGET.fullmatch(target) is None:
+        return False
+    return target.split("/", 1)[1] not in {".", ".."}
 
 
 def _ls_remote_command(
