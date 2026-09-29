@@ -130,6 +130,10 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "Exactly one bounded, noninteractive `git ls-remote --refs`" in access_docs
     assert "Strict host-key checking is mandatory" in access_docs
     assert "proof grants no mutation or deployment authority" in access_docs
+    rotation_docs = (ROOT / "docs/deploy-key-rotation.md").read_text()
+    assert "Rotation is not connected to startup or Retrigger" in rotation_docs
+    assert "does **not** establish write permission" in rotation_docs
+    assert "previous generation is retained" in rotation_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:

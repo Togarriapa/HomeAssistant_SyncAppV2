@@ -360,9 +360,9 @@ def test_activation_journals_before_swap_and_retains_previous_generation(
     real = deploy_key_rotation._rename_directory
 
     def capture(source: Path, destination: Path) -> None:
-        phase = json.loads(
-            (active.parent / ".repo-b-deploy-key.rotation.json").read_text()
-        )["phase"]
+        phase = json.loads((active.parent / ".repo-b-deploy-key.rotation.json").read_text())[
+            "phase"
+        ]
         calls.append((source, destination, phase))
         real(source, destination)
 
@@ -401,9 +401,7 @@ def test_activation_recovers_crash_between_directory_renames(
     with pytest.raises(DeployKeyRotationError, match="interrupted"):
         activate_repo_b_deploy_key_rotation(active, request_id)
     assert not active.exists()
-    assert inspect_repo_b_deploy_key(
-        active.parent / ".repo-b-deploy-key.rotation-retained"
-    ) == old
+    assert inspect_repo_b_deploy_key(active.parent / ".repo-b-deploy-key.rotation-retained") == old
 
     monkeypatch.setattr(deploy_key_rotation, "_rename_directory", real)
     status = activate_repo_b_deploy_key_rotation(active, request_id)
@@ -429,9 +427,7 @@ def test_activation_recovers_crash_after_swap_before_completion_record(
     with pytest.raises(DeployKeyRotationError, match="interrupted"):
         activate_repo_b_deploy_key_rotation(active, request_id)
     assert inspect_repo_b_deploy_key(active).generation_id == verified.candidate_generation_id
-    assert inspect_repo_b_deploy_key(
-        active.parent / ".repo-b-deploy-key.rotation-retained"
-    ) == old
+    assert inspect_repo_b_deploy_key(active.parent / ".repo-b-deploy-key.rotation-retained") == old
 
     monkeypatch.setattr(deploy_key_rotation, "_write_record", real)
     assert activate_repo_b_deploy_key_rotation(active, request_id).phase == "activated"
@@ -446,6 +442,33 @@ def test_activated_replay_performs_no_filesystem_mutation(
     monkeypatch.setattr(deploy_key_rotation, "test_repo_b_deploy_key_access", pytest.fail)
     second = activate_repo_b_deploy_key_rotation(active, request_id)
     assert second == first
+
+    third = prepare_repo_b_deploy_key_rotation(active, request_id, TARGET, REPOSITORY_ID)
+    assert third == first
+
+
+def test_prepare_replay_reports_valid_activation_interruption_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    active, request_id, old, _ = _verify(tmp_path, monkeypatch)
+    real = deploy_key_rotation._rename_directory
+    calls = 0
+
+    def interrupt(source: Path, destination: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated crash")
+        real(source, destination)
+
+    monkeypatch.setattr(deploy_key_rotation, "_rename_directory", interrupt)
+    with pytest.raises(DeployKeyRotationError, match="interrupted"):
+        activate_repo_b_deploy_key_rotation(active, request_id)
+    monkeypatch.setattr(deploy_key_rotation, "_rename_directory", pytest.fail)
+
+    status = prepare_repo_b_deploy_key_rotation(active, request_id, TARGET, REPOSITORY_ID)
+    assert status.phase == "activating"
+    assert inspect_repo_b_deploy_key(active.parent / ".repo-b-deploy-key.rotation-retained") == old
 
 
 def test_existing_retained_generation_prevents_new_rotation(tmp_path: Path) -> None:
@@ -462,9 +485,7 @@ def test_existing_retained_generation_prevents_new_rotation(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("mutation", ["content", "mode", "symlink", "hardlink"])
-def test_rotation_record_tampering_fails_closed(
-    tmp_path: Path, mutation: str
-) -> None:
+def test_rotation_record_tampering_fails_closed(tmp_path: Path, mutation: str) -> None:
     active, request_id, _, _ = _prepare(tmp_path)
     record = active.parent / ".repo-b-deploy-key.rotation.json"
     if mutation == "content":
@@ -518,4 +539,68 @@ def test_candidate_generation_rebinding_is_rejected(tmp_path: Path) -> None:
     ensure_repo_b_deploy_key(candidate)
 
     with pytest.raises(DeployKeyRotationError, match="generation changed"):
+        inspect_repo_b_deploy_key_rotation(active, request_id)
+
+
+def test_rotation_lock_prevents_concurrent_execution(tmp_path: Path) -> None:
+    active, _ = _active(tmp_path)
+    request_id = str(uuid4())
+    paths = deploy_key_rotation._paths(active)
+
+    with (
+        deploy_key_rotation._rotation_lock(paths),
+        pytest.raises(DeployKeyRotationError, match="busy") as error,
+    ):
+        prepare_repo_b_deploy_key_rotation(active, request_id, TARGET, REPOSITORY_ID)
+    assert error.value.transient is True
+
+
+def test_symlinked_parent_is_rejected_before_lock_or_record_creation(tmp_path: Path) -> None:
+    active, _ = _active(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(active.parent, target_is_directory=True)
+    aliased_active = alias / active.name
+
+    with pytest.raises(DeployKeyRotationError, match="parent is invalid"):
+        prepare_repo_b_deploy_key_rotation(
+            aliased_active,
+            str(uuid4()),
+            TARGET,
+            REPOSITORY_ID,
+        )
+    assert {entry.name for entry in active.parent.iterdir()} == {active.name}
+
+
+def test_duplicate_or_oversized_rotation_record_is_rejected(tmp_path: Path) -> None:
+    active, request_id, _, _ = _prepare(tmp_path)
+    record = active.parent / ".repo-b-deploy-key.rotation.json"
+    raw = record.read_text()
+    record.write_text(raw.replace("{", '{"phase":"prepared",', 1))
+    with pytest.raises(DeployKeyRotationError, match="record is invalid"):
+        inspect_repo_b_deploy_key_rotation(active, request_id)
+
+    record.write_bytes(b"x" * 32_769)
+    record.chmod(0o600)
+    with pytest.raises(DeployKeyRotationError, match="record is invalid"):
+        inspect_repo_b_deploy_key_rotation(active, request_id)
+
+
+def test_stale_candidate_generation_journal_fails_closed(tmp_path: Path) -> None:
+    active, request_id, _, _ = _prepare(tmp_path)
+    paths = deploy_key_rotation._paths(active)
+    paths.candidate_journal.write_text(
+        json.dumps({"schema_version": 1, "generation_id": str(uuid4())}) + "\n"
+    )
+    paths.candidate_journal.chmod(0o600)
+
+    with pytest.raises(DeployKeyRotationError, match="generation changed"):
+        inspect_repo_b_deploy_key_rotation(active, request_id)
+
+
+def test_hardlinked_rotation_lock_is_rejected(tmp_path: Path) -> None:
+    active, request_id, _, _ = _prepare(tmp_path)
+    paths = deploy_key_rotation._paths(active)
+    os.link(paths.lock, tmp_path / "lock-alias")
+
+    with pytest.raises(DeployKeyRotationError, match="lock is invalid"):
         inspect_repo_b_deploy_key_rotation(active, request_id)

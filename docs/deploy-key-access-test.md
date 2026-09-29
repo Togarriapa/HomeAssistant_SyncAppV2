@@ -51,5 +51,8 @@ raw stderr and repository content are never surfaced.
 This proof grants no mutation or deployment authority. Existing token-based Git
 transport and every validation, backup, observation, promotion, rollback,
 locking, and Retrigger safeguard remain unchanged. GitHub enrollment/removal,
-rotation, deploy-key transport, explicit Repo B initialization, runtime wiring,
-and administrative UI remain separate reviewed increments under story #388.
+deploy-key transport, explicit Repo B initialization, runtime wiring, and
+administrative UI remain separate reviewed increments under story #388. The
+staged [deploy-key rotation workflow](deploy-key-rotation.md) reuses this proof
+but intentionally retains the previous generation and grants no transport
+authority.
