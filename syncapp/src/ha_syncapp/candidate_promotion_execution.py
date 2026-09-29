@@ -5,7 +5,10 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from .deploy_key_promotion_authority import DeployKeyPromotionAuthority
 
 from .candidate_assertion_observation_execution import (
     CandidateAssertionObservationExecutionError,
@@ -48,6 +51,7 @@ def execute_candidate_promotion_once(
     token: str | None,
     remote_reader: RemoteReader | None = None,
     publisher: Publisher | None = None,
+    promotion_authority: DeployKeyPromotionAuthority | None = None,
     now: datetime | None = None,
 ) -> CandidatePromotionExecutionResult:
     """Re-prove authority, reconcile Git refs, then complete exact work."""
@@ -72,6 +76,7 @@ def execute_candidate_promotion_once(
             token=token,
             remote_reader=remote_reader,
             publisher=publisher,
+            promotion_authority=promotion_authority,
             observed_at=when,
         )
         if promoted.status != "completed":

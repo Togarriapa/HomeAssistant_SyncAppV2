@@ -42,6 +42,7 @@ from ha_syncapp.candidate_supervisor_observation_retrigger import (
 )
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.deploy_key_access import DeployKeyAccessProof
+from ha_syncapp.deploy_key_promotion_authority import DeployKeyPromotionAuthority
 from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
@@ -92,6 +93,7 @@ def _run(
     core_token: str = "core-token",
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
+    deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
 ):
     home = tmp_path / "homeassistant"
     home.mkdir(exist_ok=True)
@@ -113,6 +115,7 @@ def _run(
         github_token,
         candidate_deploy_key_ingress=candidate_deploy_key_ingress,
         deploy_key_publication_authority=deploy_key_publication_authority,
+        deploy_key_promotion_authority=deploy_key_promotion_authority,
         core_token=core_token,
     )
 
@@ -742,6 +745,54 @@ def test_cycle_runs_promotion_only_after_finalization_is_idle(
     assert calls == ["candidate_promotion"]
     assert result.candidate_finalization.processed is None
     assert result.candidate_promotion.processed == "promotion_completed"
+
+
+def test_cycle_scopes_deploy_key_to_promotion_and_leaves_rollback_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    proof = DeployKeyAccessProof(
+        TARGET,
+        123,
+        "SHA256:" + "A" * 43,
+        "123e4567-e89b-42d3-a456-426614174000",
+        1,
+        "a" * 64,
+    )
+    authority = DeployKeyPromotionAuthority(
+        proof,
+        tmp_path / "key",
+        tmp_path / "access",
+        tmp_path / "promotion",
+        tmp_path / "homeassistant",
+    )
+    observed: list[tuple[str, object, object]] = []
+
+    def promote(*args: object, **kwargs: object) -> CandidatePromotionRetriggerResult:
+        observed.append(("promotion", args[1], kwargs["promotion_authority"]))
+        return CandidatePromotionRetriggerResult(0, 0, None)
+
+    def rollback(*args: object, **kwargs: object) -> CandidateRollbackRetriggerResult:
+        observed.append(("rollback", args[1], args[2]))
+        return CandidateRollbackRetriggerResult(0, 0, None)
+
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_promotion_retrigger_pass", promote)
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_rollback_retrigger_pass", rollback)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        _run(store, tmp_path, deploy_key_promotion_authority=authority)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert observed == [
+        ("promotion", None, authority),
+        ("rollback", "github-token", "core-token"),
+    ]
 
 
 def test_cycle_runs_rollback_handoff_only_after_promotion_is_idle(

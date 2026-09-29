@@ -7,7 +7,10 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from .deploy_key_promotion_authority import DeployKeyPromotionAuthority
 
 from .candidate_promotion_execution import (
     CandidatePromotionExecutionError,
@@ -41,6 +44,7 @@ def run_candidate_promotion_retrigger_pass(
     store: StateStore,
     token: str | None,
     *,
+    promotion_authority: DeployKeyPromotionAuthority | None = None,
     reference_time: datetime | None = None,
     executor: Executor = execute_candidate_promotion_once,
 ) -> CandidatePromotionRetriggerResult:
@@ -82,7 +86,13 @@ def run_candidate_promotion_retrigger_pass(
             if changed.rowcount != 1:
                 _error(False)
         claimed = store._get_work(item.work_kind, item.work_key)
-        result = executor(store, claimed, token=token, now=when)
+        result = executor(
+            store,
+            claimed,
+            token=token,
+            promotion_authority=promotion_authority,
+            now=when,
+        )
         current_work = store._get_work(claimed.work_kind, claimed.work_key)
         if (
             result.action != "promotion_completed"

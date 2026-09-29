@@ -9,7 +9,11 @@ from ha_syncapp import deploy_key_promotion_authority as authority_module
 from ha_syncapp.candidate_promotion_execution import execute_candidate_promotion_once
 from ha_syncapp.config import Config
 from ha_syncapp.deploy_key_access import DeployKeyAccessError, DeployKeyAccessProof
-from ha_syncapp.deployment_promotion import PromotionRemoteState
+from ha_syncapp.deployment_promotion import (
+    DeploymentPromotionError,
+    PromotionRemoteState,
+    promote_finalized_deployment_once,
+)
 from ha_syncapp.deployment_promotion_transport import DeploymentPromotionTransportError
 from ha_syncapp.state import StateStore
 from test_core_health_window import START
@@ -56,17 +60,33 @@ def test_authority_reads_and_publishes_only_through_proof_bound_transport(
 
     monkeypatch.setattr(authority_module, "read_promotion_remote_state_with_deploy_key", read)
     monkeypatch.setattr(authority_module, "publish_promotion_refs_with_deploy_key", publish)
-    intent = type("Intent", (), {"target": TARGET, "repository_id": REPOSITORY_ID,
-                                  "known_good_tag": "syncapp-known-good-123e4567-e89b-42d3-a456-426614174000"})()
+    intent = type(
+        "Intent",
+        (),
+        {
+            "target": TARGET,
+            "repository_id": REPOSITORY_ID,
+            "known_good_tag": "syncapp-known-good-123e4567-e89b-42d3-a456-426614174000",
+        },
+    )()
 
     assert authority.read(intent) is state
     authority.publish(intent, state)
 
     assert observed[0][1][:5] == (
-        PROOF, TARGET, REPOSITORY_ID, intent.known_good_tag, tmp_path / "key"
+        PROOF,
+        TARGET,
+        REPOSITORY_ID,
+        intent.known_good_tag,
+        tmp_path / "key",
     )
     assert observed[1][1][:6] == (
-        intent, state, PROOF, tmp_path / "key", tmp_path / "promotion", tmp_path / "homeassistant"
+        intent,
+        state,
+        PROOF,
+        tmp_path / "key",
+        tmp_path / "promotion",
+        tmp_path / "homeassistant",
     )
     rendered = repr(authority)
     assert str(tmp_path) not in rendered
@@ -85,8 +105,15 @@ def test_authority_sanitizes_and_preserves_failure_classification(
             DeploymentPromotionTransportError("private-key secret detail", transient=transient)
         ),
     )
-    intent = type("Intent", (), {"target": TARGET, "repository_id": REPOSITORY_ID,
-                                  "known_good_tag": "syncapp-known-good-123e4567-e89b-42d3-a456-426614174000"})()
+    intent = type(
+        "Intent",
+        (),
+        {
+            "target": TARGET,
+            "repository_id": REPOSITORY_ID,
+            "known_good_tag": "syncapp-known-good-123e4567-e89b-42d3-a456-426614174000",
+        },
+    )()
 
     with pytest.raises(authority_module.DeployKeyPromotionAuthorityError) as caught:
         authority.read(intent)
@@ -115,14 +142,40 @@ def test_candidate_execution_uses_deploy_key_authority_without_token(
     )
     calls: list[str] = []
     authority = _authority(tmp_path)
-    monkeypatch.setattr(authority, "read", lambda _intent: calls.append("read") or next(states))
-    monkeypatch.setattr(authority, "publish", lambda _intent, _state: calls.append("publish"))
+    monkeypatch.setattr(
+        authority_module.DeployKeyPromotionAuthority,
+        "read",
+        lambda _self, _intent: calls.append("read") or next(states),
+    )
+    monkeypatch.setattr(
+        authority_module.DeployKeyPromotionAuthority,
+        "publish",
+        lambda _self, _intent, _state: calls.append("publish"),
+    )
     try:
         result = execute_candidate_promotion_once(
             store, item, token=None, promotion_authority=authority, now=now
         )
         assert result.status == "completed"
         assert calls == ["read", "publish", "read"]
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_promotion_rejects_mixed_token_and_deploy_key_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, plan, _baseline, _candidate = _ready(tmp_path, monkeypatch)
+    try:
+        with pytest.raises(DeploymentPromotionError, match="exactly one") as caught:
+            promote_finalized_deployment_once(
+                store,
+                plan,
+                token="github-token",
+                promotion_authority=_authority(tmp_path),
+                observed_at=START + timedelta(seconds=309),
+            )
+        assert caught.value.transient is False
     finally:
         store.__exit__(None, None, None)
 
@@ -148,9 +201,7 @@ def test_service_builds_promotion_authority_only_after_initialization(
         store.record_synchronization_baseline(
             TARGET, "main", "e" * 64, BASELINE, synchronized_at=NOW
         )
-        authority = service._deploy_key_promotion_authority_if_configured(
-            store, config, data, home
-        )
+        authority = service._deploy_key_promotion_authority_if_configured(store, config, data, home)
 
     assert authority is not None
     assert authority.home_assistant_root == home.resolve()
@@ -164,8 +215,9 @@ def test_service_sanitizes_promotion_authority_activation_failure(
     (data / "syncapp" / "repo-b-deploy-key").mkdir(parents=True, mode=0o700)
     home = tmp_path / "homeassistant"
     home.mkdir()
-    config = Config(repo_b=TARGET, github_token="rest-token",
-                    repo_b_promotion_transport="deploy_key")
+    config = Config(
+        repo_b=TARGET, github_token="rest-token", repo_b_promotion_transport="deploy_key"
+    )
     with StateStore(data) as store:
         store.bind_repository(TARGET, REPOSITORY_ID)
         store.record_synchronization_baseline(
