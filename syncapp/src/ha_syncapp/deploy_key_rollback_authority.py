@@ -9,6 +9,7 @@ from pathlib import Path
 from .deploy_key_access import (
     DeployKeyAccessError,
     DeployKeyAccessProof,
+    DeployKeyReferenceSnapshot,
     read_repo_b_deploy_key_references,
 )
 from .deployment_rollback import RollbackRepositoryProof
@@ -76,7 +77,7 @@ class DeployKeyRollbackRepositoryAuthority:
             ) from None
 
         if (
-            type(snapshot).__name__ != "DeployKeyReferenceSnapshot"
+            type(snapshot) is not DeployKeyReferenceSnapshot
             or snapshot.target.casefold() != self.proof.target.casefold()
             or snapshot.repository_id != self.proof.repository_id
             or snapshot.key_fingerprint != self.proof.key_fingerprint
