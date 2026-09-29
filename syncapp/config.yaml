@@ -27,6 +27,7 @@ options:
   deployment_observation_seconds: 300
   repo_b_candidate_transport: token
   repo_b_publication_transport: token
+  repo_b_promotion_transport: token
   recorder_retention_days: 7
 schema:
   log_level: list(info|warning|error)
@@ -37,6 +38,7 @@ schema:
   github_token: password?
   repo_b_candidate_transport: list(token|deploy_key)
   repo_b_publication_transport: list(token|deploy_key)
+  repo_b_promotion_transport: list(token|deploy_key)
   recorder_database_path: str?
   recorder_retention_days: int(1,365)
   administrative_retry_request_id: str?

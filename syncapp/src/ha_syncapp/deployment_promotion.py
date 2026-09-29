@@ -9,7 +9,10 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from .deploy_key_promotion_authority import DeployKeyPromotionAuthority
 
 from .deployment_finalization import (
     DeploymentFinalization,
@@ -216,6 +219,7 @@ def promote_finalized_deployment_once(
     token: str | None,
     remote_reader: RemoteReader | None = None,
     publisher: Publisher | None = None,
+    promotion_authority: DeployKeyPromotionAuthority | None = None,
     observed_at: datetime | None = None,
 ) -> DeploymentPromotionResult:
     """Plan durably, publish missing refs once, and reconcile uncertain outcomes."""
@@ -249,6 +253,23 @@ def promote_finalized_deployment_once(
                 terminal_at=None,
             )
             existing = _insert_plan(store, plan, requested)
+        if promotion_authority is not None:
+            if token is not None or remote_reader is not None or publisher is not None:
+                raise DeploymentPromotionError("promotion requires exactly one transport authority")
+            from .deploy_key_promotion_authority import (
+                DeployKeyPromotionAuthority,
+                DeployKeyPromotionAuthorityError,
+            )
+
+            if type(promotion_authority) is not DeployKeyPromotionAuthority:
+                raise DeploymentPromotionError("promotion authority is invalid")
+            try:
+                before = promotion_authority.read(existing)
+            except DeployKeyPromotionAuthorityError as error:
+                raise DeploymentPromotionError(
+                    "deployment promotion authority failed", transient=error.transient
+                ) from None
+            return _complete_with_authority(store, plan, existing, before, promotion_authority, now)
         credential = _validate_token(token)
         if remote_reader is None or publisher is None:
             from .deployment_promotion_transport import (
@@ -289,6 +310,43 @@ def promote_finalized_deployment_once(
         AttributeError,
     ):
         _invalid_state()
+
+
+def _complete_with_authority(
+    store: StateStore,
+    plan: PostDeploymentAssertionPlan,
+    intent: DeploymentPromotion,
+    before: PromotionRemoteState,
+    authority: object,
+    now: datetime,
+) -> DeploymentPromotionResult:
+    from .deploy_key_promotion_authority import (
+        DeployKeyPromotionAuthority,
+        DeployKeyPromotionAuthorityError,
+    )
+
+    if type(authority) is not DeployKeyPromotionAuthority:
+        _invalid_state()
+    disposition = _disposition(intent, before)
+    if disposition == "blocked":
+        _set_terminal(store, plan, intent, "blocked", now)
+        _blocked()
+    if disposition == "completed":
+        return _result(_set_terminal(store, plan, intent, "completed", now), False)
+    try:
+        authority.publish(intent, before)
+        after = authority.read(intent)
+    except DeployKeyPromotionAuthorityError as error:
+        raise DeploymentPromotionError(
+            "deployment promotion authority failed", transient=error.transient
+        ) from None
+    after_disposition = _disposition(intent, after)
+    if after_disposition != "completed":
+        if after_disposition == "blocked":
+            _set_terminal(store, plan, intent, "blocked", now)
+            _blocked()
+        _unavailable()
+    return _result(_set_terminal(store, plan, intent, "completed", now), False)
 
 
 def load_deployment_promotion(

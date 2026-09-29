@@ -34,6 +34,10 @@ from .database_startup import (
 )
 from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
 from .deploy_key_access import DeployKeyAccessError, test_repo_b_deploy_key_access
+from .deploy_key_promotion_authority import (
+    DeployKeyPromotionAuthority,
+    DeployKeyPromotionAuthorityError,
+)
 from .deploy_key_publication_authority import (
     DeployKeyPublicationAuthority,
     DeployKeyPublicationAuthorityError,
@@ -514,6 +518,49 @@ def _deploy_key_publication_authority_if_configured(
         raise LocalStartupError("publication deploy-key authority is unavailable") from exc
 
 
+def _deploy_key_promotion_authority_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    home_assistant_root: Path,
+) -> DeployKeyPromotionAuthority | None:
+    """Build candidate promotion SSH authority after durable initialization."""
+    if config.repo_b_promotion_transport == "token":
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise RetriggerCycleError("promotion deploy-key configuration is invalid")
+    repository_id = store.repository_id(config.repo_b)
+    if repository_id is None:
+        raise RetriggerCycleError("promotion repository is not trusted")
+    if store.synchronization_baseline(config.repo_b, "main") is None:
+        raise RetriggerCycleError("promotion repository is not initialized")
+    try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        home = home_assistant_root.resolve(strict=True)
+        key_directory = protected / "repo-b-deploy-key"
+        access_work_directory = protected / "work" / "deploy-key-promotion-access"
+        workspace_root = protected / "work" / "deploy-key-promotion"
+        _ensure_private_work_directory(protected, access_work_directory)
+        _ensure_private_work_directory(protected, workspace_root)
+        proof = test_repo_b_deploy_key_access(
+            config.repo_b,
+            config.github_token,
+            repository_id,
+            key_directory,
+            work_directory=access_work_directory,
+        )
+        return DeployKeyPromotionAuthority(
+            proof, key_directory, access_work_directory, workspace_root, home
+        )
+    except (
+        DeployKeyAccessError,
+        DeployKeyPromotionAuthorityError,
+        RetriggerCycleError,
+        OSError,
+    ) as exc:
+        raise RetriggerCycleError("promotion deploy-key authority is unavailable") from exc
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -521,6 +568,7 @@ def _handle_retrigger_request(
     request: RetriggerRequest,
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
+    deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
 ) -> str:
     """Execute one bounded outbound cycle while the service retains state ownership."""
     if config.repo_b is None or config.github_token is None:
@@ -564,6 +612,7 @@ def _handle_retrigger_request(
             config.github_token,
             candidate_deploy_key_ingress=candidate_deploy_key_ingress,
             deploy_key_publication_authority=deploy_key_publication_authority,
+            deploy_key_promotion_authority=deploy_key_promotion_authority,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
@@ -596,6 +645,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 emit("administrative_retry_rejected", level="warning")
         candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None
         deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None
+        deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -609,6 +659,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             deploy_key_publication_authority = _deploy_key_publication_authority_if_configured(
                 store, config, data_dir
+            )
+            deploy_key_promotion_authority = _deploy_key_promotion_authority_if_configured(
+                store, config, data_dir, Path("/homeassistant")
             )
         boot = store.start_run()
         local_change_service: LocalChangeService | None = None
@@ -750,6 +803,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                                 request,
                                 candidate_deploy_key_ingress,
                                 deploy_key_publication_authority,
+                                deploy_key_promotion_authority,
                             ),
                             timeout_seconds=0.25,
                         )

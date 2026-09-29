@@ -43,6 +43,7 @@ that writes from the app are denied.
 | `github_token` | unset | Credential used only for trusted Repo B operations |
 | `repo_b_candidate_transport` | `token` | `token`, `deploy_key` |
 | `repo_b_publication_transport` | `token` | `token`, `deploy_key` |
+| `repo_b_promotion_transport` | `token` | `token`, `deploy_key` |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
@@ -145,7 +146,16 @@ identity, initialized `main` baseline, protected key generation, and fresh acces
 proof. Branch observation, exact baseline acquisition, and authorized publication
 then use descriptor-bound, host-pinned SSH without token Git or fallback. History
 retention rewrites, deployment promotion/rollback, and REST identity verification
-remain unchanged. See [Deploy-key ordinary snapshot publication adoption](../docs/deploy-key-snapshot-publication-adoption.md).
+remain independently selected. See [Deploy-key ordinary snapshot publication adoption](../docs/deploy-key-snapshot-publication-adoption.md).
+
+Candidate promotion can be independently switched with
+`repo_b_promotion_transport: deploy_key`. After the same pinned identity,
+initialized `main` baseline, enrolled key, and fresh proof checks, promotion
+reference observation, exact candidate fetch, atomic non-force `main`/known-good
+tag publication, and reconciliation use only the proof-bound SSH authority. The
+durable promotion journal and completed replay semantics are unchanged. Candidate
+rollback, retention rewrites, and REST identity verification retain their existing
+credentials and safeguards. See [Deploy-key candidate promotion adoption](../docs/deploy-key-promotion-adoption.md).
 
 ## Retrigger recovery
 

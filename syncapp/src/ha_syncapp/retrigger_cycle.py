@@ -131,6 +131,7 @@ from ha_syncapp.database_sync_retrigger import (
     DatabaseSyncRetriggerResult,
     run_database_sync_retrigger_pass,
 )
+from ha_syncapp.deploy_key_promotion_authority import DeployKeyPromotionAuthority
 from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
 from ha_syncapp.deployment_rollback_retrigger import (
     DeploymentRollbackRetriggerError,
@@ -223,6 +224,7 @@ def run_retrigger_cycle(
     *,
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
+    deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
     core_token: str | None = None,
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
@@ -733,7 +735,8 @@ def run_retrigger_cycle(
         ):
             candidate_promotion = run_candidate_promotion_retrigger_pass(
                 store,
-                github_token,
+                None if deploy_key_promotion_authority is not None else github_token,
+                promotion_authority=deploy_key_promotion_authority,
                 reference_time=recovery_reference_time or datetime.now(UTC),
             )
         else:
