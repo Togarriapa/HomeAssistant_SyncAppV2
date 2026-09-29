@@ -170,7 +170,10 @@ def test_public_private_mismatch_is_detected_during_generation(
     def mismatch(command: tuple[str, ...], *, cwd: Path) -> bytes:
         result = real(command, cwd=cwd)
         if "-y" in command:
-            return b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n"
+            return (
+                b"ssh-ed25519 "
+                b"AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n"
+            )
         return result
 
     monkeypatch.setattr(deploy_key, "_run_ssh_keygen", mismatch)
@@ -234,7 +237,12 @@ def test_completed_publish_with_journal_is_reconciled_without_regeneration(
     enrollment = ensure_repo_b_deploy_key(key_path)
     journal = key_path.parent / ".repo-b-deploy-key.generation.json"
     journal.write_text(
-        json.dumps({"schema_version": 1, "generation_id": enrollment.generation_id}) + "\n"
+        json.dumps(
+            {"schema_version": 1, "generation_id": enrollment.generation_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
     )
     journal.chmod(0o600)
     monkeypatch.setattr(
@@ -255,3 +263,35 @@ def test_unsafe_parent_is_rejected_without_writing(tmp_path: Path) -> None:
         ensure_repo_b_deploy_key(key_path)
     assert not key_path.exists()
 
+
+def test_relative_or_non_normalized_target_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(DeployKeyError, match="Deploy key parent is invalid"):
+        ensure_repo_b_deploy_key(Path("relative/repo-b-deploy-key"))
+    with pytest.raises(DeployKeyError, match="Deploy key parent is invalid"):
+        ensure_repo_b_deploy_key(tmp_path / "protected" / ".." / "repo-b-deploy-key")
+
+
+def test_generator_symlink_output_is_rejected_without_following_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = _key_path(tmp_path)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"preserve-me")
+    outside.chmod(0o644)
+
+    def forged(command: tuple[str, ...], *, cwd: Path) -> bytes:
+        if "-t" in command:
+            (cwd / "private_key").symlink_to(outside)
+            (cwd / "private_key.pub").write_text(
+                "ssh-ed25519 "
+                "AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm "
+                "homeassistant-syncapp-repo-b\n"
+            )
+            return b""
+        return b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n"
+
+    monkeypatch.setattr(deploy_key, "_run_ssh_keygen", forged)
+    with pytest.raises(DeployKeyError, match="Deploy key generation failed"):
+        ensure_repo_b_deploy_key(key_path)
+    assert outside.read_bytes() == b"preserve-me"
+    assert stat.S_IMODE(outside.stat().st_mode) == 0o644

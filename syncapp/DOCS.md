@@ -83,6 +83,21 @@ aggregates: processed total, fixed `retried`/`rejected` counts and the latest
 processing timestamp. This read-only view omits request IDs, work identities,
 digests and raw options and grants no retry authority.
 
+## Repo B deploy-key foundation
+
+The protected Ed25519 generation boundary is implemented but is not yet connected
+to App startup, options, GitHub enrollment, or Git transport. It returns only the
+public key, SHA-256 fingerprint, algorithm, and generation UUID; private key bytes
+remain in an app-owned `0700` directory as a `0600` file. Existing generations are
+validated and replayed without running `ssh-keygen` again.
+
+Do not treat generation as proof that GitHub accepted the key. A later reviewed
+increment must perform a read-only authentication test against the pinned private
+Repo B before deploy-key transport can replace `github_token`. Interrupted or
+tampered generations fail closed and are not automatically repaired or rotated.
+See [Repo B deploy-key generation](../docs/deploy-key-generation.md) for the exact
+storage, journal, privacy, and recovery boundary.
+
 ## Retrigger recovery
 
 The container launcher supervises the state-owning SyncApp service and triggers the

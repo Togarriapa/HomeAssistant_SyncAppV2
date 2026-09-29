@@ -121,6 +121,11 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "`recorder_retention_days` | `7` | Integer from 1 through 365" in operator_docs
     assert "`administrative_retry_request_id`" in operator_docs
     assert "A request UUID is consumed exactly once" in operator_docs
+    assert "## Repo B deploy-key foundation" in operator_docs
+    deploy_key_docs = (ROOT / "docs/deploy-key-generation.md").read_text()
+    assert "does not yet enroll, test, rotate, or use the key" in deploy_key_docs
+    assert "never returned or logged" in deploy_key_docs
+    assert "performs no network operation" in deploy_key_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
