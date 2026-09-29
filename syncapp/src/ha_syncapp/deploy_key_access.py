@@ -11,8 +11,10 @@ import signal
 import stat
 import subprocess  # nosec B404
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID
@@ -101,6 +103,21 @@ class DeployKeyReferenceSnapshot:
     observation_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class DeployKeyTransportSession:
+    """Ephemeral descriptor-bound authority for one exact Repo B key generation."""
+
+    target: str
+    repository_id: int
+    key_fingerprint: str
+    generation_id: str
+    git_executable: Path
+    work_directory: Path
+    ssh_command: str = dataclass_field(repr=False)
+    environment: dict[str, str] = dataclass_field(repr=False)
+    private_descriptor: int = dataclass_field(repr=False)
+
+
 def test_repo_b_deploy_key_access(
     target: str,
     github_token: str,
@@ -166,7 +183,8 @@ def test_repo_b_deploy_key_access(
     )
 
 
-def read_repo_b_deploy_key_references(
+@contextmanager
+def open_repo_b_deploy_key_transport(
     proof: DeployKeyAccessProof,
     target: str,
     expected_repository_id: int,
@@ -176,8 +194,8 @@ def read_repo_b_deploy_key_references(
     work_directory: Path,
     git_executable: Path = Path("/usr/bin/git"),
     ssh_executable: Path = Path("/usr/bin/ssh"),
-) -> DeployKeyReferenceSnapshot:
-    """Read bounded canonical Git refs with one exact previously verified key generation."""
+) -> Iterator[DeployKeyTransportSession]:
+    """Open one descriptor-bound Git authority and close it after the exact operation."""
     _validate_access_proof(proof)
     if (
         not _valid_target(target)
@@ -205,27 +223,73 @@ def read_repo_b_deploy_key_references(
 
     private_descriptor = _open_private_key(key_directory / "private_key")
     try:
-        command = _ls_remote_command(
+        yield DeployKeyTransportSession(
             target,
+            expected_repository_id,
+            enrollment.fingerprint,
+            enrollment.generation_id,
             git_executable,
+            work_directory,
             _ssh_command(ssh_executable, known_hosts_file, private_descriptor),
-        )
-        raw = _run_git_ls_remote(
-            command,
-            cwd=work_directory,
-            environment=_git_environment(ssh_executable, work_directory),
-            pass_fds=(private_descriptor,),
+            _git_environment(ssh_executable, work_directory),
+            private_descriptor,
         )
     finally:
         os.close(private_descriptor)
+
+
+def read_repo_b_deploy_key_references(
+    proof: DeployKeyAccessProof,
+    target: str,
+    expected_repository_id: int,
+    key_directory: Path,
+    *,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    work_directory: Path,
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+) -> DeployKeyReferenceSnapshot:
+    """Read bounded canonical Git refs with one exact previously verified key generation."""
+    with open_repo_b_deploy_key_transport(
+        proof,
+        target,
+        expected_repository_id,
+        key_directory,
+        known_hosts_file=known_hosts_file,
+        work_directory=work_directory,
+        git_executable=git_executable,
+        ssh_executable=ssh_executable,
+    ) as session:
+        raw = run_bounded_repo_b_git(
+            _ls_remote_command(target, git_executable, session.ssh_command),
+            cwd=session.work_directory,
+            environment=session.environment,
+            pass_fds=(session.private_descriptor,),
+        )
     references = _parse_reference_evidence(raw)
     return DeployKeyReferenceSnapshot(
         target=target,
         repository_id=expected_repository_id,
-        key_fingerprint=enrollment.fingerprint,
-        generation_id=enrollment.generation_id,
+        key_fingerprint=session.key_fingerprint,
+        generation_id=session.generation_id,
         references=references,
         observation_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def run_bounded_repo_b_git(
+    command: tuple[str, ...],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    pass_fds: tuple[int, ...],
+) -> bytes:
+    """Run one already-confined Repo B Git command with bounded sanitized output."""
+    return _run_git_ls_remote(
+        command,
+        cwd=cwd,
+        environment=environment,
+        pass_fds=pass_fds,
     )
 
 

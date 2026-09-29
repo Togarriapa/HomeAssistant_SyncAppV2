@@ -134,6 +134,9 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "Rotation is not connected to startup or Retrigger" in rotation_docs
     assert "does **not** establish write permission" in rotation_docs
     assert "previous generation is retained" in rotation_docs
+    candidate_fetch_docs = (ROOT / "docs/deploy-key-candidate-fetch.md").read_text()
+    assert "No GitHub token" in candidate_fetch_docs
+    assert "must never silently return to token-backed Git transport" in candidate_fetch_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
