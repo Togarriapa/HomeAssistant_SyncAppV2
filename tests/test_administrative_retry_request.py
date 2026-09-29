@@ -154,8 +154,8 @@ def test_schema_34_migrates_receipts_without_losing_blocked_work(tmp_path: Path)
         store._connection.execute("PRAGMA user_version = 34")
 
     with StateStore(tmp_path) as migrated:
-        assert SCHEMA_VERSION == 35
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (35,)
+        assert SCHEMA_VERSION == 36
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (36,)
         assert migrated._get_work(KIND, KEY).status == "blocked"
         assert load_administrative_retry_receipt(migrated, REQUEST_ID) is None
 

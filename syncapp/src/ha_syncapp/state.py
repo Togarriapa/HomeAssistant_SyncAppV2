@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -79,6 +79,15 @@ class AdministrativeRetryRuntimeEvidence:
 
     outcome: str
     processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RepoBInitializationRuntimeEvidence:
+    """Identity-free Repo B initialization authority evidence."""
+
+    phase: str
+    block_reason: str
+    recorded_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +325,28 @@ class StateStore:
             "identity_sha256 TEXT NOT NULL, "
             "outcome TEXT NOT NULL CHECK (outcome IN ('retried','rejected')), "
             "processed_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
+
+    @staticmethod
+    def _create_repo_b_initialization_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS repo_b_initialization ("
+            "request_id TEXT PRIMARY KEY NOT NULL, target TEXT NOT NULL, "
+            "repository_id INTEGER NOT NULL CHECK (repository_id > 0), "
+            "key_fingerprint TEXT NOT NULL, generation_id TEXT NOT NULL, "
+            "observation_sha256 TEXT NOT NULL, observed_at TEXT NOT NULL, "
+            "phase TEXT NOT NULL CHECK (phase IN ('authorized','blocked','completed')), "
+            "block_reason TEXT NOT NULL CHECK (block_reason IN ("
+            "'none','repository_not_empty','already_initialized','active_request')), "
+            "recorded_at TEXT NOT NULL, terminal_at TEXT, record_sha256 TEXT NOT NULL, "
+            "FOREIGN KEY (target) REFERENCES repository_binding(target), "
+            "CHECK ((phase = 'authorized' AND block_reason = 'none' AND terminal_at IS NULL) "
+            "OR (phase = 'blocked' AND block_reason != 'none' AND terminal_at IS NOT NULL) "
+            "OR (phase = 'completed' AND block_reason = 'none' AND terminal_at IS NOT NULL)))"
+        )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS repo_b_initialization_active_target "
+            "ON repo_b_initialization(target) WHERE phase = 'authorized'"
         )
 
     @staticmethod
@@ -1154,6 +1185,7 @@ class StateStore:
                 self._create_candidate_semantic_checkpoint_table(db)
                 self._create_candidate_backup_checkpoint_table(db)
                 self._create_administrative_retry_request_table(db)
+                self._create_repo_b_initialization_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -1196,6 +1228,7 @@ class StateStore:
                 32,
                 33,
                 34,
+                35,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1408,6 +1441,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._create_administrative_retry_request_table(db)
+                    db.execute("PRAGMA user_version = 35")
+                version = 35
+            if version == 35:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_repo_b_initialization_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -1963,6 +2002,42 @@ class StateStore:
                     processed_at=parsed,
                 )
             )
+        return tuple(evidence)
+
+    def repo_b_initialization_runtime_evidence(
+        self,
+    ) -> tuple[RepoBInitializationRuntimeEvidence, ...]:
+        """Read bounded initialization status without selecting authority identity."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT phase, block_reason, recorded_at FROM repo_b_initialization "
+                "ORDER BY recorded_at, phase, block_reason LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read Repo B initialization runtime evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Repo B initialization runtime evidence exceeds the limit")
+
+        evidence: list[RepoBInitializationRuntimeEvidence] = []
+        phases = {"authorized", "blocked", "completed"}
+        reasons = {
+            "none",
+            "repository_not_empty",
+            "already_initialized",
+            "active_request",
+        }
+        for row in rows:
+            if len(row) != 3:
+                raise StateError("Invalid Repo B initialization runtime evidence")
+            phase, block_reason, recorded_at = row
+            if phase not in phases or block_reason not in reasons:
+                raise StateError("Invalid Repo B initialization runtime evidence")
+            parsed = _parse_timestamp(recorded_at)
+            if parsed.isoformat() != recorded_at:
+                raise StateError("Invalid Repo B initialization runtime evidence")
+            evidence.append(RepoBInitializationRuntimeEvidence(phase, block_reason, parsed))
         return tuple(evidence)
 
     def deployment_rollback_runtime_evidence(
