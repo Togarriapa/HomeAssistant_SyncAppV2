@@ -11,17 +11,44 @@ from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 
+from ha_syncapp.deploy_key_access import (
+    DeployKeyAccessError,
+    DeployKeyAccessProof,
+    DeployKeyReference,
+    DeployKeyReferenceSnapshot,
+    open_repo_b_deploy_key_transport,
+    read_repo_b_deploy_key_references,
+    run_bounded_repo_b_git,
+)
 from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, verify_workspace_content
 from ha_syncapp.github_repo import BranchAbsence, BranchHead
 from ha_syncapp.local_git import GitError, inspect_repository
 from ha_syncapp.publication_intent import PublicationIntent
 
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+_GENERATION = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$")
+_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_REFERENCE = re.compile(r"^refs/(?:heads|tags)/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 _TOKEN = re.compile(r"^[!-~]{1,512}$")
+_ALLOWED_LOCAL_CONFIG = {
+    "core.repositoryformatversion": {"0"},
+    "core.filemode": {"true", "false"},
+    "core.bare": {"false"},
+    "core.logallrefupdates": {"true"},
+    "user.name": {"Home Assistant SyncApp"},
+    "user.email": {"syncapp@localhost"},
+}
 
 
 class PublicationTransportError(RuntimeError):
     """An authorized Repo B publication could not be safely transported."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 def push_publication_intent(
@@ -85,15 +112,280 @@ def push_publication_intent(
     return intent.local_commit_sha
 
 
+def push_publication_intent_with_deploy_key(
+    workspace: GitWorkspace,
+    intent: PublicationIntent,
+    proof: DeployKeyAccessProof,
+    key_directory: Path,
+    *,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+) -> str:
+    """Publish one immutable intent through an exact protected key generation."""
+    _validate_intent(intent)
+    _validate_deploy_key_proof(intent, proof)
+    before = _read_deploy_key_references(
+        workspace,
+        intent,
+        proof,
+        key_directory,
+        known_hosts_file=known_hosts_file,
+        git_executable=git_executable,
+        ssh_executable=ssh_executable,
+    )
+    _validate_before_publication(before, intent, proof)
+    root, tree, local_head = _reprove_workspace(workspace, intent, git_executable)
+    if local_head != intent.local_commit_sha:
+        raise PublicationTransportError("local publication commit changed after authorization")
+
+    try:
+        with open_repo_b_deploy_key_transport(
+            proof,
+            intent.target,
+            intent.repository_id,
+            key_directory,
+            known_hosts_file=known_hosts_file,
+            work_directory=tree,
+            git_executable=git_executable,
+            ssh_executable=ssh_executable,
+        ) as session:
+            run_bounded_repo_b_git(
+                _deploy_key_push_command(
+                    session.git_executable,
+                    session.ssh_command,
+                    intent.target,
+                    intent.local_commit_sha,
+                    intent.branch,
+                ),
+                cwd=tree,
+                environment=session.environment,
+                pass_fds=(session.private_descriptor,),
+            )
+    except DeployKeyAccessError as error:
+        raise _deploy_key_access_error(error) from None
+
+    _verify_after_transport(workspace)
+    after = _read_deploy_key_references(
+        workspace,
+        intent,
+        proof,
+        key_directory,
+        known_hosts_file=known_hosts_file,
+        git_executable=git_executable,
+        ssh_executable=ssh_executable,
+    )
+    _validate_after_publication(after, intent, proof)
+    return intent.local_commit_sha
+
+
+def _validate_deploy_key_proof(intent: PublicationIntent, proof: DeployKeyAccessProof) -> None:
+    if (
+        type(proof) is not DeployKeyAccessProof
+        or proof.target.casefold() != intent.target.casefold()
+        or proof.repository_id != intent.repository_id
+        or _FINGERPRINT.fullmatch(proof.key_fingerprint) is None
+        or _GENERATION.fullmatch(proof.generation_id) is None
+        or type(proof.ref_count) is not int
+        or proof.ref_count < 0
+        or _SHA256.fullmatch(proof.observation_sha256) is None
+    ):
+        raise PublicationTransportError("deploy-key publication authority is invalid")
+
+
+def _read_deploy_key_references(
+    workspace: GitWorkspace,
+    intent: PublicationIntent,
+    proof: DeployKeyAccessProof,
+    key_directory: Path,
+    *,
+    known_hosts_file: Path,
+    git_executable: Path,
+    ssh_executable: Path,
+) -> DeployKeyReferenceSnapshot:
+    try:
+        return read_repo_b_deploy_key_references(
+            proof,
+            intent.target,
+            intent.repository_id,
+            key_directory,
+            known_hosts_file=known_hosts_file,
+            work_directory=workspace.tree_path,
+            git_executable=git_executable,
+            ssh_executable=ssh_executable,
+        )
+    except DeployKeyAccessError as error:
+        raise _deploy_key_access_error(error) from None
+
+
+def _validate_reference_snapshot(
+    snapshot: DeployKeyReferenceSnapshot,
+    intent: PublicationIntent,
+    proof: DeployKeyAccessProof,
+) -> tuple[DeployKeyReference, ...]:
+    if (
+        type(snapshot) is not DeployKeyReferenceSnapshot
+        or snapshot.target.casefold() != intent.target.casefold()
+        or snapshot.repository_id != intent.repository_id
+        or snapshot.key_fingerprint != proof.key_fingerprint
+        or snapshot.generation_id != proof.generation_id
+        or _SHA256.fullmatch(snapshot.observation_sha256) is None
+        or type(snapshot.references) is not tuple
+        or not _canonical_references(snapshot.references)
+    ):
+        raise PublicationTransportError("publication reference evidence is invalid")
+    name = f"refs/heads/{intent.branch}"
+    return tuple(reference for reference in snapshot.references if reference.name == name)
+
+
+def _canonical_references(references: tuple[DeployKeyReference, ...]) -> bool:
+    previous: str | None = None
+    for reference in references:
+        if (
+            type(reference) is not DeployKeyReference
+            or not _valid_reference_name(reference.name)
+            or _COMMIT_SHA.fullmatch(reference.commit_sha) is None
+            or (previous is not None and reference.name <= previous)
+        ):
+            return False
+        previous = reference.name
+    return True
+
+
+def _valid_reference_name(name: str) -> bool:
+    if (
+        not isinstance(name, str)
+        or _REFERENCE.fullmatch(name) is None
+        or name.endswith(("/", ".", ".lock"))
+        or ".." in name
+        or "//" in name
+        or "@{" in name
+        or any(character in " ~^:?*[\\" or ord(character) < 0x20 for character in name)
+    ):
+        return False
+    return all(component not in {"", ".", ".."} for component in name.split("/"))
+
+
+def _validate_before_publication(
+    snapshot: DeployKeyReferenceSnapshot,
+    intent: PublicationIntent,
+    proof: DeployKeyAccessProof,
+) -> None:
+    references = _validate_reference_snapshot(snapshot, intent, proof)
+    if intent.expect_remote_absent:
+        if references:
+            raise PublicationTransportError("publication target branch is no longer absent")
+        return
+    if len(references) != 1 or references[0].commit_sha != intent.expected_remote_commit_sha:
+        raise PublicationTransportError("publication branch evidence changed after authorization")
+
+
+def _validate_after_publication(
+    snapshot: DeployKeyReferenceSnapshot,
+    intent: PublicationIntent,
+    proof: DeployKeyAccessProof,
+) -> None:
+    references = _validate_reference_snapshot(snapshot, intent, proof)
+    if len(references) == 1 and references[0].commit_sha == intent.local_commit_sha:
+        return
+    if not references and intent.expect_remote_absent:
+        raise PublicationTransportError("Repo B publication could not be confirmed", transient=True)
+    if (
+        len(references) == 1
+        and not intent.expect_remote_absent
+        and references[0].commit_sha == intent.expected_remote_commit_sha
+    ):
+        raise PublicationTransportError("Repo B publication could not be confirmed", transient=True)
+    raise PublicationTransportError("Repo B publication target diverged")
+
+
+def _reprove_workspace(
+    workspace: GitWorkspace, intent: PublicationIntent, git_executable: Path
+) -> tuple[Path, Path, str]:
+    if type(workspace) is not GitWorkspace:
+        raise PublicationTransportError("isolated publication workspace is invalid")
+    try:
+        repository = inspect_repository(workspace)
+        snapshot_id = verify_workspace_content(workspace)
+    except (GitError, WorkspaceError) as exc:
+        raise PublicationTransportError(
+            "isolated publication workspace could not be re-proven"
+        ) from exc
+    if repository.default_branch != intent.branch:
+        raise PublicationTransportError("publication branch does not match isolated workspace")
+    if snapshot_id != workspace.snapshot_id:
+        raise PublicationTransportError("isolated publication snapshot identity changed")
+    root = workspace.root.resolve(strict=True)
+    tree = workspace.tree_path.resolve(strict=True)
+    _verify_local_git_config(str(git_executable), tree, root)
+    try:
+        local_head = _run_git(str(git_executable), tree, root, ("rev-parse", "--verify", "HEAD"))
+    except GitError as exc:
+        raise PublicationTransportError("local publication commit could not be re-proven") from exc
+    return root, tree, local_head
+
+
+def _verify_local_git_config(executable: str, tree: Path, root: Path) -> None:
+    try:
+        raw = _run_git(executable, tree, root, ("config", "--local", "--null", "--list"))
+        if not raw.endswith("\0"):
+            raise ValueError
+        entries = raw[:-1].split("\0")
+        observed: dict[str, str] = {}
+        for entry in entries:
+            key, value = entry.split("\n", 1)
+            if key in observed or value not in _ALLOWED_LOCAL_CONFIG.get(key, set()):
+                raise ValueError
+            observed[key] = value
+    except (GitError, ValueError):
+        raise PublicationTransportError("isolated publication Git metadata is unsafe") from None
+    if set(observed) != set(_ALLOWED_LOCAL_CONFIG):
+        raise PublicationTransportError("isolated publication Git metadata is unsafe")
+
+
+def _deploy_key_push_command(
+    executable: Path,
+    ssh_command: str,
+    target: str,
+    commit_sha: str,
+    branch: str,
+) -> tuple[str, ...]:
+    return (
+        str(executable),
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "push.recurseSubmodules=no",
+        "-c",
+        f"core.sshCommand={ssh_command}",
+        "push",
+        "--porcelain",
+        "--no-verify",
+        _ssh_repository_url(target),
+        f"{commit_sha}:refs/heads/{branch}",
+    )
+
+
+def _deploy_key_access_error(error: DeployKeyAccessError) -> PublicationTransportError:
+    if error.transient:
+        return PublicationTransportError(
+            "Repo B publication transport is temporarily unavailable", transient=True
+        )
+    return PublicationTransportError("deploy-key publication authority is invalid")
+
+
 def _validate_intent(intent: PublicationIntent) -> None:
     if type(intent) is not PublicationIntent:
         raise PublicationTransportError("publication intent evidence is invalid")
     if type(intent.repository_id) is not int or intent.repository_id <= 0:
         raise PublicationTransportError("publication repository identity is invalid")
-    parts = intent.target.split("/") if isinstance(intent.target, str) else []
-    if len(parts) != 2 or not all(parts):
+    if not isinstance(intent.target, str) or _TARGET.fullmatch(intent.target) is None:
         raise PublicationTransportError("publication repository target is invalid")
-    if not isinstance(intent.branch, str) or not intent.branch:
+    if not isinstance(intent.branch, str) or _BRANCH.fullmatch(intent.branch) is None:
         raise PublicationTransportError("publication branch identity is invalid")
     if _COMMIT_SHA.fullmatch(intent.local_commit_sha) is None:
         raise PublicationTransportError("publication local commit identity is invalid")
@@ -147,6 +439,11 @@ def _validate_token(token: str) -> None:
 def _repository_url(target: str) -> str:
     owner, repository = target.split("/", 1)
     return f"https://github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
+
+
+def _ssh_repository_url(target: str) -> str:
+    owner, repository = target.split("/", 1)
+    return f"ssh://git@github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
 
 
 def _git_executable() -> str:

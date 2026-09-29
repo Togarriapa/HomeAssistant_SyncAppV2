@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -152,6 +153,7 @@ def test_pushes_only_exact_authorized_ref_over_descriptor_bound_ssh(
     assert not any(argument.startswith("--force") for argument in command)
     assert "credential.helper=" in command
     assert "protocol.file.allow=never" in command
+    assert "push.recurseSubmodules=no" in command
     ssh_config = next(value for value in command if value.startswith("core.sshCommand="))
     assert "IdentitiesOnly=yes" in ssh_config
     assert "StrictHostKeyChecking=yes" in ssh_config
@@ -206,7 +208,7 @@ def test_missing_moved_or_duplicate_baseline_fails_before_push(
     _install_reference_reads(monkeypatch, [_snapshot(proof, references)])
     monkeypatch.setattr(publication_transport, "run_bounded_repo_b_git", pytest.fail)
 
-    with pytest.raises(PublicationTransportError, match="branch evidence") as error:
+    with pytest.raises(PublicationTransportError, match="(?:branch|reference) evidence") as error:
         push_publication_intent_with_deploy_key(
             workspace,
             _intent(commit_sha),
@@ -372,14 +374,42 @@ def test_workspace_drift_during_transport_fails_closed(
     _install_reference_reads(monkeypatch, [before, after])
 
     def mutate(*_args: object, **_kwargs: object) -> bytes:
-        (workspace.tree_path / "configuration.yaml").write_text(
-            "homeassistant:\n  name: changed\n"
-        )
+        (workspace.tree_path / "configuration.yaml").write_text("homeassistant:\n  name: changed\n")
         return b""
 
     monkeypatch.setattr(publication_transport, "run_bounded_repo_b_git", mutate)
 
     with pytest.raises(PublicationTransportError, match="changed during transport"):
+        push_publication_intent_with_deploy_key(
+            workspace,
+            _intent(commit_sha),
+            proof,
+            key_directory,
+            known_hosts_file=known_hosts,
+        )
+
+
+def test_local_git_url_rewrite_cannot_redirect_authorized_ssh_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, commit_sha = _workspace(tmp_path)
+    key_directory, known_hosts, proof = _authority(tmp_path)
+    before = _snapshot(proof, (DeployKeyReference("refs/heads/main", BASELINE),))
+    _install_reference_reads(monkeypatch, [before])
+    subprocess.run(
+        [
+            "/usr/bin/git",
+            "config",
+            "--local",
+            "url.ssh://attacker.invalid/.pushInsteadOf",
+            "ssh://git@github.com/",
+        ],
+        cwd=workspace.tree_path,
+        check=True,
+    )
+    monkeypatch.setattr(publication_transport, "run_bounded_repo_b_git", pytest.fail)
+
+    with pytest.raises(PublicationTransportError, match="metadata is unsafe"):
         push_publication_intent_with_deploy_key(
             workspace,
             _intent(commit_sha),
