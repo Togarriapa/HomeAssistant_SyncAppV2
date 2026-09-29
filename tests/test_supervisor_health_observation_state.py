@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_current_schema_contains_supervisor_health_observation_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 36
+    assert SCHEMA_VERSION == 37
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"
@@ -19,7 +19,7 @@ def test_current_schema_contains_supervisor_health_observation_table(tmp_path: P
             "observed_at",
             "record_sha256",
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 36
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 37
 
 
 def test_schema_v14_migrates_observation_without_losing_work(tmp_path: Path) -> None:
@@ -36,4 +36,4 @@ def test_schema_v14_migrates_observation_without_losing_work(tmp_path: Path) -> 
         assert item is not None
         assert item.work_key == "preserve-me"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 36
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 37

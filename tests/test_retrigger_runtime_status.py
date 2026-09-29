@@ -463,10 +463,24 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
             "block_reasons": {
                 "active_request": 0,
                 "already_initialized": 0,
+                "execution_blocked": 0,
                 "none": 0,
                 "repository_not_empty": 0,
             },
             "latest_recorded_at": None,
+        },
+        "repo_b_initialization_execution": {
+            "total": 0,
+            "phases": {
+                "blocked": 0,
+                "completed": 0,
+                "prepared": 0,
+                "publishing": 0,
+                "retry": 0,
+            },
+            "attempts_total": 0,
+            "attempts_maximum": 0,
+            "latest_updated_at": None,
         },
         "deployment_rollback": {
             "total": 0,

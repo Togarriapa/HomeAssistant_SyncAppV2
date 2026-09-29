@@ -47,6 +47,7 @@ from .state import (
     AdministrativeRetryRuntimeEvidence,
     DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
+    RepoBInitializationExecutionRuntimeEvidence,
     RepoBInitializationRuntimeEvidence,
     StateError,
     StateStore,
@@ -92,6 +93,7 @@ def collect_retrigger_runtime_inventory(
         evidence = store.recovery_work_evidence()
         administrative_retry_evidence = store.administrative_retry_runtime_evidence()
         initialization_evidence = store.repo_b_initialization_runtime_evidence()
+        initialization_execution_evidence = store.repo_b_initialization_execution_runtime_evidence()
         rollback_evidence = store.deployment_rollback_runtime_evidence()
         fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
         integrity_evidence = candidate_integrity_runtime_evidence(store)
@@ -119,6 +121,12 @@ def collect_retrigger_runtime_inventory(
     recovery["repo_b_initialization"] = render_repo_b_initialization_runtime_status(
         initialization_evidence,
         reference_time=reference_time,
+    )
+    recovery["repo_b_initialization_execution"] = (
+        render_repo_b_initialization_execution_runtime_status(
+            initialization_execution_evidence,
+            reference_time=reference_time,
+        )
     )
     recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
         rollback_evidence,
@@ -204,6 +212,7 @@ def render_repo_b_initialization_runtime_status(
     reasons = {
         "active_request": 0,
         "already_initialized": 0,
+        "execution_blocked": 0,
         "none": 0,
         "repository_not_empty": 0,
     }
@@ -237,6 +246,57 @@ def render_repo_b_initialization_runtime_status(
         "phases": phases,
         "block_reasons": reasons,
         "latest_recorded_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_repo_b_initialization_execution_runtime_status(
+    evidence: Iterable[RepoBInitializationExecutionRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate initialization execution without durable or source identity."""
+
+    reference = _utc(reference_time, "Repo B initialization execution time is invalid")
+    phases = {
+        "blocked": 0,
+        "completed": 0,
+        "prepared": 0,
+        "publishing": 0,
+        "retry": 0,
+    }
+    latest: datetime | None = None
+    attempts_total = 0
+    attempts_maximum = 0
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "Repo B initialization execution evidence exceeds the limit"
+            )
+        if (
+            type(row) is not RepoBInitializationExecutionRuntimeEvidence
+            or row.phase not in phases
+            or type(row.attempt_count) is not int
+            or not 0 <= row.attempt_count <= 8
+        ):
+            raise RetriggerRuntimeStatusError("Repo B initialization execution evidence is invalid")
+        updated = _utc(
+            row.updated_at,
+            "Repo B initialization execution evidence is invalid",
+        )
+        if updated > reference:
+            raise RetriggerRuntimeStatusError("Repo B initialization execution evidence is invalid")
+        total += 1
+        phases[row.phase] += 1
+        attempts_total += row.attempt_count
+        attempts_maximum = max(attempts_maximum, row.attempt_count)
+        latest = updated if latest is None or updated > latest else latest
+    return {
+        "total": total,
+        "phases": phases,
+        "attempts_total": attempts_total,
+        "attempts_maximum": attempts_maximum,
+        "latest_updated_at": None if latest is None else latest.isoformat(),
     }
 
 

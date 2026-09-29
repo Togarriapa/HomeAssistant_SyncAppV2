@@ -46,6 +46,8 @@ The recovery file exposes:
   `retried` and `rejected` outcome counts, and the latest processed UTC timestamp.
 - `repo_b_initialization` with fixed authorized, blocked and completed phase counts,
   fixed deterministic block-reason counts and the latest recorded UTC timestamp.
+- `repo_b_initialization_execution` with fixed preparation/publication/retry/terminal
+  phase counts, total and maximum attempts, and the latest update timestamp.
 
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
@@ -63,6 +65,12 @@ selects only phase, block reason and recorded timestamp. Request UUID, repositor
 target and ID, deploy-key fingerprint and generation, remote observation digest and
 record integrity digest are never selected. The aggregate reports explicit authority
 state but cannot initialize a repository, publish a ref or grant Git transport access.
+
+Initialization execution uses another bounded projection selecting only phase,
+attempt count and update time. Request/repository identity, key binding, snapshot and
+commit identity, retry timestamp, block reason, record digest, source path and key
+path are not selected. The aggregate is diagnostic evidence only and grants no Git
+or retry authority.
 
 A successful `candidate_apply` item means only that the complete admission chain was
 freshly re-proven and an immutable live Apply intent was durably recorded. It does not

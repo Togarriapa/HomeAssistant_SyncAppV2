@@ -62,21 +62,26 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return source, snapshots, workspaces, key_directory
 
 
-def _proof(*, fingerprint: str = FINGERPRINT, generation: str = GENERATION_ID):
+def _proof(
+    *,
+    fingerprint: str = FINGERPRINT,
+    generation: str = GENERATION_ID,
+    ref_count: int = 0,
+    observation_sha256: str = EMPTY_DIGEST,
+):
     return DeployKeyAccessProof(
         TARGET,
         REPOSITORY_ID,
         fingerprint,
         generation,
-        0,
-        EMPTY_DIGEST,
+        ref_count,
+        observation_sha256,
     )
 
 
 def _snapshot(*references: DeployKeyReference) -> DeployKeyReferenceSnapshot:
     raw = b"".join(
-        f"{reference.commit_sha}\t{reference.name}\n".encode("ascii")
-        for reference in references
+        f"{reference.commit_sha}\t{reference.name}\n".encode("ascii") for reference in references
     )
     return DeployKeyReferenceSnapshot(
         TARGET,
@@ -124,6 +129,7 @@ def _install_successful_transport(
         assert intent.expect_remote_absent is True
         assert intent.expected_remote_commit_sha is None
         assert intent.branch == "main"
+        assert kwargs["require_repository_empty"] is True
         return intent.local_commit_sha
 
     monkeypatch.setattr(
@@ -197,9 +203,11 @@ def test_restart_after_push_reconciles_only_exact_intended_main(
 
     monkeypatch.setattr(
         "ha_syncapp.repo_initialization_execution.read_repo_b_deploy_key_references",
-        lambda *a, **k: _snapshot()
-        if not remote_commit
-        else _snapshot(DeployKeyReference("refs/heads/main", remote_commit[0])),
+        lambda *a, **k: (
+            _snapshot()
+            if not remote_commit
+            else _snapshot(DeployKeyReference("refs/heads/main", remote_commit[0]))
+        ),
     )
 
     def interrupted_push(workspace, intent, proof, key_directory, **kwargs):
@@ -313,6 +321,28 @@ def test_changed_key_generation_is_blocked_before_remote_access(
     assert blocked.block_reason == "key_changed"
 
 
+def test_rebound_authority_observation_is_blocked_before_remote_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(
+        "ha_syncapp.repo_initialization_execution.read_repo_b_deploy_key_references",
+        lambda *a, **k: pytest.fail("rebound proof must not reach transport"),
+    )
+    try:
+        blocked = _execute(
+            store,
+            paths,
+            proof=_proof(ref_count=1, observation_sha256="f" * 64),
+        )
+    finally:
+        store.__exit__(None, None, None)
+
+    assert blocked.phase == "blocked"
+    assert blocked.block_reason == "key_changed"
+
+
 def test_nonempty_or_diverged_repository_is_durably_blocked_without_push(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -320,9 +350,7 @@ def test_nonempty_or_diverged_repository_is_durably_blocked_without_push(
     paths = _paths(tmp_path)
     monkeypatch.setattr(
         "ha_syncapp.repo_initialization_execution.read_repo_b_deploy_key_references",
-        lambda *a, **k: _snapshot(
-            DeployKeyReference("refs/heads/main", "f" * 40)
-        ),
+        lambda *a, **k: _snapshot(DeployKeyReference("refs/heads/main", "f" * 40)),
     )
     monkeypatch.setattr(
         "ha_syncapp.repo_initialization_execution.push_publication_intent_with_deploy_key",
@@ -335,6 +363,25 @@ def test_nonempty_or_diverged_repository_is_durably_blocked_without_push(
 
     assert blocked.phase == "blocked"
     assert blocked.block_reason == "repository_diverged"
+
+
+def test_baseline_created_after_authority_blocks_before_remote_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    paths = _paths(tmp_path)
+    store.record_synchronization_baseline(TARGET, "main", "b" * 64, "a" * 40, synchronized_at=NOW)
+    monkeypatch.setattr(
+        "ha_syncapp.repo_initialization_execution.read_repo_b_deploy_key_references",
+        lambda *a, **k: pytest.fail("existing baseline must block before transport"),
+    )
+    try:
+        blocked = _execute(store, paths)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert blocked.phase == "blocked"
+    assert blocked.block_reason == "authority_invalid"
 
 
 def test_exhausted_transient_attempts_are_durably_blocked(
@@ -381,6 +428,27 @@ def test_tampered_execution_record_fails_closed(tmp_path: Path, monkeypatch) -> 
             load_repo_b_initialization_execution(store, REQUEST_ID)
     finally:
         store.__exit__(None, None, None)
+
+
+def test_execution_journal_contains_no_source_paths_content_or_key_material(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    paths = _paths(tmp_path)
+    calls: list[tuple[str, object]] = []
+    _install_successful_transport(monkeypatch, calls)
+    try:
+        execution = _execute(store, paths)
+    finally:
+        store.__exit__(None, None, None)
+
+    raw = (tmp_path / "data" / "syncapp" / "state.sqlite3").read_bytes()
+    assert b"name: Test" not in raw
+    assert str(paths[0]).encode() not in raw
+    assert str(paths[3]).encode() not in raw
+    assert b"private_key" not in raw
+    assert execution.snapshot_id.encode() in raw
+    assert execution.commit_sha.encode() in raw
 
 
 def test_schema_36_migrates_execution_state_without_losing_authority(tmp_path: Path) -> None:
@@ -436,3 +504,27 @@ def test_runtime_inventory_exposes_identity_free_execution_aggregates(
         execution.record_sha256,
     ):
         assert sensitive not in encoded
+
+
+def test_runtime_inventory_rejects_future_execution_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ha_syncapp.retrigger_runtime_status import (
+        RetriggerRuntimeStatusError,
+        collect_retrigger_runtime_inventory,
+    )
+
+    store = _store(tmp_path)
+    paths = _paths(tmp_path)
+    calls: list[tuple[str, object]] = []
+    _install_successful_transport(monkeypatch, calls)
+    try:
+        _execute(store, paths)
+        store._connection.execute(
+            "UPDATE repo_b_initialization_execution SET updated_at=? WHERE request_id=?",
+            ((NOW + timedelta(seconds=1)).isoformat(), REQUEST_ID),
+        )
+        with pytest.raises(RetriggerRuntimeStatusError, match="invalid"):
+            collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)

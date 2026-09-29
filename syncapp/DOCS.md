@@ -120,6 +120,13 @@ until initialization authority and status exposure are explicitly reviewed. See
 [Repo B deploy-key promotion transport](../docs/deploy-key-promotion-transport.md)
 for atomic reconciliation, retry and cleanup boundaries.
 
+An explicit [Repo B initialization executor](../docs/repo-b-initialization-execution.md)
+now consumes one journaled empty-repository authority, prepares a deterministic
+initial `main` commit, publishes it through the descriptor-only non-force deploy-key
+transport, and reconciles interruption by exact remote commit evidence. It is not
+selected by routine startup, synchronization or Retrigger yet; broader deploy-key
+transport adoption remains a separate reviewed increment.
+
 ## Retrigger recovery
 
 The container launcher supervises the state-owning SyncApp service and triggers the

@@ -239,6 +239,26 @@ def test_initial_publication_rejects_existing_branch_before_push(
         )
 
 
+def test_explicit_initialization_rejects_any_existing_repository_ref_before_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, commit_sha = _workspace(tmp_path)
+    key_directory, known_hosts, proof = _authority(tmp_path)
+    existing = _snapshot(proof, (DeployKeyReference("refs/tags/existing", BASELINE),))
+    _install_reference_reads(monkeypatch, [existing])
+    monkeypatch.setattr(publication_transport, "run_bounded_repo_b_git", pytest.fail)
+
+    with pytest.raises(PublicationTransportError, match="no longer empty"):
+        push_publication_intent_with_deploy_key(
+            workspace,
+            _intent(commit_sha, initial=True),
+            proof,
+            key_directory,
+            known_hosts_file=known_hosts,
+            require_repository_empty=True,
+        )
+
+
 def test_rebound_reference_snapshot_fails_before_push(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
