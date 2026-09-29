@@ -67,6 +67,11 @@ architectures, starts the image without networking, stops it and restarts it wit
 the same `/data` to verify identity persistence. These are container tests, not
 Supervisor or physical Raspberry Pi certification.
 
+Physical Raspberry Pi 5 release observations use the
+[versioned HAOS evidence contract](haos-release-evidence.md). A passing checker
+summary is machine-checkable integrity evidence, not a substitute for an
+independent review of the physical procedure.
+
 ## Synchronization safety boundaries
 
 Git operations are progressively introduced only inside isolated mutable workspaces,
