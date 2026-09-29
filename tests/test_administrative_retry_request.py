@@ -11,7 +11,7 @@ from ha_syncapp.administrative_retry_request import (
     apply_administrative_retry_request,
     load_administrative_retry_receipt,
 )
-from ha_syncapp.state import SCHEMA_VERSION, StateStore
+from ha_syncapp.state import SCHEMA_VERSION, StateError, StateStore
 
 NOW = datetime(2026, 9, 29, 1, 45, tzinfo=UTC)
 REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000"
@@ -167,3 +167,52 @@ def test_sqlite_receipt_contains_no_raw_work_identity(tmp_path: Path) -> None:
 
     assert KEY.encode() not in raw
     assert KIND.encode() not in raw
+
+
+def test_runtime_projection_selects_only_outcome_and_timestamp(tmp_path: Path) -> None:
+    statements: list[str] = []
+    with StateStore(tmp_path) as store:
+        apply_administrative_retry_request(store, _request(), now=NOW)
+        store._connection.set_trace_callback(statements.append)
+        evidence = store.administrative_retry_runtime_evidence()
+        store._connection.set_trace_callback(None)
+
+    assert [(row.outcome, row.processed_at) for row in evidence] == [("rejected", NOW)]
+    statement = next(
+        sql for sql in statements if "FROM administrative_retry_request" in sql
+    ).lower()
+    assert "select outcome, processed_at" in statement
+    for forbidden in ("request_id", "identity_sha256", "record_sha256", "work_kind", "work_key"):
+        assert forbidden not in statement
+    assert REQUEST_ID not in repr(evidence)
+    assert KEY not in repr(evidence)
+
+
+def test_runtime_projection_is_bounded_and_fails_closed_on_invalid_time(
+    tmp_path: Path,
+) -> None:
+    with StateStore(tmp_path) as store:
+        rows = [
+            (
+                f"request-{index}",
+                "0" * 64,
+                "rejected",
+                NOW.isoformat(),
+                "1" * 64,
+            )
+            for index in range(4097)
+        ]
+        store._connection.executemany(
+            "INSERT INTO administrative_retry_request VALUES (?,?,?,?,?)",
+            rows,
+        )
+        with pytest.raises(StateError, match="exceeds the limit"):
+            store.administrative_retry_runtime_evidence()
+
+        store._connection.execute("DELETE FROM administrative_retry_request")
+        store._connection.execute(
+            "INSERT INTO administrative_retry_request VALUES (?,?,?,?,?)",
+            ("request-invalid", "0" * 64, "rejected", "not-a-time", "1" * 64),
+        )
+        with pytest.raises(StateError, match="Invalid state timestamp"):
+            store.administrative_retry_runtime_evidence()

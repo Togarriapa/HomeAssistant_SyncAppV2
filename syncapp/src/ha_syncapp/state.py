@@ -74,6 +74,14 @@ class RecoveryWorkEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class AdministrativeRetryRuntimeEvidence:
+    """Identity-free outcome evidence for one explicit administrative request."""
+
+    outcome: str
+    processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentRollbackRuntimeEvidence:
     """Content-free rollback lifecycle evidence for runtime diagnostics."""
 
@@ -1919,6 +1927,40 @@ class StateStore:
                     next_attempt_at=(
                         None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
                     ),
+                )
+            )
+        return tuple(evidence)
+
+    def administrative_retry_runtime_evidence(
+        self,
+    ) -> tuple[AdministrativeRetryRuntimeEvidence, ...]:
+        """Read bounded retry outcomes without selecting request or work identity."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT outcome, processed_at FROM administrative_retry_request "
+                "ORDER BY processed_at, outcome LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read administrative retry runtime evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Administrative retry runtime evidence exceeds the limit")
+
+        evidence: list[AdministrativeRetryRuntimeEvidence] = []
+        for row in rows:
+            if len(row) != 2:
+                raise StateError("Invalid administrative retry runtime evidence")
+            outcome, processed_at = row
+            if outcome not in {"retried", "rejected"} or not isinstance(processed_at, str):
+                raise StateError("Invalid administrative retry runtime evidence")
+            parsed = _parse_timestamp(processed_at)
+            if parsed.isoformat() != processed_at:
+                raise StateError("Invalid administrative retry runtime evidence")
+            evidence.append(
+                AdministrativeRetryRuntimeEvidence(
+                    outcome=outcome,
+                    processed_at=parsed,
                 )
             )
         return tuple(evidence)
