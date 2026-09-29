@@ -121,6 +121,7 @@ def push_publication_intent_with_deploy_key(
     known_hosts_file: Path = Path("/app/github_known_hosts"),
     git_executable: Path = Path("/usr/bin/git"),
     ssh_executable: Path = Path("/usr/bin/ssh"),
+    require_repository_empty: bool = False,
 ) -> str:
     """Publish one immutable intent through an exact protected key generation."""
     _validate_intent(intent)
@@ -134,7 +135,14 @@ def push_publication_intent_with_deploy_key(
         git_executable=git_executable,
         ssh_executable=ssh_executable,
     )
-    _validate_before_publication(before, intent, proof)
+    if type(require_repository_empty) is not bool:
+        raise PublicationTransportError("publication repository policy is invalid")
+    _validate_before_publication(
+        before,
+        intent,
+        proof,
+        require_repository_empty=require_repository_empty,
+    )
     root, tree, local_head = _reprove_workspace(workspace, intent, git_executable)
     if local_head != intent.local_commit_sha:
         raise PublicationTransportError("local publication commit changed after authorization")
@@ -270,7 +278,11 @@ def _validate_before_publication(
     snapshot: DeployKeyReferenceSnapshot,
     intent: PublicationIntent,
     proof: DeployKeyAccessProof,
+    *,
+    require_repository_empty: bool = False,
 ) -> None:
+    if require_repository_empty and snapshot.references:
+        raise PublicationTransportError("publication repository is no longer empty")
     references = _validate_reference_snapshot(snapshot, intent, proof)
     if intent.expect_remote_absent:
         if references:

@@ -25,8 +25,9 @@ fails closed before the journal changes.
 
 ## Atomic authorization and deterministic blocks
 
-Schema v36 stores the request, non-secret key-generation binding, content-free
-observation digest, lifecycle state and integrity digest in one transaction. The
+Schema v37 retains the authority and adds a separately integrity-protected execution
+journal. The authority stores the request, non-secret key-generation binding,
+content-free observation digest, lifecycle state and integrity digest in one transaction. The
 transaction rechecks repository identity, existing synchronization baselines and
 active initialization authority under `BEGIN IMMEDIATE`.
 
@@ -47,8 +48,9 @@ another repository, key generation or observation fails closed.
 
 `discover_authorized_repo_b_initializations()` returns at most sixteen
 integrity-checked authorized records in deterministic order. This is the bounded
-handoff for a later idempotent initialization executor and Retrigger lane; this
-increment does not execute or schedule that work.
+handoff for the explicit [initialization executor](repo-b-initialization-execution.md)
+and a later Retrigger lane. The executor exists but is not automatically selected
+by startup, routine synchronization or Retrigger.
 
 Runtime inventory exposes only aggregate initialization phase counts, fixed block
 reason counts and the latest recorded timestamp. The runtime query never selects
@@ -57,7 +59,7 @@ observation digests or record digests. Malformed, oversized or future-dated
 runtime evidence fails closed.
 
 The current production token-backed synchronization and promotion selection is
-unchanged. A later executor and transport-adoption task must consume this authority
+unchanged. A later transport-adoption task must select the executor
 without bypassing validation, backup, Apply observation, promotion, rollback,
 locking, idempotency or controlled retry/backoff safeguards. Missing authority
 must never cause implicit initialization or silent transport fallback.

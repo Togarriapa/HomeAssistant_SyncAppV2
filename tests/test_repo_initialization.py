@@ -371,8 +371,8 @@ def test_schema_35_migrates_authority_without_losing_existing_state(tmp_path: Pa
         store._connection.execute("PRAGMA user_version = 35")
 
     with StateStore(tmp_path) as migrated:
-        assert SCHEMA_VERSION == 36
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (36,)
+        assert SCHEMA_VERSION == 37
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (37,)
         assert migrated.repository_id(TARGET) == REPOSITORY_ID
         assert load_repo_b_initialization(migrated, REQUEST_ID) is None
 
@@ -396,6 +396,7 @@ def test_runtime_inventory_exposes_only_aggregate_initialization_status(
         "block_reasons": {
             "active_request": 0,
             "already_initialized": 0,
+            "execution_blocked": 0,
             "none": 1,
             "repository_not_empty": 0,
         },

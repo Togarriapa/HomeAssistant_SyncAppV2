@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess  # nosec B404
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from ha_syncapp.git_workspace import GitWorkspace, verify_workspace_content
@@ -74,7 +75,9 @@ def inspect_repository(workspace: GitWorkspace) -> LocalGitRepository:
     )
 
 
-def create_snapshot_commit(workspace: GitWorkspace) -> str | None:
+def create_snapshot_commit(
+    workspace: GitWorkspace, *, committed_at: datetime | None = None
+) -> str | None:
     """Commit only content that still exactly matches the accepted snapshot identity."""
     root, tree = _validate_workspace(workspace)
     inspect_repository(workspace)
@@ -92,7 +95,13 @@ def create_snapshot_commit(workspace: GitWorkspace) -> str | None:
         return None
 
     message = f"Sync verified snapshot {workspace.snapshot_id}"
-    _run_git(executable, tree, root, ("commit", "--no-gpg-sign", "--no-verify", "-m", message))
+    _run_git(
+        executable,
+        tree,
+        root,
+        ("commit", "--no-gpg-sign", "--no-verify", "-m", message),
+        committed_at=committed_at,
+    )
     verify_workspace_content(workspace)
     commit_sha = _run_git(executable, tree, root, ("rev-parse", "--verify", "HEAD"))
     if _COMMIT_SHA.fullmatch(commit_sha) is None:
@@ -171,8 +180,10 @@ def _git_executable() -> str:
     return executable
 
 
-def _git_environment(executable: str, root: Path) -> dict[str, str]:
-    return {
+def _git_environment(
+    executable: str, root: Path, committed_at: datetime | None = None
+) -> dict[str, str]:
+    environment = {
         "PATH": os.path.dirname(executable),
         "HOME": str(root),
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -181,6 +192,17 @@ def _git_environment(executable: str, root: Path) -> dict[str, str]:
         "GCM_INTERACTIVE": "Never",
         "LC_ALL": "C",
     }
+    if committed_at is not None:
+        if (
+            type(committed_at) is not datetime
+            or committed_at.tzinfo is None
+            or committed_at.utcoffset() != timedelta(0)
+        ):
+            raise GitError("snapshot commit timestamp is invalid")
+        canonical = committed_at.isoformat()
+        environment["GIT_AUTHOR_DATE"] = canonical
+        environment["GIT_COMMITTER_DATE"] = canonical
+    return environment
 
 
 def _git_command(executable: str, arguments: tuple[str, ...]) -> list[str]:
@@ -224,12 +246,19 @@ def _is_ancestor(
     raise GitError("confined Git command failed")
 
 
-def _run_git(executable: str, tree: Path, root: Path, arguments: tuple[str, ...]) -> str:
+def _run_git(
+    executable: str,
+    tree: Path,
+    root: Path,
+    arguments: tuple[str, ...],
+    *,
+    committed_at: datetime | None = None,
+) -> str:
     try:
         result = subprocess.run(  # nosec B603
             _git_command(executable, arguments),
             cwd=tree,
-            env=_git_environment(executable, root),
+            env=_git_environment(executable, root, committed_at),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

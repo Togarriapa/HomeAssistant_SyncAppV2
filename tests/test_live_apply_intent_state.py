@@ -24,14 +24,14 @@ def _columns(path: Path) -> tuple[str, ...]:
 
 
 def test_current_schema_contains_durable_live_apply_intent_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 36
+    assert SCHEMA_VERSION == 37
     with StateStore(tmp_path):
         pass
 
     path = tmp_path / "syncapp/state.sqlite3"
     assert _columns(path) == _EXPECTED_COLUMNS
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 36
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 37
 
 
 def test_schema_v7_migrates_live_apply_intent_without_losing_work(tmp_path: Path) -> None:
@@ -52,4 +52,4 @@ def test_schema_v7_migrates_live_apply_intent_without_losing_work(tmp_path: Path
 
     assert _columns(path) == _EXPECTED_COLUMNS
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 36
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 37

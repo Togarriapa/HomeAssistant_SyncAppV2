@@ -34,6 +34,7 @@ _BLOCK_REASONS = {
     "repository_not_empty",
     "already_initialized",
     "active_request",
+    "execution_blocked",
 }
 
 
