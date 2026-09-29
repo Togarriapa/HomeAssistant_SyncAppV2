@@ -37,6 +37,7 @@ def test_explicit_options(tmp_path: Path) -> None:
                 "repo_b": "Owner/Home",
                 "github_token": "secret-sentinel",
                 "repo_b_candidate_transport": "deploy_key",
+                "repo_b_publication_transport": "deploy_key",
                 "recorder_database_path": "/homeassistant/recorder.db",
                 "recorder_retention_days": 14,
                 "administrative_retry_request_id": REQUEST_ID,
@@ -51,6 +52,7 @@ def test_explicit_options(tmp_path: Path) -> None:
     assert config.repo_b == "Owner/Home"
     assert config.github_token == "secret-sentinel"
     assert config.repo_b_candidate_transport == "deploy_key"
+    assert config.repo_b_publication_transport == "deploy_key"
     assert config.recorder_database_path == "/homeassistant/recorder.db"
     assert config.recorder_retention_days == 14
     assert config.administrative_retry_request == AdministrativeRetryRequest(
@@ -91,10 +93,16 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"repo_b": "Owner/Home", "github_token": " secret-sentinel"},
         {"repo_b": "Owner/Home", "github_token": "secret\nsentinel"},
         {"repo_b_candidate_transport": "deploy_key"},
+        {"repo_b_publication_transport": "deploy_key"},
         {
             "repo_b": "Owner/Home",
             "github_token": "secret-sentinel",
             "repo_b_candidate_transport": "ssh",
+        },
+        {
+            "repo_b": "Owner/Home",
+            "github_token": "secret-sentinel",
+            "repo_b_publication_transport": "ssh",
         },
         {"recorder_database_path": "homeassistant/recorder.db"},
         {"recorder_database_path": "/homeassistant"},
