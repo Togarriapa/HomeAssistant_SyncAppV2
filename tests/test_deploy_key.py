@@ -6,7 +6,11 @@ from uuid import UUID
 
 import pytest
 from ha_syncapp import deploy_key
-from ha_syncapp.deploy_key import DeployKeyError, ensure_repo_b_deploy_key
+from ha_syncapp.deploy_key import (
+    DeployKeyError,
+    ensure_repo_b_deploy_key,
+    inspect_repo_b_deploy_key,
+)
 
 
 def _key_path(tmp_path: Path) -> Path:
@@ -54,6 +58,36 @@ def test_replay_does_not_invoke_ssh_keygen_or_change_identity(
 
     assert second == first
     assert {entry.name: entry.read_bytes() for entry in key_path.iterdir()} == before
+
+
+def test_read_only_inspection_requires_existing_complete_generation(tmp_path: Path) -> None:
+    key_path = _key_path(tmp_path)
+    with pytest.raises(DeployKeyError, match="Deploy key state is invalid"):
+        inspect_repo_b_deploy_key(key_path)
+
+    enrollment = ensure_repo_b_deploy_key(key_path)
+    before = {entry.name: entry.read_bytes() for entry in key_path.iterdir()}
+    assert inspect_repo_b_deploy_key(key_path) == enrollment
+    assert {entry.name: entry.read_bytes() for entry in key_path.iterdir()} == before
+
+
+def test_read_only_inspection_never_reconciles_generation_journal(tmp_path: Path) -> None:
+    key_path = _key_path(tmp_path)
+    enrollment = ensure_repo_b_deploy_key(key_path)
+    journal = key_path.parent / ".repo-b-deploy-key.generation.json"
+    journal.write_text(
+        json.dumps(
+            {"schema_version": 1, "generation_id": enrollment.generation_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    journal.chmod(0o600)
+
+    with pytest.raises(DeployKeyError, match="Deploy key state is incomplete"):
+        inspect_repo_b_deploy_key(key_path)
+    assert journal.is_file()
 
 
 def test_generation_uses_bounded_ed25519_command_contract(

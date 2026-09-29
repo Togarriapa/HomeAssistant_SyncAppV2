@@ -162,3 +162,5 @@ def test_container_installs_only_locked_runtime_requirements() -> None:
     )
     assert "pip install websockets" not in dockerfile
     assert "openssh-client" in dockerfile
+    assert "COPY github_known_hosts /app/github_known_hosts" in dockerfile
+    assert (ROOT / "syncapp/github_known_hosts").is_file()
