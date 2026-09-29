@@ -165,6 +165,32 @@ def test_forged_or_malformed_proof_is_rejected_before_ssh(
         )
 
 
+@pytest.mark.parametrize("invalid_target", ["Owner-/Repo", "Owner/.", "Owner/.."])
+def test_reserved_repository_names_are_rejected_before_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_target: str
+) -> None:
+    key_directory, known_hosts, work, proof = _inputs(tmp_path)
+    forged = DeployKeyAccessProof(
+        target=invalid_target,
+        repository_id=proof.repository_id,
+        key_fingerprint=proof.key_fingerprint,
+        generation_id=proof.generation_id,
+        ref_count=proof.ref_count,
+        observation_sha256=proof.observation_sha256,
+    )
+    monkeypatch.setattr(deploy_key_access, "_run_git_ls_remote", pytest.fail)
+
+    with pytest.raises(DeployKeyAccessError, match="proof"):
+        read_repo_b_deploy_key_references(
+            forged,
+            invalid_target,
+            REPOSITORY_ID,
+            key_directory,
+            known_hosts_file=known_hosts,
+            work_directory=work,
+        )
+
+
 def test_transport_reuses_confined_ssh_descriptor_without_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
