@@ -76,7 +76,8 @@ class DeployKeyRollbackRepositoryAuthority:
             ) from None
 
         if (
-            snapshot.target.casefold() != self.proof.target.casefold()
+            type(snapshot).__name__ != "DeployKeyReferenceSnapshot"
+            or snapshot.target.casefold() != self.proof.target.casefold()
             or snapshot.repository_id != self.proof.repository_id
             or snapshot.key_fingerprint != self.proof.key_fingerprint
             or snapshot.generation_id != self.proof.generation_id
