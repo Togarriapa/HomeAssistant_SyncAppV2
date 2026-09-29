@@ -40,6 +40,10 @@ from ha_syncapp.state import StateError, StateStore, SynchronizationBaseline
 class LocalSyncError(RuntimeError):
     """A local synchronization cycle could not complete safely."""
 
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 class LocalSyncDisposition(StrEnum):
     """Externally useful result of one guarded synchronization cycle."""
@@ -176,7 +180,12 @@ def synchronize_local_configuration(
         PublicationWorkflowError,
         DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise LocalSyncError("local synchronization failed closed") from exc
+        raise LocalSyncError(
+            "local synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)

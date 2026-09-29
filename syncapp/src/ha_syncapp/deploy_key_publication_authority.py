@@ -140,8 +140,10 @@ class DeployKeyPublicationAuthority:
                 ssh_executable=self.ssh_executable,
             )
         except BaselineAnchorError as exc:
+            cause = exc.__cause__
             raise DeployKeyPublicationAuthorityError(
-                "publication baseline acquisition failed", transient=True
+                "publication baseline acquisition failed",
+                transient=isinstance(cause, DeployKeyAccessError) and cause.transient,
             ) from exc
 
     def complete(

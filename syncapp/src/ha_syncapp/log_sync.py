@@ -41,6 +41,10 @@ _LOGS_BRANCH = "logs"
 class LogSyncError(RuntimeError):
     """A log artifact publication cycle could not complete safely."""
 
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 class LogSyncDisposition(StrEnum):
     """Externally useful result of one guarded logs publication cycle."""
@@ -172,7 +176,12 @@ def synchronize_log_artifact(
         PublicationWorkflowError,
         DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise LogSyncError("logs synchronization failed closed") from exc
+        raise LogSyncError(
+            "logs synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)

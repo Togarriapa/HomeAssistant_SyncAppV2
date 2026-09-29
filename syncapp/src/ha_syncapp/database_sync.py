@@ -45,6 +45,10 @@ _DATABASE_BRANCH = "database"
 class DatabaseSyncError(RuntimeError):
     """A Recorder database publication cycle could not complete safely."""
 
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 class DatabaseSyncDisposition(StrEnum):
     """Externally useful result of one guarded database publication cycle."""
@@ -177,7 +181,12 @@ def synchronize_database_snapshot(
         PublicationWorkflowError,
         DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise DatabaseSyncError("database synchronization failed closed") from exc
+        raise DatabaseSyncError(
+            "database synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)

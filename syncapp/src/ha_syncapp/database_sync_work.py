@@ -101,9 +101,9 @@ def execute_claimed_database_sync_work(
             target,
             token,
         )
-    except DatabaseSyncError:
+    except DatabaseSyncError as exc:
         try:
-            failed = store.fail_work(item, transient=True)
+            failed = store.fail_work(item, transient=exc.transient)
         except StateError as exc:
             raise DatabaseSyncWorkError(
                 "database synchronization retry state could not be recorded"

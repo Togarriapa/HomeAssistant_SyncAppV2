@@ -129,9 +129,9 @@ def execute_claimed_log_sync_work(
             target,
             token,
         )
-    except LogSyncError:
+    except LogSyncError as exc:
         try:
-            failed = store.fail_work(item, transient=True)
+            failed = store.fail_work(item, transient=exc.transient)
         except StateError as exc:
             raise LogSyncWorkError(
                 "logs synchronization retry state could not be recorded"

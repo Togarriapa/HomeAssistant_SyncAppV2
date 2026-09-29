@@ -96,9 +96,9 @@ def execute_claimed_runtime_sync_work(
             target,
             token,
         )
-    except RuntimeSyncError:
+    except RuntimeSyncError as exc:
         try:
-            failed = store.fail_work(item, transient=True)
+            failed = store.fail_work(item, transient=exc.transient)
         except StateError as exc:
             raise RuntimeSyncWorkError(
                 "runtime synchronization retry state could not be recorded"

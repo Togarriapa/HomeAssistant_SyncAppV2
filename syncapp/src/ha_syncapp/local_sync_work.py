@@ -99,9 +99,9 @@ def execute_claimed_local_sync_work(
             token,
             branch=branch,
         )
-    except LocalSyncError:
+    except LocalSyncError as exc:
         try:
-            failed = store.fail_work(item, transient=True)
+            failed = store.fail_work(item, transient=exc.transient)
         except StateError as exc:
             raise LocalSyncWorkError(
                 "local synchronization retry state could not be recorded"

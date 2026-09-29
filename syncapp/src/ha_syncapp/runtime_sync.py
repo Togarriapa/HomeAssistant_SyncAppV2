@@ -48,6 +48,10 @@ _RUNTIME_BRANCH = "runtime"
 class RuntimeSyncError(RuntimeError):
     """A runtime inventory publication cycle could not complete safely."""
 
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 class RuntimeSyncDisposition(StrEnum):
     """Externally useful result of one guarded runtime publication cycle."""
@@ -183,7 +187,12 @@ def synchronize_runtime_inventory(
         PublicationWorkflowError,
         DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise RuntimeSyncError("runtime synchronization failed closed") from exc
+        raise RuntimeSyncError(
+            "runtime synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)
