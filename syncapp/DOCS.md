@@ -113,4 +113,6 @@ durable work, but interruption alone never authorizes bypassing deployment safet
 Container CI cannot substitute for a Home Assistant OS installation test. Before
 a release, verify install/start/stop/restart/automatic reboot start, the read-only
 `/homeassistant` mount, and backup/restore on a test system with protection mode
-enabled.
+enabled. Record the Raspberry Pi 5 observation using the
+[physical HAOS release evidence runbook](../docs/haos-release-evidence.md); its
+checker verifies document shape and integrity, not the truth of the physical test.
