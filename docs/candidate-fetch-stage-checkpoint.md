@@ -53,3 +53,9 @@ ID, workspace identity/path, token, manifest content and nested errors.
 Fetch/Stage does not read or write live Home Assistant configuration. It grants no
 Analyze, validation, backup, Apply, restart, observation, promotion, tagging or
 rollback authority. Those remain separate evidence-gated actions.
+
+The reviewed [deploy-key candidate fetch transport](deploy-key-candidate-fetch.md)
+is available as a separate proof-bound primitive, but this production lane is not
+wired to it yet. Runtime adoption requires explicit deploy-key initialization and
+durable lifecycle authority; it must not silently fall back between SSH and
+token-backed HTTPS.

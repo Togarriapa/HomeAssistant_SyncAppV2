@@ -63,13 +63,14 @@ included in errors.
 
 ## Integration boundary
 
-This increment centralizes safe SSH metadata reads but does not yet replace the
-existing token-backed candidate fetch, publication push, or promotion mutation.
-Those paths must adopt this exact proof/generation binding in later reviewed
-increments while preserving non-force updates, fresh remote-state checks,
-candidate validation, backup, deployment observation, rollback, locking,
-idempotency, and deterministic blocking. No startup or Retrigger path invokes
-this transport automatically yet.
+The separate [deploy-key candidate fetch transport](deploy-key-candidate-fetch.md)
+now composes this metadata read with a second exact-generation check and a
+descriptor-bound acquisition of one candidate commit. Production Fetch/Stage,
+publication push, and promotion mutation remain unchanged until durable
+initialization/runtime authority exists. Those paths must preserve non-force
+updates, fresh remote-state checks, candidate validation, backup, deployment
+observation, rollback, locking, idempotency, and deterministic blocking. No
+startup or Retrigger path invokes either deploy-key transport automatically yet.
 
 No live Repo B, Home Assistant, Supervisor, enrollment, key-removal, deployment,
 promotion, or rollback operation is performed by this boundary.

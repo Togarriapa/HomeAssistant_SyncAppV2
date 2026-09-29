@@ -14,8 +14,18 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .candidate_detection import CandidateObservation
+from .deploy_key_access import (
+    DeployKeyAccessError,
+    DeployKeyAccessProof,
+    DeployKeyReference,
+    DeployKeyReferenceSnapshot,
+    open_repo_b_deploy_key_transport,
+    read_repo_b_deploy_key_references,
+    run_bounded_repo_b_git,
+)
 
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[!-~]{1,512}$")
 _CANDIDATE_BRANCH = "candidate"
 _FETCH_REF = "refs/syncapp/candidate-fetch"
@@ -24,6 +34,10 @@ _WORKSPACE_PREFIX = ".git-workspace-candidate-"
 
 class CandidateFetchError(RuntimeError):
     """The trusted candidate could not be fetched into isolated metadata safely."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +126,158 @@ def fetch_trusted_candidate(
             shutil.rmtree(root, ignore_errors=True)
 
 
+def fetch_trusted_candidate_with_deploy_key(
+    proof: DeployKeyAccessProof,
+    target: str,
+    repository_id: int,
+    expected_sha: str,
+    key_directory: Path,
+    workspace_root: Path,
+    home_assistant_root: Path,
+    *,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+) -> CandidateFetch:
+    """Fetch one freshly observed candidate commit through an exact protected key."""
+    if not isinstance(expected_sha, str) or _COMMIT_SHA.fullmatch(expected_sha) is None:
+        raise CandidateFetchError("expected candidate commit is invalid")
+    parent = _trusted_workspace_root(workspace_root, home_assistant_root)
+    try:
+        snapshot = read_repo_b_deploy_key_references(
+            proof,
+            target,
+            repository_id,
+            key_directory,
+            known_hosts_file=known_hosts_file,
+            work_directory=parent,
+            git_executable=git_executable,
+            ssh_executable=ssh_executable,
+        )
+    except DeployKeyAccessError as error:
+        raise _access_error(error) from None
+    _validate_candidate_snapshot(snapshot, proof, target, repository_id, expected_sha)
+
+    root = parent / f"{_WORKSPACE_PREFIX}{uuid.uuid4().hex}.tmp"
+    try:
+        root.mkdir(mode=0o700)
+        os.chmod(root, 0o700)
+    except OSError as exc:
+        raise CandidateFetchError("candidate fetch workspace could not be created") from exc
+
+    accepted = False
+    try:
+        executable = str(git_executable)
+        _run_git(executable, root, ("init", "--quiet"))
+        _verify_initialized_workspace(root)
+        try:
+            with open_repo_b_deploy_key_transport(
+                proof,
+                target,
+                repository_id,
+                key_directory,
+                known_hosts_file=known_hosts_file,
+                work_directory=root,
+                git_executable=git_executable,
+                ssh_executable=ssh_executable,
+            ) as session:
+                refspec = f"refs/heads/{_CANDIDATE_BRANCH}:{_FETCH_REF}"
+                run_bounded_repo_b_git(
+                    _deploy_key_fetch_command(
+                        session.git_executable, session.ssh_command, target, refspec
+                    ),
+                    cwd=root,
+                    environment=session.environment,
+                    pass_fds=(session.private_descriptor,),
+                )
+        except DeployKeyAccessError as error:
+            raise _access_error(error) from None
+        fetched = _run_git(
+            executable,
+            root,
+            ("rev-parse", "--verify", f"{_FETCH_REF}^{{commit}}"),
+        )
+        if fetched != expected_sha:
+            raise CandidateFetchError("fetched candidate does not match trusted observation")
+        object_type = _run_git(executable, root, ("cat-file", "-t", f"{_FETCH_REF}^{{commit}}"))
+        if object_type != "commit":
+            raise CandidateFetchError("fetched candidate object is not a commit")
+        _verify_initialized_workspace(root)
+        accepted = True
+        return CandidateFetch(
+            root=root,
+            target=target,
+            repository_id=repository_id,
+            branch=_CANDIDATE_BRANCH,
+            commit_sha=fetched,
+            git_ref=_FETCH_REF,
+        )
+    except CandidateFetchError:
+        raise
+    except (OSError, subprocess.SubprocessError):
+        raise CandidateFetchError("candidate fetch failed", transient=True) from None
+    finally:
+        if not accepted:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def _validate_candidate_snapshot(
+    snapshot: DeployKeyReferenceSnapshot,
+    proof: DeployKeyAccessProof,
+    target: str,
+    repository_id: int,
+    expected_sha: str,
+) -> None:
+    if (
+        type(snapshot) is not DeployKeyReferenceSnapshot
+        or snapshot.target.casefold() != target.casefold()
+        or snapshot.repository_id != repository_id
+        or snapshot.key_fingerprint != proof.key_fingerprint
+        or snapshot.generation_id != proof.generation_id
+        or _SHA256.fullmatch(snapshot.observation_sha256) is None
+        or any(type(reference) is not DeployKeyReference for reference in snapshot.references)
+    ):
+        raise CandidateFetchError("candidate reference evidence is invalid")
+    candidates = tuple(
+        reference for reference in snapshot.references if reference.name == "refs/heads/candidate"
+    )
+    if len(candidates) != 1 or candidates[0].commit_sha != expected_sha:
+        raise CandidateFetchError("candidate reference does not match expected commit")
+
+
+def _access_error(error: DeployKeyAccessError) -> CandidateFetchError:
+    if error.transient:
+        return CandidateFetchError("candidate fetch is temporarily unavailable", transient=True)
+    return CandidateFetchError("candidate fetch transport authority is invalid")
+
+
+def _deploy_key_fetch_command(
+    executable: Path,
+    ssh_command: str,
+    target: str,
+    refspec: str,
+) -> tuple[str, ...]:
+    return (
+        str(executable),
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "fetch.fsckObjects=true",
+        "-c",
+        f"core.sshCommand={ssh_command}",
+        "fetch",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--depth=1",
+        _ssh_repository_url(target),
+        refspec,
+    )
+
+
 def _validate_observation(observation: CandidateObservation, expected_sha: str) -> None:
     if type(observation) is not CandidateObservation:
         raise CandidateFetchError("trusted candidate observation is invalid")
@@ -162,6 +328,11 @@ def _trusted_workspace_root(path: Path, home_assistant_root: Path) -> Path:
 def _repository_url(target: str) -> str:
     owner, repository = target.split("/", 1)
     return f"https://github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
+
+
+def _ssh_repository_url(target: str) -> str:
+    owner, repository = target.split("/", 1)
+    return f"ssh://git@github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
 
 
 def _git_executable() -> str:

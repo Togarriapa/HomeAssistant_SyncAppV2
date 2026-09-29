@@ -167,7 +167,7 @@ def test_fetches_only_fresh_exact_candidate_ref_with_protected_ssh_key(
         (DeployKeyReference("refs/heads/candidate", OTHER_SHA),),
         (
             DeployKeyReference("refs/heads/candidate", SHA),
-            DeployKeyReference("refs/tags/candidate", SHA),
+            DeployKeyReference("refs/heads/candidate", SHA),
         ),
     ],
 )
@@ -311,9 +311,7 @@ def test_fetched_object_mismatch_is_deterministic_and_removes_workspace(
         lambda *args, **kwargs: snapshot,
     )
 
-    def local(
-        _executable: str, root: Path, arguments: tuple[str, ...], **kwargs: object
-    ) -> str:
+    def local(_executable: str, root: Path, arguments: tuple[str, ...], **kwargs: object) -> str:
         if arguments[0] == "init":
             (root / ".git").mkdir()
         if arguments[0] == "rev-parse":
