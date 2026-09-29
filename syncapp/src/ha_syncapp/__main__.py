@@ -14,6 +14,10 @@ from pathlib import Path
 from types import FrameType
 
 from . import __version__
+from .administrative_retry_request import (
+    AdministrativeRetryRequestError,
+    apply_administrative_retry_request,
+)
 from .candidate_detection_service import (
     CandidateDetectionService,
     CandidateDetectionServiceError,
@@ -475,6 +479,17 @@ def _handle_retrigger_request(
 def run(data_dir: Path, stop: Shutdown) -> None:
     config = load_config(data_dir / "options.json")
     with StateStore(data_dir) as store:
+        if config.administrative_retry_request is not None:
+            retry_result = apply_administrative_retry_request(
+                store,
+                config.administrative_retry_request,
+            )
+            if retry_result.replayed:
+                emit("administrative_retry_skipped")
+            elif retry_result.outcome == "retried":
+                emit("administrative_retry_completed")
+            else:
+                emit("administrative_retry_rejected", level="warning")
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -706,6 +721,9 @@ def main() -> int:
     except CandidateDetectionServiceError:
         emit("service_failed", level="error", reason="candidate_detection_service_failed")
         return 13
+    except AdministrativeRetryRequestError:
+        emit("service_failed", level="error", reason="administrative_retry_failed")
+        return 14
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1

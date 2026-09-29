@@ -245,6 +245,7 @@ def test_persistence_failure_prevents_network_and_schema_22_migrates(tmp_path, m
         assert remote.reads == 0
         store._connection.execute("DROP TRIGGER reject_promotion")
         store._connection.execute("DROP TABLE deployment_promotion")
+        store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
         store._connection.execute("PRAGMA user_version = 22")
         store._connection.commit()
     finally:
@@ -253,7 +254,7 @@ def test_persistence_failure_prevents_network_and_schema_22_migrates(tmp_path, m
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_promotion'"
         ).fetchone() == ("deployment_promotion",)

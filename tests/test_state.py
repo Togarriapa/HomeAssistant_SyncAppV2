@@ -213,6 +213,7 @@ def test_schema_v2_migrates_repository_binding_without_losing_work(tmp_path: Pat
         db.execute("DROP TABLE prepared_deployment")
         db.execute("DROP TABLE live_apply_progress")
         db.execute("DROP TABLE live_apply_intent")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 2")
     with StateStore(tmp_path) as store:
         store.bind_repository("Owner/Home", 123)

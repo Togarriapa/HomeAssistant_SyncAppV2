@@ -71,6 +71,7 @@ def test_schema_v5_migrates_retention_intent_without_losing_work(tmp_path: Path)
         db.execute("DROP TABLE database_retention_intent")
         db.execute("DROP TABLE live_apply_progress")
         db.execute("DROP TABLE live_apply_intent")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 5")
 
     with StateStore(tmp_path) as migrated:
@@ -80,4 +81,4 @@ def test_schema_v5_migrates_retention_intent_without_losing_work(tmp_path: Path)
         assert migrated.database_retention_intent(WORK_KEY) is None
 
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35

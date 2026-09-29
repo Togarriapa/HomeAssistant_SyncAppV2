@@ -35,3 +35,6 @@ schema:
   github_token: password?
   recorder_database_path: str?
   recorder_retention_days: int(1,365)
+  administrative_retry_request_id: str?
+  administrative_retry_work_kind: str?
+  administrative_retry_work_key: password?

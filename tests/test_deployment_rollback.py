@@ -241,6 +241,7 @@ def test_persistence_failure_is_sanitized_and_schema_23_migrates(tmp_path, monke
         assert load_deployment_rollback(store, plan) is None
         store._connection.execute("DROP TRIGGER reject_rollback")
         store._connection.execute("DROP TABLE deployment_rollback")
+        store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
         store._connection.execute("PRAGMA user_version = 23")
         store._connection.commit()
     finally:
@@ -249,7 +250,7 @@ def test_persistence_failure_is_sanitized_and_schema_23_migrates(tmp_path, monke
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_rollback'"
         ).fetchone() == ("deployment_rollback",)

@@ -130,6 +130,7 @@ def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> Non
             "INSERT INTO installation VALUES (1, ?, 7, NULL, NULL, NULL)",
             (installation_id,),
         )
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 1")
     with StateStore(tmp_path) as store:
         boot = store.start_run()
@@ -138,6 +139,6 @@ def test_schema_v1_is_migrated_without_resetting_identity(tmp_path: Path) -> Non
         queued = store.enqueue_work("local_sync", "stable-change", now=NOW)
         assert queued.status == "pending"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
         stored_id = db.execute("SELECT installation_id FROM installation").fetchone()[0]
         assert stored_id == installation_id
