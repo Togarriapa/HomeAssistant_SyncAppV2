@@ -5,9 +5,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .candidate_deploy_key_ingress import (
+    CandidateDeployKeyIngressError,
+    DeployKeyCandidateIngress,
+)
 from .candidate_detection import (
     CandidateDetectionError,
     CandidateDetectionResult,
+    detect_and_enqueue_deploy_key_candidate,
     detect_and_enqueue_trusted_candidate,
 )
 from .github_repo import RepositoryVerificationError
@@ -33,8 +38,9 @@ class CandidateDetectionService:
         self,
         store: StateStore,
         target: str,
-        github_token: str,
+        github_token: str | None,
         *,
+        deploy_key_ingress: DeployKeyCandidateIngress | None = None,
         interval_seconds: float,
     ) -> None:
         if type(store) is not StateStore:
@@ -48,12 +54,15 @@ class CandidateDetectionService:
             raise CandidateDetectionServiceError("candidate service interval is invalid")
         if not isinstance(target, str) or not target:
             raise CandidateDetectionServiceError("candidate service target is invalid")
-        if not isinstance(github_token, str) or not github_token:
+        token_selected = isinstance(github_token, str) and bool(github_token)
+        key_selected = type(deploy_key_ingress) is DeployKeyCandidateIngress
+        if token_selected == key_selected:
             raise CandidateDetectionServiceError("candidate service credential is invalid")
 
         self._store = store
         self._target = target
         self._github_token = github_token
+        self._deploy_key_ingress = deploy_key_ingress
         self._interval_seconds = float(interval_seconds)
         self._next_due: float | None = None
         self._last_now: float | None = None
@@ -78,12 +87,23 @@ class CandidateDetectionService:
         # coalesces elapsed intervals instead of replaying a catch-up queue.
         self._next_due = current + self._interval_seconds
         try:
-            detection = detect_and_enqueue_trusted_candidate(
-                self._store,
-                self._target,
-                self._github_token,
-            )
-        except (CandidateDetectionError, RepositoryVerificationError) as exc:
+            if self._deploy_key_ingress is not None:
+                detection = detect_and_enqueue_deploy_key_candidate(
+                    self._store, self._target, self._deploy_key_ingress
+                )
+            else:
+                if self._github_token is None:
+                    raise CandidateDetectionServiceError("candidate service credential is invalid")
+                detection = detect_and_enqueue_trusted_candidate(
+                    self._store,
+                    self._target,
+                    self._github_token,
+                )
+        except (
+            CandidateDetectionError,
+            RepositoryVerificationError,
+            CandidateDeployKeyIngressError,
+        ) as exc:
             raise CandidateDetectionServiceError("candidate service tick failed closed") from exc
         return CandidateDetectionTickResult(due=True, detection=detection)
 

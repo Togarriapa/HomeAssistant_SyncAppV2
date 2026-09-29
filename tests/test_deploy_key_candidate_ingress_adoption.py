@@ -8,7 +8,10 @@ from ha_syncapp import __main__ as service
 from ha_syncapp import candidate_deploy_key_ingress as ingress_module
 from ha_syncapp.candidate_detection import CandidateObservation
 from ha_syncapp.candidate_fetch import CandidateFetch
-from ha_syncapp.candidate_fetch_stage_execution import execute_candidate_fetch_stage_once
+from ha_syncapp.candidate_fetch_stage_execution import (
+    CandidateFetchStageExecutionError,
+    execute_candidate_fetch_stage_once,
+)
 from ha_syncapp.candidate_orchestration import register_claimed_candidate
 from ha_syncapp.config import Config
 from ha_syncapp.deploy_key_access import (
@@ -193,22 +196,25 @@ def test_fetch_stage_uses_only_selected_deploy_key_ingress(
     ingress = ingress_module.DeployKeyCandidateIngress(PROOF, key, access)
     calls: list[str] = []
     monkeypatch.setattr(
-        ingress,
+        ingress_module.DeployKeyCandidateIngress,
         "observe",
-        lambda *args, **kwargs: calls.append("observe")
-        or CandidateObservation(TARGET, REPOSITORY_ID, "candidate", SHA),
+        lambda *args, **kwargs: (
+            calls.append("observe") or CandidateObservation(TARGET, REPOSITORY_ID, "candidate", SHA)
+        ),
     )
     monkeypatch.setattr(
-        ingress,
+        ingress_module.DeployKeyCandidateIngress,
         "fetch",
-        lambda *args, **kwargs: calls.append("fetch")
-        or CandidateFetch(
-            workspace / "result",
-            TARGET,
-            REPOSITORY_ID,
-            "candidate",
-            SHA,
-            "refs/syncapp/candidate-fetch",
+        lambda *args, **kwargs: (
+            calls.append("fetch")
+            or CandidateFetch(
+                workspace / "result",
+                TARGET,
+                REPOSITORY_ID,
+                "candidate",
+                SHA,
+                "refs/syncapp/candidate-fetch",
+            )
         ),
     )
     with StateStore(data) as store:
@@ -219,7 +225,7 @@ def test_fetch_stage_uses_only_selected_deploy_key_ingress(
         orchestration = register_claimed_candidate(
             store, claimed, target=TARGET, repository_id=REPOSITORY_ID, now=NOW
         )
-        with pytest.raises(Exception):
+        with pytest.raises(CandidateFetchStageExecutionError):
             # The fake fetch has no Git tree; reaching staging proves transport selection.
             execute_candidate_fetch_stage_once(
                 store,

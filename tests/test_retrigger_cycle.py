@@ -17,6 +17,7 @@ from ha_syncapp.candidate_backup_retrigger import CandidateBackupRetriggerResult
 from ha_syncapp.candidate_core_observation_retrigger import (
     CandidateCoreObservationRetriggerResult,
 )
+from ha_syncapp.candidate_deploy_key_ingress import DeployKeyCandidateIngress
 from ha_syncapp.candidate_detection import CandidateDetectionResult, CandidateObservation
 from ha_syncapp.candidate_entity_observation_retrigger import (
     CandidateEntityObservationRetriggerResult,
@@ -40,6 +41,7 @@ from ha_syncapp.candidate_supervisor_observation_retrigger import (
     CandidateSupervisorObservationRetriggerResult,
 )
 from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
+from ha_syncapp.deploy_key_access import DeployKeyAccessProof
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.runtime_sync_retrigger import RuntimeSyncRetriggerResult
@@ -87,6 +89,7 @@ def _run(
     tmp_path: Path,
     github_token: str = "github-token",
     core_token: str = "core-token",
+    candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
 ):
     home = tmp_path / "homeassistant"
     home.mkdir(exist_ok=True)
@@ -106,8 +109,67 @@ def _run(
         tmp_path / "runtime-workspaces",
         TARGET,
         github_token,
+        candidate_deploy_key_ingress=candidate_deploy_key_ingress,
         core_token=core_token,
     )
+
+
+def test_cycle_uses_selected_deploy_key_only_for_candidate_ingress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    proof = DeployKeyAccessProof(
+        TARGET,
+        123,
+        "SHA256:" + "A" * 43,
+        "123e4567-e89b-42d3-a456-426614174000",
+        1,
+        "a" * 64,
+    )
+    ingress = DeployKeyCandidateIngress(proof, tmp_path / "key", tmp_path / "access")
+    observed: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_local_sync_retrigger_pass",
+        lambda *_args, **_kwargs: LocalSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_database_sync_retrigger_pass",
+        lambda *_args, **_kwargs: DatabaseSyncRetriggerResult(0, None),
+    )
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "run_runtime_sync_retrigger_pass",
+        lambda *_args, **_kwargs: RuntimeSyncRetriggerResult(0, None),
+    )
+
+    def fetch_stage(*args: object, **kwargs: object) -> CandidateFetchStageRetriggerResult:
+        observed.append(("fetch", args, kwargs))
+        return CandidateFetchStageRetriggerResult(0, 0, None)
+
+    def detect(*args: object, **kwargs: object) -> CandidateDetectionResult:
+        observed.append(("detect", args, kwargs))
+        return _candidate_absent()
+
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_fetch_stage_retrigger_pass", fetch_stage)
+    monkeypatch.setattr(retrigger_cycle, "detect_and_enqueue_deploy_key_candidate", detect)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: pytest.fail("deploy-key mode must not use token detection"),
+    )
+    try:
+        _run(store, tmp_path, candidate_deploy_key_ingress=ingress)
+    finally:
+        store.__exit__(None, None, None)
+
+    fetch = observed[0]
+    assert fetch[1][-1] is None
+    assert fetch[2]["deploy_key_ingress"] is ingress
+    assert observed[1] == ("detect", (store, TARGET, ingress), {})
 
 
 def test_cycle_runs_supported_lanes_then_candidate_detection_in_deterministic_order(

@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import NoReturn
 from uuid import UUID, uuid4
 
+from .candidate_deploy_key_ingress import (
+    CandidateDeployKeyIngressError,
+    DeployKeyCandidateIngress,
+)
 from .candidate_detection import (
     CandidateDetectionError,
     CandidateObservation,
@@ -244,6 +248,7 @@ def execute_candidate_fetch_stage_once(
     orchestration: CandidateOrchestration,
     *,
     token: str | None,
+    deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     workspace_root: Path,
     staging_root: Path,
     home_assistant_root: Path,
@@ -285,11 +290,20 @@ def execute_candidate_fetch_stage_once(
         )
         _clean_abandoned_stage_temps(staging_root)
         _remove_incomplete_destination(destination, staging_root)
-        if token is None:
+        if (token is None) == (deploy_key_ingress is None):
             raise CandidateFetchStageExecutionError(
-                "Candidate Fetch/Stage credentials are unavailable", transient=True
+                "Candidate Fetch/Stage transport authority is invalid", transient=False
             )
-        observation = observer(current.target, token, expected_id=current.repository_id)
+        if deploy_key_ingress is not None:
+            observation = deploy_key_ingress.observe(
+                current.target, expected_id=current.repository_id
+            )
+        else:
+            if token is None:
+                raise CandidateFetchStageExecutionError(
+                    "Candidate Fetch/Stage transport authority is invalid", transient=False
+                )
+            observation = observer(current.target, token, expected_id=current.repository_id)
         if (
             observation.target != current.target
             or observation.repository_id != current.repository_id
@@ -297,13 +311,25 @@ def execute_candidate_fetch_stage_once(
             or observation.commit_sha != current.candidate_sha
         ):
             _invalid()
-        fetched = fetcher(
-            observation,
-            current.candidate_sha,
-            token,
-            workspace_root,
-            home_assistant_root,
-        )
+        if deploy_key_ingress is not None:
+            fetched = deploy_key_ingress.fetch(
+                observation,
+                current.candidate_sha,
+                workspace_root,
+                home_assistant_root,
+            )
+        else:
+            if token is None:
+                raise CandidateFetchStageExecutionError(
+                    "Candidate Fetch/Stage transport authority is invalid", transient=False
+                )
+            fetched = fetcher(
+                observation,
+                current.candidate_sha,
+                token,
+                workspace_root,
+                home_assistant_root,
+            )
         stage = stager(fetched, staging_root, home_assistant_root)
         verify_candidate_stage(stage)
         if (
@@ -329,6 +355,13 @@ def execute_candidate_fetch_stage_once(
         return CandidateFetchStageResult(completed, advanced, False)
     except CandidateFetchStageExecutionError:
         raise
+    except CandidateDeployKeyIngressError as error:
+        raise CandidateFetchStageExecutionError(
+            "Candidate Fetch/Stage is temporarily unavailable"
+            if error.transient
+            else "Candidate Fetch/Stage evidence is invalid",
+            transient=error.transient,
+        ) from None
     except CandidateFetchError as error:
         transient = "command failed" in str(error) or "fetch failed" in str(error)
         raise CandidateFetchStageExecutionError(

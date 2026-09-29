@@ -41,6 +41,7 @@ that writes from the app are denied.
 | `retrigger_interval_seconds` | `300` | Integer from 30 through 3600 |
 | `repo_b` | unset | GitHub `owner/repository` target |
 | `github_token` | unset | Credential used only for trusted Repo B operations |
+| `repo_b_candidate_transport` | `token` | `token`, `deploy_key` |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
@@ -85,8 +86,8 @@ digests and raw options and grants no retry authority.
 
 ## Repo B deploy-key foundation
 
-The protected Ed25519 generation boundary is implemented but is not yet connected
-to App startup, options, GitHub enrollment, or Git transport. It returns only the
+The protected Ed25519 generation boundary is implemented but generation and GitHub
+enrollment are not automatic App-startup operations. It returns only the
 public key, SHA-256 fingerprint, algorithm, and generation UUID; private key bytes
 remain in an app-owned `0700` directory as a `0600` file. Existing generations are
 validated and replayed without running `ssh-keygen` again.
@@ -126,6 +127,15 @@ initial `main` commit, publishes it through the descriptor-only non-force deploy
 transport, and reconciles interruption by exact remote commit evidence. It is not
 selected by routine startup, synchronization or Retrigger yet; broader deploy-key
 transport adoption remains a separate reviewed increment.
+
+Candidate ingress can now be explicitly switched to the verified deploy key with
+`repo_b_candidate_transport: deploy_key`. Activation requires the trusted Repo B
+identity, an existing durable `main` baseline, protected enrolled key state, and a
+fresh identity-bound access proof. Periodic candidate observation and Retrigger
+Fetch/Stage then use only descriptor-bound, host-pinned SSH authority and never
+fall back to token Git. GitHub REST identity verification and all non-candidate
+publication/deployment transports remain unchanged. See
+[Deploy-key candidate ingress adoption](../docs/deploy-key-candidate-ingress-adoption.md).
 
 ## Retrigger recovery
 

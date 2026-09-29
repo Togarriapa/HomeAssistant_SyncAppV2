@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .candidate_deploy_key_ingress import DeployKeyCandidateIngress
 from .candidate_fetch_stage_execution import (
     CandidateFetchStageExecutionError,
     CandidateFetchStageResult,
@@ -46,15 +47,21 @@ def run_candidate_fetch_stage_retrigger_pass(
     workspace_root: Path,
     staging_root: Path,
     target: str,
-    github_token: str,
+    github_token: str | None,
     *,
+    deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     reference_time: datetime | None = None,
     executor: Executor = execute_candidate_fetch_stage_once,
 ) -> CandidateFetchStageRetriggerResult:
     """Recover candidate work and execute at most one eligible Fetch/Stage action."""
     when = datetime.now(UTC) if reference_time is None else reference_time
     claimed: WorkItem | None = None
-    if type(store) is not StateStore or when.tzinfo is None or when.utcoffset() is None:
+    if (
+        type(store) is not StateStore
+        or when.tzinfo is None
+        or when.utcoffset() is None
+        or ((github_token is None) == (deploy_key_ingress is None))
+    ):
         raise CandidateFetchStageRetriggerError("candidate Fetch/Stage inputs are invalid")
     try:
         _prepare_private_root(workspace_root, home_assistant_root)
@@ -78,15 +85,16 @@ def run_candidate_fetch_stage_retrigger_pass(
                 repository_id=repository_id,
                 now=when,
             )
-        result = executor(
-            store,
-            orchestration,
-            token=github_token,
-            workspace_root=workspace_root,
-            staging_root=staging_root,
-            home_assistant_root=home_assistant_root,
-            now=when,
-        )
+        execution_options: dict[str, object] = {
+            "token": github_token,
+            "workspace_root": workspace_root,
+            "staging_root": staging_root,
+            "home_assistant_root": home_assistant_root,
+            "now": when,
+        }
+        if deploy_key_ingress is not None:
+            execution_options["deploy_key_ingress"] = deploy_key_ingress
+        result = executor(store, orchestration, **execution_options)
         store.defer_work(claimed, now=when)
         return CandidateFetchStageRetriggerResult(recovered, considered, result.checkpoint.phase)
     except CandidateFetchStageExecutionError as error:

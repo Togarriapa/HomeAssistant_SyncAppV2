@@ -25,6 +25,7 @@ options:
   status_interval_seconds: 300
   retrigger_interval_seconds: 300
   deployment_observation_seconds: 300
+  repo_b_candidate_transport: token
   recorder_retention_days: 7
 schema:
   log_level: list(info|warning|error)
@@ -33,6 +34,7 @@ schema:
   deployment_observation_seconds: int(30,3600)
   repo_b: str?
   github_token: password?
+  repo_b_candidate_transport: list(token|deploy_key)
   recorder_database_path: str?
   recorder_retention_days: int(1,365)
   administrative_retry_request_id: str?

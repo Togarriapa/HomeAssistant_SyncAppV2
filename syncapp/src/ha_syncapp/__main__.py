@@ -18,6 +18,7 @@ from .administrative_retry_request import (
     AdministrativeRetryRequestError,
     apply_administrative_retry_request,
 )
+from .candidate_deploy_key_ingress import DeployKeyCandidateIngress
 from .candidate_detection_service import (
     CandidateDetectionService,
     CandidateDetectionServiceError,
@@ -29,6 +30,7 @@ from .database_startup import (
     run_startup_database_sync,
 )
 from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
+from .deploy_key_access import DeployKeyAccessError, test_repo_b_deploy_key_access
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
@@ -400,6 +402,7 @@ def _log_sync_service_if_configured(
 def _candidate_detection_service_if_configured(
     store: StateStore,
     config: Config,
+    deploy_key_ingress: DeployKeyCandidateIngress | None = None,
 ) -> CandidateDetectionService | None:
     """Build periodic trusted candidate intake for a configured Repo B."""
     if config.repo_b is None or config.github_token is None:
@@ -409,9 +412,44 @@ def _candidate_detection_service_if_configured(
     return CandidateDetectionService(
         store,
         config.repo_b,
-        config.github_token,
+        None if deploy_key_ingress is not None else config.github_token,
+        deploy_key_ingress=deploy_key_ingress,
         interval_seconds=_CANDIDATE_DETECTION_INTERVAL_SECONDS,
     )
+
+
+def _candidate_deploy_key_ingress_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> DeployKeyCandidateIngress | None:
+    """Build explicit candidate-only SSH authority after durable initialization."""
+    if config.repo_b_candidate_transport == "token":
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise CandidateDetectionServiceError("candidate deploy-key configuration is invalid")
+    repository_id = store.repository_id(config.repo_b)
+    if repository_id is None:
+        raise CandidateDetectionServiceError("candidate service repository is not trusted")
+    if store.synchronization_baseline(config.repo_b, "main") is None:
+        raise CandidateDetectionServiceError("candidate repository is not initialized")
+    protected = (data_dir / "syncapp").resolve(strict=True)
+    key_directory = protected / "repo-b-deploy-key"
+    access_work_directory = protected / "work" / "deploy-key-access"
+    try:
+        _ensure_private_work_directory(protected, access_work_directory)
+        proof = test_repo_b_deploy_key_access(
+            config.repo_b,
+            config.github_token,
+            repository_id,
+            key_directory,
+            work_directory=access_work_directory,
+        )
+        return DeployKeyCandidateIngress(proof, key_directory, access_work_directory)
+    except (DeployKeyAccessError, OSError) as exc:
+        raise CandidateDetectionServiceError(
+            "candidate deploy-key authority is unavailable"
+        ) from exc
 
 
 def _handle_retrigger_request(
@@ -419,6 +457,7 @@ def _handle_retrigger_request(
     config: Config,
     data_dir: Path,
     request: RetriggerRequest,
+    candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
 ) -> str:
     """Execute one bounded outbound cycle while the service retains state ownership."""
     if config.repo_b is None or config.github_token is None:
@@ -460,6 +499,7 @@ def _handle_retrigger_request(
             runtime_workspace_root,
             config.repo_b,
             config.github_token,
+            candidate_deploy_key_ingress=candidate_deploy_key_ingress,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
@@ -490,6 +530,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 emit("administrative_retry_completed")
             else:
                 emit("administrative_retry_rejected", level="warning")
+        candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -498,6 +539,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 expected_id=expected_id,
             )
             store.bind_repository(config.repo_b, identity.repository_id)
+            candidate_deploy_key_ingress = _candidate_deploy_key_ingress_if_configured(
+                store, config, data_dir
+            )
         boot = store.start_run()
         local_change_service: LocalChangeService | None = None
         database_sync_service: DatabaseSyncService | None = None
@@ -521,9 +565,14 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if not stop.requested:
                 log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
             if not stop.requested:
-                candidate_detection_service = _candidate_detection_service_if_configured(
-                    store, config
-                )
+                if candidate_deploy_key_ingress is None:
+                    candidate_detection_service = _candidate_detection_service_if_configured(
+                        store, config
+                    )
+                else:
+                    candidate_detection_service = _candidate_detection_service_if_configured(
+                        store, config, candidate_deploy_key_ingress
+                    )
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
         mode = (
@@ -569,7 +618,11 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                     try:
                         retrigger_server.serve_once(
                             lambda request: _handle_retrigger_request(
-                                store, config, data_dir, request
+                                store,
+                                config,
+                                data_dir,
+                                request,
+                                candidate_deploy_key_ingress,
                             ),
                             timeout_seconds=0.25,
                         )
