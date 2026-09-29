@@ -156,3 +156,4 @@ def test_container_installs_only_locked_runtime_requirements() -> None:
         in dockerfile
     )
     assert "pip install websockets" not in dockerfile
+    assert "openssh-client" in dockerfile
