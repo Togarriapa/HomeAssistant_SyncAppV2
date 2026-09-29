@@ -157,7 +157,7 @@ def test_missing_remote_after_baseline_is_blocked(
     assert result.disposition is local_sync.LocalSyncDisposition.REMOTE_MISSING
 
 
-def test_first_publication_uses_existing_authorization_workflow(
+def test_uninitialized_repository_is_blocked_before_commit_or_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _store(tmp_path)
@@ -167,23 +167,21 @@ def test_first_publication_uses_existing_authorization_workflow(
     monkeypatch.setattr(
         local_sync, "fetch_optional_trusted_branch_head", lambda *a, **k: _remote_absence()
     )
-    monkeypatch.setattr(local_sync, "create_snapshot_commit", lambda workspace: NEW_SHA)
-
-    intent = PublicationIntent(TARGET, REPOSITORY_ID, "main", NEW_SHA, None, True)
-
-    def build(workspace: GitWorkspace, preflight: object) -> PublicationIntent:
-        calls.append(("intent", preflight))
-        return intent
-
-    def complete(
-        state: StateStore, workspace: GitWorkspace, supplied: PublicationIntent, token: str
-    ) -> object:
-        calls.append(("publish", supplied))
-        assert token == "token"
-        return state.record_synchronization_baseline(TARGET, "main", workspace.snapshot_id, NEW_SHA)
-
-    monkeypatch.setattr(local_sync, "build_publication_intent", build)
-    monkeypatch.setattr(local_sync, "complete_authorized_publication", complete)
+    monkeypatch.setattr(
+        local_sync,
+        "create_snapshot_commit",
+        lambda workspace: pytest.fail("uninitialized repository must not create a commit"),
+    )
+    monkeypatch.setattr(
+        local_sync,
+        "build_publication_intent",
+        lambda *a, **k: pytest.fail("uninitialized repository must not build publication intent"),
+    )
+    monkeypatch.setattr(
+        local_sync,
+        "complete_authorized_publication",
+        lambda *a, **k: pytest.fail("uninitialized repository must not publish"),
+    )
 
     try:
         result = local_sync.synchronize_local_configuration(
@@ -193,10 +191,11 @@ def test_first_publication_uses_existing_authorization_workflow(
     finally:
         store.__exit__(None, None, None)
 
-    assert result.disposition is local_sync.LocalSyncDisposition.INITIALIZED
-    assert result.commit_sha == NEW_SHA
-    assert persisted is not None and persisted.commit_sha == NEW_SHA
-    assert [name for name, _ in calls][-2:] == ["intent", "publish"]
+    assert result.disposition is local_sync.LocalSyncDisposition.INITIALIZATION_REQUIRED
+    assert result.commit_sha is None
+    assert result.baseline is None
+    assert persisted is None
+    assert [name for name, _ in calls] == ["capture", "prepare", "initialize"]
 
 
 def test_normal_publication_anchors_exact_baseline_before_commit(
