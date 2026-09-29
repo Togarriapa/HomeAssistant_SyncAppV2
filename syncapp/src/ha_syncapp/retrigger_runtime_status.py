@@ -44,6 +44,7 @@ from .candidate_static_execution import (
 from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
+    AdministrativeRetryRuntimeEvidence,
     DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
     StateError,
@@ -88,6 +89,7 @@ def collect_retrigger_runtime_inventory(
         raise RetriggerRuntimeStatusError("recovery state store is invalid")
     try:
         evidence = store.recovery_work_evidence()
+        administrative_retry_evidence = store.administrative_retry_runtime_evidence()
         rollback_evidence = store.deployment_rollback_runtime_evidence()
         fetch_stage_evidence = candidate_fetch_stage_runtime_evidence(store)
         integrity_evidence = candidate_integrity_runtime_evidence(store)
@@ -108,6 +110,10 @@ def collect_retrigger_runtime_inventory(
     ):
         raise RetriggerRuntimeStatusError("recovery work evidence is unavailable") from None
     recovery = render_retrigger_runtime_status(evidence, reference_time=reference_time)
+    recovery["administrative_retry_requests"] = render_administrative_retry_runtime_status(
+        administrative_retry_evidence,
+        reference_time=reference_time,
+    )
     recovery["deployment_rollback"] = render_deployment_rollback_runtime_status(
         rollback_evidence,
         reference_time=reference_time,
@@ -144,6 +150,40 @@ def collect_retrigger_runtime_inventory(
         manifest={},
         analysis={"recovery": recovery},
     )
+
+
+def render_administrative_retry_runtime_status(
+    evidence: Iterable[AdministrativeRetryRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate explicit retry outcomes without request or work identity."""
+
+    reference = _utc(reference_time, "administrative retry reference time is invalid")
+    outcomes = {"rejected": 0, "retried": 0}
+    latest: datetime | None = None
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "administrative retry runtime evidence exceeds the limit"
+            )
+        if type(row) is not AdministrativeRetryRuntimeEvidence or row.outcome not in outcomes:
+            raise RetriggerRuntimeStatusError("administrative retry runtime evidence is invalid")
+        processed = _utc(
+            row.processed_at,
+            "administrative retry runtime evidence is invalid",
+        )
+        if processed > reference:
+            raise RetriggerRuntimeStatusError("administrative retry runtime evidence is invalid")
+        total += 1
+        outcomes[row.outcome] += 1
+        latest = processed if latest is None or processed > latest else latest
+    return {
+        "total": total,
+        "outcomes": outcomes,
+        "latest_processed_at": None if latest is None else latest.isoformat(),
+    }
 
 
 def render_candidate_fetch_stage_runtime_status(

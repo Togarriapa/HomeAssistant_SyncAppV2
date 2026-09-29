@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from ha_syncapp.administrative_retry_request import (
+    AdministrativeRetryRequest,
+    apply_administrative_retry_request,
+    load_administrative_retry_receipt,
+)
 from ha_syncapp.candidate_backup_execution import CandidateBackupRuntimeEvidence
 from ha_syncapp.candidate_dependency_execution import CandidateDependencyRuntimeEvidence
 from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageRuntimeEvidence
@@ -17,6 +22,7 @@ from ha_syncapp.retrigger_runtime_status import (
     MAX_RECOVERY_EVIDENCE_ROWS,
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
+    render_administrative_retry_runtime_status,
     render_candidate_backup_runtime_status,
     render_candidate_dependency_runtime_status,
     render_candidate_fetch_stage_runtime_status,
@@ -28,6 +34,7 @@ from ha_syncapp.retrigger_runtime_status import (
     render_retrigger_runtime_status,
 )
 from ha_syncapp.state import (
+    AdministrativeRetryRuntimeEvidence,
     DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
     StateStore,
@@ -35,6 +42,8 @@ from ha_syncapp.state import (
 
 NOW = datetime(2026, 9, 13, 1, 0, tzinfo=UTC)
 STATUSES = {"pending", "running", "retry", "blocked", "succeeded"}
+REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000"
+SECOND_REQUEST_ID = "123e4567-e89b-42d3-a456-426614174001"
 
 
 def _store(tmp_path: Path) -> StateStore:
@@ -99,6 +108,70 @@ def test_collects_aggregate_status_attempt_and_backoff_without_work_keys(tmp_pat
         "runtime-secret",
     ):
         assert secret not in encoded
+
+
+def test_collects_administrative_retry_outcomes_without_request_identity(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    try:
+        work_key = "private-admin-work-key-sentinel"
+        store.enqueue_work("candidate", work_key, now=NOW - timedelta(minutes=3))
+        claimed = store.claim_work_kind("candidate", now=NOW - timedelta(minutes=2))
+        assert claimed is not None
+        store.fail_work(claimed, transient=False, now=NOW - timedelta(minutes=1))
+        apply_administrative_retry_request(
+            store,
+            AdministrativeRetryRequest(REQUEST_ID, "candidate", work_key),
+            now=NOW - timedelta(seconds=30),
+        )
+        apply_administrative_retry_request(
+            store,
+            AdministrativeRetryRequest(
+                SECOND_REQUEST_ID,
+                "privatekind",
+                "private-missing-key-sentinel",
+            ),
+            now=NOW,
+        )
+        first_receipt = load_administrative_retry_receipt(store, REQUEST_ID)
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert inventory.analysis["recovery"]["administrative_retry_requests"] == {
+        "total": 2,
+        "outcomes": {"rejected": 1, "retried": 1},
+        "latest_processed_at": NOW.isoformat(),
+    }
+    encoded = json.dumps(inventory.analysis["recovery"], sort_keys=True)
+    assert first_receipt is not None
+    for secret in (
+        REQUEST_ID,
+        SECOND_REQUEST_ID,
+        "private-admin-work-key-sentinel",
+        "private-missing-key-sentinel",
+        "privatekind",
+        first_receipt.identity_sha256,
+        first_receipt.record_sha256,
+    ):
+        assert secret not in encoded
+
+
+def test_empty_runtime_inventory_has_explicit_administrative_retry_counts(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    try:
+        inventory = collect_retrigger_runtime_inventory(store, reference_time=NOW)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert inventory.analysis["recovery"]["administrative_retry_requests"] == {
+        "total": 0,
+        "outcomes": {"rejected": 0, "retried": 0},
+        "latest_processed_at": None,
+    }
 
 
 def test_candidate_apply_recovery_is_visible_without_deployment_identity(tmp_path: Path) -> None:
@@ -379,6 +452,11 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
         "ready": 0,
         "backoff": {"scheduled": 0, "next_attempt_at": None},
         "kinds": [],
+        "administrative_retry_requests": {
+            "total": 0,
+            "outcomes": {"rejected": 0, "retried": 0},
+            "latest_processed_at": None,
+        },
         "deployment_rollback": {
             "total": 0,
             "phases": {
@@ -743,3 +821,62 @@ def test_render_bounds_evidence_rows() -> None:
     evidence = tuple(_evidence() for _ in range(MAX_RECOVERY_EVIDENCE_ROWS + 1))
     with pytest.raises(RetriggerRuntimeStatusError, match="limit"):
         render_retrigger_runtime_status(evidence, reference_time=NOW)
+
+
+def test_render_administrative_retry_outcomes_deterministically() -> None:
+    evidence = (
+        AdministrativeRetryRuntimeEvidence("rejected", NOW - timedelta(minutes=2)),
+        AdministrativeRetryRuntimeEvidence("retried", NOW - timedelta(minutes=1)),
+        AdministrativeRetryRuntimeEvidence("rejected", NOW),
+    )
+
+    assert render_administrative_retry_runtime_status(evidence, reference_time=NOW) == {
+        "total": 3,
+        "outcomes": {"rejected": 2, "retried": 1},
+        "latest_processed_at": NOW.isoformat(),
+    }
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        object(),
+        AdministrativeRetryRuntimeEvidence("unknown", NOW),
+        AdministrativeRetryRuntimeEvidence("retried", NOW.replace(tzinfo=None)),
+        AdministrativeRetryRuntimeEvidence("retried", NOW + timedelta(seconds=1)),
+        AdministrativeRetryRuntimeEvidence(
+            "retried",
+            NOW.astimezone(timezone(timedelta(hours=1))),
+        ),
+    ],
+)
+def test_render_administrative_retry_rejects_malformed_evidence(evidence: object) -> None:
+    with pytest.raises(RetriggerRuntimeStatusError, match="evidence is invalid"):
+        render_administrative_retry_runtime_status((evidence,), reference_time=NOW)
+
+
+def test_render_administrative_retry_bounds_evidence_rows() -> None:
+    evidence = tuple(
+        AdministrativeRetryRuntimeEvidence("rejected", NOW)
+        for _ in range(MAX_RECOVERY_EVIDENCE_ROWS + 1)
+    )
+    with pytest.raises(RetriggerRuntimeStatusError, match="limit"):
+        render_administrative_retry_runtime_status(evidence, reference_time=NOW)
+
+
+def test_documentation_defines_identity_free_administrative_retry_status() -> None:
+    root = Path(__file__).resolve().parents[1]
+    runtime_docs = (root / "docs" / "retrigger-runtime-status.md").read_text()
+    operator_docs = (root / "syncapp" / "DOCS.md").read_text()
+
+    for required in (
+        "`administrative_retry_requests`",
+        "`retried` and `rejected`",
+        "latest processed UTC timestamp",
+        "request IDs",
+        "identity digests",
+        "read-only",
+    ):
+        assert required in runtime_docs
+    assert "`analysis/recovery.json`" in operator_docs
+    assert "administrative retry outcome aggregates" in " ".join(operator_docs.split())

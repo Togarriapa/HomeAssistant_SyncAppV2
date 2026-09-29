@@ -42,10 +42,19 @@ The recovery file exposes:
   reason, plus total/maximum rollback attempts and the latest update timestamp.
 - content-free candidate Fetch/Stage phase counts, aggregate staged entry/byte
   counts and the latest checkpoint timestamp.
+- `administrative_retry_requests` with the total number processed, fixed
+  `retried` and `rejected` outcome counts, and the latest processed UTC timestamp.
 
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
 no candidate SHA or retry capability is published.
+
+Administrative retry outcome evidence is a bounded read-only projection. Its query
+selects only the fixed outcome and processing timestamp; request IDs, work kinds,
+work keys, identity digests, receipt digests and raw App options are never selected.
+Malformed, future-dated or oversized evidence fails closed. These aggregates confirm
+that explicit requests were consumed or rejected, but they cannot identify, rearm,
+claim, unblock or otherwise mutate any work item and grant no retry authority.
 
 A successful `candidate_apply` item means only that the complete admission chain was
 freshly re-proven and an immutable live Apply intent was durably recorded. It does not

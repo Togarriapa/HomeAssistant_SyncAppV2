@@ -78,6 +78,11 @@ it does not store the raw work kind or key. Logs contain only fixed
 validation, backup, deployment observation, promotion, rollback or normal Retrigger
 backoff rules.
 
+Generated `analysis/recovery.json` includes bounded administrative retry outcome
+aggregates: processed total, fixed `retried`/`rejected` counts and the latest
+processing timestamp. This read-only view omits request IDs, work identities,
+digests and raw options and grants no retry authority.
+
 ## Retrigger recovery
 
 The container launcher supervises the state-owning SyncApp service and triggers the
