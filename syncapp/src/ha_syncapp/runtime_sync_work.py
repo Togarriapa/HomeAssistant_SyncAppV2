@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
 from ha_syncapp.runtime_sync import (
     RuntimeSyncDisposition,
@@ -81,7 +82,7 @@ def execute_claimed_runtime_sync_work(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> RuntimeSyncWorkResult:
     """Execute one already-claimed runtime item and durably record its outcome."""
     _validate_claim(store, item, inventory, target)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .log_sync_process import LogSyncProcessError, run_log_sync_process
 from .log_sync_work import LogSyncWorkResult
 from .state import StateError, StateStore
@@ -28,7 +29,7 @@ def run_log_sync_retrigger_pass(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> LogSyncRetriggerResult:
     """Recover interrupted work, then delegate one normal logs processing attempt."""
     if type(store) is not StateStore:

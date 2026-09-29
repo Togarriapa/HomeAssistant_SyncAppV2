@@ -8,6 +8,11 @@ from enum import StrEnum
 from pathlib import Path
 
 from ha_syncapp.baseline_anchor import BaselineAnchorError, anchor_trusted_baseline
+from ha_syncapp.deploy_key_publication_authority import (
+    DeployKeyPublicationAuthority,
+    DeployKeyPublicationAuthorityError,
+    resolve_publication_authority,
+)
 from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, prepare_git_workspace
 from ha_syncapp.github_repo import (
     BranchAbsence,
@@ -69,7 +74,7 @@ def synchronize_local_configuration(
     snapshot_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: str | DeployKeyPublicationAuthority,
     *,
     branch: str = "main",
 ) -> LocalSyncResult:
@@ -90,11 +95,16 @@ def synchronize_local_configuration(
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=branch)
 
-        remote = fetch_optional_trusted_branch_head(
-            target,
-            token,
-            expected_id=repository_id,
-            branch=branch,
+        authority = resolve_publication_authority(
+            token=token if isinstance(token, str) else None,
+            authority=token if isinstance(token, DeployKeyPublicationAuthority) else None,
+        )
+        remote = (
+            fetch_optional_trusted_branch_head(
+                target, token, expected_id=repository_id, branch=branch
+            )
+            if isinstance(token, str)
+            else authority.observe(target, repository_id, branch)
         )
         baseline = store.synchronization_baseline(target, branch)
 
@@ -110,7 +120,10 @@ def synchronize_local_configuration(
             return refusal
 
         if isinstance(remote, BranchHead):
-            anchor_trusted_baseline(workspace, remote, token)
+            if isinstance(token, str):
+                anchor_trusted_baseline(workspace, remote, token)
+            else:
+                authority.anchor(workspace, remote)
 
         local_commit_sha = create_snapshot_commit(workspace)
         if local_commit_sha is None:
@@ -130,7 +143,11 @@ def synchronize_local_configuration(
         if not preflight.may_publish:
             raise LocalSyncError("local synchronization lost publication authorization")
         intent = build_publication_intent(workspace, preflight)
-        completed = complete_authorized_publication(store, workspace, intent, token)
+        completed = (
+            complete_authorized_publication(store, workspace, intent, token)
+            if isinstance(token, str)
+            else authority.complete(store, workspace, intent)
+        )
         disposition = (
             LocalSyncDisposition.INITIALIZED
             if preflight.disposition is PublicationDisposition.SAFE_TO_INITIALIZE
@@ -157,6 +174,7 @@ def synchronize_local_configuration(
         PublicationPreflightError,
         PublicationIntentError,
         PublicationWorkflowError,
+        DeployKeyPublicationAuthorityError,
     ) as exc:
         raise LocalSyncError("local synchronization failed closed") from exc
     finally:

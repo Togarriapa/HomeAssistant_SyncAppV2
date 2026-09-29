@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.local_sync import (
     LocalSyncDisposition,
     LocalSyncError,
@@ -82,7 +83,7 @@ def execute_claimed_local_sync_work(
     snapshot_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
     *,
     branch: str = "main",
 ) -> LocalSyncWorkResult:

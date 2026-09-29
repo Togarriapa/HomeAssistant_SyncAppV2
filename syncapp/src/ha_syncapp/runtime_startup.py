@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .runtime_sync_process import (
     RuntimeSyncProcessError,
     RuntimeSyncProcessResult,
@@ -32,7 +33,7 @@ def run_startup_runtime_sync(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
     *,
     core_token: str | None = None,
 ) -> RuntimeStartupResult:

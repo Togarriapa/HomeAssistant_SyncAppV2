@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.log_artifact_loader import LogArtifactLoadError, load_log_artifact
 from ha_syncapp.log_sync import (
     LogSyncDisposition,
@@ -110,7 +111,7 @@ def execute_claimed_log_sync_work(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> LogSyncWorkResult:
     """Reconstruct, reverify, and publish the exact artifact bound to one claimed item."""
     artifact_id = _validate_claim(store, item, target)

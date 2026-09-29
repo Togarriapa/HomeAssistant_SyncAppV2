@@ -131,6 +131,7 @@ from ha_syncapp.database_sync_retrigger import (
     DatabaseSyncRetriggerResult,
     run_database_sync_retrigger_pass,
 )
+from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
 from ha_syncapp.deployment_rollback_retrigger import (
     DeploymentRollbackRetriggerError,
     DeploymentRollbackRetriggerResult,
@@ -221,6 +222,7 @@ def run_retrigger_cycle(
     github_token: str,
     *,
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
+    deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     core_token: str | None = None,
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
@@ -240,13 +242,14 @@ def run_retrigger_cycle(
         raise RetriggerCycleError("retrigger logs work roots are incomplete")
 
     try:
+        publication_credential = deploy_key_publication_authority or github_token
         local_sync = run_local_sync_retrigger_pass(
             store,
             home_assistant_root,
             snapshot_staging_root,
             local_workspace_root,
             target,
-            github_token,
+            publication_credential,
         )
         if recorder_database is None:
             database_sync = DatabaseSyncRetriggerResult(recovered_interrupted=0, processed=None)
@@ -261,7 +264,7 @@ def run_retrigger_cycle(
                 database_snapshot_root,
                 database_workspace_root,
                 target,
-                github_token,
+                publication_credential,
             )
             if recorder_retention_days is None:
                 database_retention = DatabaseRetentionPassResult(
@@ -282,7 +285,7 @@ def run_retrigger_cycle(
             runtime_snapshot_root,
             runtime_workspace_root,
             target,
-            github_token,
+            publication_credential,
             core_token=core_token,
         )
         if log_artifact_root is None:
@@ -297,7 +300,7 @@ def run_retrigger_cycle(
                 log_snapshot_root,
                 log_workspace_root,
                 target,
-                github_token,
+                publication_credential,
             )
             log_retention = run_log_retention_work_pass(
                 store,

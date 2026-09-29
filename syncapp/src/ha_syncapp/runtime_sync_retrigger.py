@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.runtime_sync_process import RuntimeSyncProcessError, run_runtime_sync_process
 from ha_syncapp.runtime_sync_work import RuntimeSyncWorkResult
 from ha_syncapp.state import StateError, StateStore
@@ -28,7 +29,7 @@ def run_runtime_sync_retrigger_pass(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
     *,
     core_token: str | None = None,
 ) -> RuntimeSyncRetriggerResult:

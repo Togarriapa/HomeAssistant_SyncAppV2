@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .local_change_bridge import (
     LocalChangeBridge,
     LocalChangeBridgeError,
@@ -32,7 +33,7 @@ class LocalChangeServiceError(RuntimeError):
 
 
 LocalSyncProcessor = Callable[
-    [StateStore, Path, Path, Path, str, str],
+    [StateStore, Path, Path, Path, str, PublicationCredential],
     LocalSyncProcessResult,
 ]
 
@@ -47,7 +48,7 @@ class LocalChangeService:
         snapshot_root: Path,
         workspace_root: Path,
         target: str,
-        github_token: str,
+        github_token: PublicationCredential,
         *,
         quiet_seconds: float,
         consumer: LocalChangeWorkerConsumer = consume_local_change_events,

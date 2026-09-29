@@ -11,6 +11,7 @@ from .core_runtime_bundle import (
     collect_core_runtime_bundle,
     merge_runtime_inventory_inputs,
 )
+from .deploy_key_publication_authority import PublicationCredential
 from .retrigger_runtime_status import (
     RetriggerRuntimeStatusError,
     collect_retrigger_runtime_inventory,
@@ -42,7 +43,7 @@ def run_runtime_sync_process(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
     *,
     core_token: str | None = None,
 ) -> RuntimeSyncProcessResult:

@@ -42,6 +42,7 @@ that writes from the app are denied.
 | `repo_b` | unset | GitHub `owner/repository` target |
 | `github_token` | unset | Credential used only for trusted Repo B operations |
 | `repo_b_candidate_transport` | `token` | `token`, `deploy_key` |
+| `repo_b_publication_transport` | `token` | `token`, `deploy_key` |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
@@ -136,6 +137,15 @@ Fetch/Stage then use only descriptor-bound, host-pinned SSH authority and never
 fall back to token Git. GitHub REST identity verification and all non-candidate
 publication/deployment transports remain unchanged. See
 [Deploy-key candidate ingress adoption](../docs/deploy-key-candidate-ingress-adoption.md).
+
+Routine non-force Local, Recorder database, runtime inventory, and log artifact
+publication can be independently switched with
+`repo_b_publication_transport: deploy_key`. Activation requires the same pinned
+identity, initialized `main` baseline, protected key generation, and fresh access
+proof. Branch observation, exact baseline acquisition, and authorized publication
+then use descriptor-bound, host-pinned SSH without token Git or fallback. History
+retention rewrites, deployment promotion/rollback, and REST identity verification
+remain unchanged. See [Deploy-key ordinary snapshot publication adoption](../docs/deploy-key-snapshot-publication-adoption.md).
 
 ## Retrigger recovery
 

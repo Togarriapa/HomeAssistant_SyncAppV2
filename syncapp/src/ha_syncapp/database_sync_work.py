@@ -13,6 +13,7 @@ from ha_syncapp.database_sync import (
     DatabaseSyncResult,
     synchronize_database_snapshot,
 )
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.state import StateError, StateStore, WorkItem
 
 _WORK_KIND = "database"
@@ -86,7 +87,7 @@ def execute_claimed_database_sync_work(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> DatabaseSyncWorkResult:
     """Execute one already-claimed database item and durably record its outcome."""
     _validate_claim(store, item, target, source_database)

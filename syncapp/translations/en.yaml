@@ -11,6 +11,9 @@ configuration:
   repo_b_candidate_transport:
     name: Repo B candidate transport
     description: Select token Git or the explicitly enrolled and verified deploy key for candidate detection and fetch.
+  repo_b_publication_transport:
+    name: Repo B snapshot publication transport
+    description: Select token Git or the explicitly enrolled and verified deploy key for routine Local, database, runtime, and log snapshot publication.
   recorder_database_path:
     name: Recorder database path
     description: Optional absolute path to the Recorder database below /homeassistant.
