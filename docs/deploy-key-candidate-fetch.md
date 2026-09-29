@@ -1,10 +1,9 @@
 # Repo B deploy-key candidate fetch transport
 
-SyncApp now has a proof-bound SSH primitive for acquiring one exact Repo B
+SyncApp has a proof-bound SSH primitive for acquiring one exact Repo B
 `candidate` commit into isolated Git metadata. It replaces token-backed HTTPS
-inside this explicit primitive only; the production Fetch/Stage lane remains on
-its existing transport until the deploy-key initialization and runtime authority
-can supply a reviewed durable proof without an unsafe fallback.
+inside the primitive and is selected by the production Fetch/Stage lane only when
+the operator explicitly chooses deploy-key candidate ingress after initialization.
 
 ## Authority and fresh reference gate
 
@@ -55,18 +54,15 @@ only the isolated metadata root and exact repository/branch/commit identities.
 
 ## Runtime integration boundary
 
-This task adds no production fallback. Existing Fetch/Stage orchestration still
-uses the token-backed path because no durable runtime deploy-key authorization or
-explicit Repo B initialization control exists yet. Switching that lane before
-those controls would make enrolled state ambiguous and could cause deterministic
-failures to loop or tempt an HTTPS fallback.
+The reviewed [candidate-ingress adoption](deploy-key-candidate-ingress-adoption.md)
+supplies the exact proof/generation authority and preserves the journal-before-network
+checkpoint, bounded Retrigger backoff, deterministic candidate blocking, offline
+replay, stage verification, and downstream safeguards. Selection is explicit and
+fails closed when initialization or key authority is incomplete; it
+must never silently return to token-backed Git transport.
 
-A later reviewed integration must supply the exact proof/generation authority,
-preserve the existing journal-before-network checkpoint, bounded Retrigger
-backoff, deterministic candidate blocking, offline replay, stage verification,
-and all downstream validation, backup, Apply, observation, promotion, and
-rollback safeguards. It must fail closed when deploy-key initialization is not
-complete; it must never silently return to token-backed Git transport.
+Ordinary publication, promotion and rollback are outside candidate-ingress
+selection and retain their existing production transport until separate adoption.
 
 No live SSH request, GitHub enrollment/removal, Repo B write, Home Assistant or
 Supervisor mutation, deployment, promotion, or rollback is performed by this

@@ -41,9 +41,14 @@ from ha_syncapp.candidate_dependency_retrigger import (
     CandidateDependencyRetriggerResult,
     run_candidate_dependency_retrigger_pass,
 )
+from ha_syncapp.candidate_deploy_key_ingress import (
+    CandidateDeployKeyIngressError,
+    DeployKeyCandidateIngress,
+)
 from ha_syncapp.candidate_detection import (
     CandidateDetectionError,
     CandidateDetectionResult,
+    detect_and_enqueue_deploy_key_candidate,
     detect_and_enqueue_trusted_candidate,
 )
 from ha_syncapp.candidate_entity_observation_retrigger import (
@@ -215,6 +220,7 @@ def run_retrigger_cycle(
     target: str,
     github_token: str,
     *,
+    candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     core_token: str | None = None,
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
@@ -310,15 +316,28 @@ def run_retrigger_cycle(
             reference_time=recovery_reference_time or datetime.now(UTC),
         )
 
-        candidate_fetch_stage = run_candidate_fetch_stage_retrigger_pass(
-            store,
-            home_assistant_root,
-            local_workspace_root / "candidate-fetch",
-            snapshot_staging_root / "candidate-stage",
-            target,
-            github_token,
-            reference_time=recovery_reference_time or datetime.now(UTC),
-        )
+        candidate_reference_time = recovery_reference_time or datetime.now(UTC)
+        if candidate_deploy_key_ingress is None:
+            candidate_fetch_stage = run_candidate_fetch_stage_retrigger_pass(
+                store,
+                home_assistant_root,
+                local_workspace_root / "candidate-fetch",
+                snapshot_staging_root / "candidate-stage",
+                target,
+                github_token,
+                reference_time=candidate_reference_time,
+            )
+        else:
+            candidate_fetch_stage = run_candidate_fetch_stage_retrigger_pass(
+                store,
+                home_assistant_root,
+                local_workspace_root / "candidate-fetch",
+                snapshot_staging_root / "candidate-stage",
+                target,
+                None,
+                deploy_key_ingress=candidate_deploy_key_ingress,
+                reference_time=candidate_reference_time,
+            )
         if candidate_fetch_stage.processed is None:
             candidate_integrity = run_candidate_integrity_retrigger_pass(
                 store,
@@ -748,11 +767,18 @@ def run_retrigger_cycle(
         else:
             candidate_rollback = CandidateRollbackRetriggerResult(0, 0, None)
 
-        candidate_detection = detect_and_enqueue_trusted_candidate(
-            store,
-            target,
-            github_token,
-        )
+        if candidate_deploy_key_ingress is None:
+            candidate_detection = detect_and_enqueue_trusted_candidate(
+                store,
+                target,
+                github_token,
+            )
+        else:
+            candidate_detection = detect_and_enqueue_deploy_key_candidate(
+                store,
+                target,
+                candidate_deploy_key_ingress,
+            )
 
         if log_artifact_root is None:
             log_collection = None
@@ -771,6 +797,7 @@ def run_retrigger_cycle(
         LogSyncRetriggerError,
         LogRetentionWorkError,
         CandidateDetectionError,
+        CandidateDeployKeyIngressError,
         RepositoryVerificationError,
         LogCollectionError,
         DatabaseRetentionWorkError,

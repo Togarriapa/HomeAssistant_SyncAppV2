@@ -5,9 +5,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from .github_repo import BranchAbsence, BranchHead, fetch_optional_trusted_branch_head
 from .state import StateError, StateStore, WorkItem
+
+if TYPE_CHECKING:
+    from .candidate_deploy_key_ingress import DeployKeyCandidateIngress
 
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _CANDIDATE_BRANCH = "candidate"
@@ -124,6 +128,32 @@ def detect_and_enqueue_trusted_candidate(
     if observation.commit_sha is None:
         return CandidateDetectionResult(observation=observation, work=None)
 
+    try:
+        work = store.enqueue_work(_CANDIDATE_WORK_KIND, observation.commit_sha)
+    except StateError:
+        raise CandidateDetectionError("Candidate detection state is unavailable") from None
+    return CandidateDetectionResult(observation=observation, work=work)
+
+
+def detect_and_enqueue_deploy_key_candidate(
+    store: StateStore,
+    target: str,
+    ingress: DeployKeyCandidateIngress,
+) -> CandidateDetectionResult:
+    """Detect candidate state through one explicitly selected deploy-key authority."""
+    if type(store) is not StateStore:
+        raise CandidateDetectionError("Candidate detection state store is invalid")
+    try:
+        expected_id = store.repository_id(target)
+    except StateError:
+        raise CandidateDetectionError("Candidate detection state is unavailable") from None
+    if expected_id is None:
+        raise CandidateDetectionError("Trusted Repo B binding is unavailable")
+    observation = ingress.observe(target, expected_id=expected_id)
+    if observation.repository_id != expected_id:
+        raise CandidateDetectionError("Candidate repository identity is inconsistent")
+    if observation.commit_sha is None:
+        return CandidateDetectionResult(observation=observation, work=None)
     try:
         work = store.enqueue_work(_CANDIDATE_WORK_KIND, observation.commit_sha)
     except StateError:

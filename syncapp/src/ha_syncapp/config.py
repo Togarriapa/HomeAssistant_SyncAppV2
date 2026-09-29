@@ -30,6 +30,7 @@ class Config:
     deployment_observation_seconds: int = 300
     repo_b: str | None = None
     github_token: str | None = field(default=None, repr=False)
+    repo_b_candidate_transport: str = "token"
     recorder_database_path: str | None = None
     recorder_retention_days: int = 7
     administrative_retry_request: AdministrativeRetryRequest | None = field(
@@ -126,6 +127,7 @@ def load_config(path: Path) -> Config:
         "deployment_observation_seconds",
         "repo_b",
         "github_token",
+        "repo_b_candidate_transport",
         "recorder_database_path",
         "recorder_retention_days",
         "administrative_retry_request_id",
@@ -158,6 +160,11 @@ def load_config(path: Path) -> Config:
         raise ConfigError("Invalid Repo B target")
     if github_token is not None and not _valid_token(github_token):
         raise ConfigError("Invalid GitHub authentication")
+    candidate_transport = options.get("repo_b_candidate_transport", "token")
+    if candidate_transport not in {"token", "deploy_key"}:
+        raise ConfigError("Invalid Repo B candidate transport")
+    if candidate_transport == "deploy_key" and repo_b is None:
+        raise ConfigError("Deploy-key candidate transport requires Repo B")
 
     recorder_database_path = options.get("recorder_database_path")
     if recorder_database_path is not None and not _valid_recorder_database_path(
@@ -198,6 +205,7 @@ def load_config(path: Path) -> Config:
         deployment_observation_seconds=deployment_observation_seconds,
         repo_b=cast(str | None, repo_b),
         github_token=cast(str | None, github_token),
+        repo_b_candidate_transport=cast(str, candidate_transport),
         recorder_database_path=cast(str | None, recorder_database_path),
         recorder_retention_days=recorder_retention_days,
         administrative_retry_request=administrative_retry_request,

@@ -8,6 +8,9 @@ configuration:
   retrigger_interval_seconds:
     name: Retrigger recovery interval (seconds)
     description: How often the separate recovery dispatcher checks interrupted or transiently failed work, from 30 to 3600 seconds.
+  repo_b_candidate_transport:
+    name: Repo B candidate transport
+    description: Select token Git or the explicitly enrolled and verified deploy key for candidate detection and fetch.
   recorder_database_path:
     name: Recorder database path
     description: Optional absolute path to the Recorder database below /homeassistant.
