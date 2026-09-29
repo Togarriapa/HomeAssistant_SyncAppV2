@@ -15,6 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
+COPY github_known_hosts /app/github_known_hosts
 # Keep SyncApp dependencies separate from the official Core Python environment. The
 # validator gets a distinct executable path so HA OS AppArmor can force a child-profile
 # transition before any candidate/configuration bytes are read.

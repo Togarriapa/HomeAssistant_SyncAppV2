@@ -10,6 +10,8 @@ from ha_syncapp.deploy_key import ensure_repo_b_deploy_key
 from ha_syncapp.deploy_key_access import (
     MAX_LS_REMOTE_BYTES,
     DeployKeyAccessError,
+)
+from ha_syncapp.deploy_key_access import (
     test_repo_b_deploy_key_access as prove_access,
 )
 from ha_syncapp.github_repo import RepoIdentity, RepositoryVerificationError
@@ -335,6 +337,33 @@ def test_oversized_output_is_rejected_without_content_disclosure(
     assert "secret-ref-sentinel" not in str(e.value)
 
 
+def test_subprocess_output_is_stopped_at_the_read_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_directory, known_hosts, work = _inputs(tmp_path)
+    _trusted_identity(monkeypatch)
+    executable = tmp_path / "oversized-git"
+    executable.write_text(
+        "#!/usr/bin/python3\n"
+        "import os\n"
+        f"os.write(1, b'secret-ref-sentinel' + b'x' * {MAX_LS_REMOTE_BYTES})\n"
+    )
+    executable.chmod(0o700)
+
+    with pytest.raises(DeployKeyAccessError, match="invalid reference evidence") as e:
+        prove_access(
+            TARGET,
+            TOKEN,
+            REPOSITORY_ID,
+            key_directory,
+            known_hosts_file=known_hosts,
+            work_directory=work,
+            git_executable=executable,
+        )
+    assert e.value.transient is False
+    assert "secret-ref-sentinel" not in str(e.value)
+
+
 @pytest.mark.parametrize(
     ("stderr", "transient", "message"),
     [
@@ -342,7 +371,11 @@ def test_oversized_output_is_rejected_without_content_disclosure(
         ("ERROR: Repository not found.", False, "authentication failed"),
         ("Host key verification failed.", False, "authentication failed"),
         ("ssh: Could not resolve hostname github.com", True, "transport failed"),
-        ("ssh: connect to host github.com port 22: Network is unreachable", True, "transport failed"),
+        (
+            "ssh: connect to host github.com port 22: Network is unreachable",
+            True,
+            "transport failed",
+        ),
         ("secret-unknown-failure", False, "command failed"),
     ],
 )
@@ -394,4 +427,3 @@ def test_command_timeout_is_transient_and_sanitized(
             git_executable=executable,
         )
     assert e.value.transient is True
-

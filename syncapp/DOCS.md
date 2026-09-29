@@ -91,12 +91,15 @@ public key, SHA-256 fingerprint, algorithm, and generation UUID; private key byt
 remain in an app-owned `0700` directory as a `0600` file. Existing generations are
 validated and replayed without running `ssh-keygen` again.
 
-Do not treat generation as proof that GitHub accepted the key. A later reviewed
-increment must perform a read-only authentication test against the pinned private
-Repo B before deploy-key transport can replace `github_token`. Interrupted or
-tampered generations fail closed and are not automatically repaired or rotated.
-See [Repo B deploy-key generation](../docs/deploy-key-generation.md) for the exact
-storage, journal, privacy, and recovery boundary.
+Do not treat generation as proof that GitHub accepted the key. The separate
+read-only access-test boundary re-proves the private Repo B numeric identity with
+GitHub metadata, verifies the packaged GitHub Ed25519 host-key pin, then performs
+one bounded noninteractive `git ls-remote --refs` over SSH. It returns only a
+content-free observation proof and grants no transport or mutation authority.
+Interrupted or tampered generations fail closed and are not automatically repaired
+or rotated. See [Repo B deploy-key generation](../docs/deploy-key-generation.md)
+and [Repo B deploy-key access test](../docs/deploy-key-access-test.md) for the
+exact storage, identity, host-key, privacy, and recovery boundaries.
 
 ## Retrigger recovery
 

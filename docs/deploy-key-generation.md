@@ -1,8 +1,8 @@
 # Repo B deploy-key generation
 
-SyncApp now has a narrow, network-free boundary for creating and inspecting one
+SyncApp has a narrow, network-free boundary for creating and inspecting one
 Ed25519 deploy-key generation. This is the first increment of the deploy-key
-lifecycle in story #388; it does not yet enroll, test, rotate, or use the key.
+lifecycle in story #388; it does not enroll, rotate, or use the key.
 
 `ensure_repo_b_deploy_key()` accepts an explicit final key directory whose
 parent must already be owned by the current App user with mode `0700`. Before it
@@ -39,10 +39,11 @@ ownership, malformed or oversized material, noncanonical public keys,
 integrity mismatches, and command failures produce sanitized errors. Their
 contents are not included in diagnostics.
 
-This increment performs no network operation and grants no Git or GitHub
-authority. A later reviewed task must add read-only Repo B access testing and
-stable repository-identity proof before deploy-key transport can be enabled.
-Rotation, GitHub enrollment/removal, explicit Repo B initialization, and
-runtime exposure also remain separate tasks. Existing token transport and all
+Generation performs no network operation and grants no Git or GitHub authority.
+The separate [read-only Repo B access test](deploy-key-access-test.md) combines
+this protected generation with token-authenticated repository-identity proof;
+it does not change the generation boundary. Rotation, GitHub enrollment/removal,
+deploy-key transport, explicit Repo B initialization, and runtime exposure remain
+separate tasks. Existing token transport and all
 candidate validation, backup, observation, promotion, rollback, locking, and
 Retrigger safeguards are unchanged.
