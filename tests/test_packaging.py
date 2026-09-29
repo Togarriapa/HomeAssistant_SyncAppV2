@@ -102,14 +102,25 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert manifest["schema"]["github_token"].endswith("?")
     assert manifest["schema"]["retrigger_interval_seconds"] == "int(30,3600)"
     assert manifest["schema"]["recorder_retention_days"] == "int(1,365)"
+    assert "administrative_retry_request_id" not in manifest["options"]
+    assert "administrative_retry_work_kind" not in manifest["options"]
+    assert "administrative_retry_work_key" not in manifest["options"]
+    assert manifest["schema"]["administrative_retry_request_id"] == "str?"
+    assert manifest["schema"]["administrative_retry_work_kind"] == "str?"
+    assert manifest["schema"]["administrative_retry_work_key"] == "password?"
 
     translations = yaml.safe_load((ROOT / "syncapp/translations/en.yaml").read_text())
     assert "retrigger_interval_seconds" in translations["configuration"]
     assert "recorder_retention_days" in translations["configuration"]
+    assert "administrative_retry_request_id" in translations["configuration"]
+    assert "administrative_retry_work_kind" in translations["configuration"]
+    assert "administrative_retry_work_key" in translations["configuration"]
 
     operator_docs = (ROOT / "syncapp/DOCS.md").read_text()
     assert "`retrigger_interval_seconds` | `300` | Integer from 30 through 3600" in operator_docs
     assert "`recorder_retention_days` | `7` | Integer from 1 through 365" in operator_docs
+    assert "`administrative_retry_request_id`" in operator_docs
+    assert "A request UUID is consumed exactly once" in operator_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:

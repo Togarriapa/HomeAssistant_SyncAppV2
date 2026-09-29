@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -299,6 +299,16 @@ class StateStore:
             "PRIMARY KEY (work_kind, work_key))"
         )
         db.execute("CREATE INDEX work_ready ON work(status, next_attempt_at, created_at)")
+
+    @staticmethod
+    def _create_administrative_retry_request_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE administrative_retry_request ("
+            "request_id TEXT PRIMARY KEY NOT NULL, "
+            "identity_sha256 TEXT NOT NULL, "
+            "outcome TEXT NOT NULL CHECK (outcome IN ('retried','rejected')), "
+            "processed_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
 
     @staticmethod
     def _create_repository_binding_table(db: sqlite3.Connection) -> None:
@@ -1135,6 +1145,7 @@ class StateStore:
                 self._create_candidate_static_checkpoint_table(db)
                 self._create_candidate_semantic_checkpoint_table(db)
                 self._create_candidate_backup_checkpoint_table(db)
+                self._create_administrative_retry_request_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -1176,6 +1187,7 @@ class StateStore:
                 31,
                 32,
                 33,
+                34,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1382,6 +1394,12 @@ class StateStore:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_deployment_finalization_table_v34(db)
+                    db.execute("PRAGMA user_version = 34")
+                version = 34
+            if version == 34:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_administrative_retry_request_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 

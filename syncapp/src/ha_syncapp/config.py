@@ -6,12 +6,16 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import cast
+from uuid import UUID
+
+from .administrative_retry_request import AdministrativeRetryRequest
 
 MAX_OPTIONS_BYTES = 65536
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _HOMEASSISTANT_ROOT = PurePosixPath("/homeassistant")
 _MAX_PATH_LENGTH = 4096
+_WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
 class ConfigError(ValueError):
@@ -28,6 +32,10 @@ class Config:
     github_token: str | None = field(default=None, repr=False)
     recorder_database_path: str | None = None
     recorder_retention_days: int = 7
+    administrative_retry_request: AdministrativeRetryRequest | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -77,6 +85,28 @@ def _valid_recorder_database_path(value: object) -> bool:
     return path != _HOMEASSISTANT_ROOT and path.is_relative_to(_HOMEASSISTANT_ROOT)
 
 
+def _valid_request_id(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        return False
+    return parsed.version == 4 and str(parsed) == value
+
+
+def _valid_work_kind(value: object) -> bool:
+    return type(value) is str and _WORK_KIND.fullmatch(value) is not None
+
+
+def _valid_work_key(value: object) -> bool:
+    return bool(
+        type(value) is str
+        and 1 <= len(value) <= 256
+        and all(ord(character) >= 0x20 and ord(character) != 0x7F for character in value)
+    )
+
+
 def load_config(path: Path) -> Config:
     """Read a bounded JSON object; reject unknown options and coercion."""
     try:
@@ -98,6 +128,9 @@ def load_config(path: Path) -> Config:
         "github_token",
         "recorder_database_path",
         "recorder_retention_days",
+        "administrative_retry_request_id",
+        "administrative_retry_work_kind",
+        "administrative_retry_work_key",
     }
     if not isinstance(options, dict) or options.keys() - supported:
         raise ConfigError("Options must contain only supported keys")
@@ -136,6 +169,28 @@ def load_config(path: Path) -> Config:
     if type(recorder_retention_days) is not int or not 1 <= recorder_retention_days <= 365:
         raise ConfigError("Recorder retention must be an integer from 1 to 365 days")
 
+    retry_request_id = options.get("administrative_retry_request_id")
+    retry_work_kind = options.get("administrative_retry_work_kind")
+    retry_work_key = options.get("administrative_retry_work_key")
+    retry_values = (retry_request_id, retry_work_kind, retry_work_key)
+    if any(value is not None for value in retry_values) and not all(
+        value is not None for value in retry_values
+    ):
+        raise ConfigError("Administrative retry options must be configured together")
+    administrative_retry_request = None
+    if retry_request_id is not None:
+        if (
+            not _valid_request_id(retry_request_id)
+            or not _valid_work_kind(retry_work_kind)
+            or not _valid_work_key(retry_work_key)
+        ):
+            raise ConfigError("Invalid administrative retry request")
+        administrative_retry_request = AdministrativeRetryRequest(
+            retry_request_id,
+            cast(str, retry_work_kind),
+            cast(str, retry_work_key),
+        )
+
     return Config(
         log_level=level,
         status_interval_seconds=interval,
@@ -145,4 +200,5 @@ def load_config(path: Path) -> Config:
         github_token=cast(str | None, github_token),
         recorder_database_path=cast(str | None, recorder_database_path),
         recorder_retention_days=recorder_retention_days,
+        administrative_retry_request=administrative_retry_request,
     )

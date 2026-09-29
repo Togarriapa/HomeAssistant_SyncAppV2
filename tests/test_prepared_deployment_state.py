@@ -192,6 +192,7 @@ def test_v4_migration_preserves_all_existing_state(tmp_path):
         db.execute("DROP TABLE prepared_deployment")
         db.execute("DROP TABLE live_apply_progress")
         db.execute("DROP TABLE live_apply_intent")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 4")
     with StateStore(tmp_path) as store:
         next_boot = store.start_run()
@@ -203,7 +204,7 @@ def test_v4_migration_preserves_all_existing_state(tmp_path):
         assert store.enqueue_work("candidate", EVIDENCE.candidate_sha, now=WHEN) == work
         assert _record(store).evidence == EVIDENCE
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
 
 
 def test_insert_failure_is_atomic_and_sanitized(tmp_path):
@@ -227,6 +228,7 @@ def test_v4_migration_failure_does_not_advance_schema_or_replace_state(tmp_path)
         _record(store)
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 4")
     before = path.read_bytes()
     with pytest.raises(StateError), StateStore(tmp_path):

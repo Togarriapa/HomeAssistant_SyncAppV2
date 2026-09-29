@@ -5,7 +5,7 @@ from ha_syncapp.state import SCHEMA_VERSION, StateStore
 
 
 def test_current_schema_contains_core_health_window_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 34
+    assert SCHEMA_VERSION == 35
     with StateStore(tmp_path):
         pass
     path = tmp_path / "syncapp/state.sqlite3"
@@ -19,7 +19,7 @@ def test_current_schema_contains_core_health_window_table(tmp_path: Path) -> Non
             "completed_at",
             "record_sha256",
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
 
 
 def test_schema_v13_migrates_window_without_losing_work(tmp_path: Path) -> None:
@@ -28,6 +28,7 @@ def test_schema_v13_migrates_window_without_losing_work(tmp_path: Path) -> None:
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE core_health_window")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 13")
 
     with StateStore(tmp_path) as store:
@@ -35,4 +36,4 @@ def test_schema_v13_migrates_window_without_losing_work(tmp_path: Path) -> None:
         assert item is not None
         assert item.work_key == "preserve-me"
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35

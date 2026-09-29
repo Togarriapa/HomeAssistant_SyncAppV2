@@ -281,6 +281,7 @@ def test_tampering_rebinding_temporal_order_and_schema_20_migration(tmp_path, mo
         with pytest.raises(PostDeploymentAssertionObservationError, match="state is invalid"):
             load_post_deployment_assertion_observation(store, plan)
         store._connection.execute("DROP TABLE post_deployment_assertion_observation")
+        store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
         store._connection.execute("PRAGMA user_version = 20")
         store._connection.commit()
     finally:
@@ -289,7 +290,7 @@ def test_tampering_rebinding_temporal_order_and_schema_20_migration(tmp_path, mo
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'post_deployment_assertion_observation'"
         ).fetchone() == ("post_deployment_assertion_observation",)

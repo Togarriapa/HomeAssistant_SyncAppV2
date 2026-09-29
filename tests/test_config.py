@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 
 import pytest
+from ha_syncapp.administrative_retry_request import AdministrativeRetryRequest
 from ha_syncapp.config import Config, ConfigError, load_config
+
+REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def write_options(tmp_path: Path, value: object) -> Path:
@@ -35,6 +38,9 @@ def test_explicit_options(tmp_path: Path) -> None:
                 "github_token": "secret-sentinel",
                 "recorder_database_path": "/homeassistant/recorder.db",
                 "recorder_retention_days": 14,
+                "administrative_retry_request_id": REQUEST_ID,
+                "administrative_retry_work_kind": "candidate",
+                "administrative_retry_work_key": "blocked-candidate-sha",
             },
         )
     )
@@ -45,6 +51,12 @@ def test_explicit_options(tmp_path: Path) -> None:
     assert config.github_token == "secret-sentinel"
     assert config.recorder_database_path == "/homeassistant/recorder.db"
     assert config.recorder_retention_days == 14
+    assert config.administrative_retry_request == AdministrativeRetryRequest(
+        REQUEST_ID,
+        "candidate",
+        "blocked-candidate-sha",
+    )
+    assert "blocked-candidate-sha" not in repr(config)
 
 
 @pytest.mark.parametrize(
@@ -91,6 +103,31 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"recorder_retention_days": 0},
         {"recorder_retention_days": -1},
         {"recorder_retention_days": 366},
+        {"administrative_retry_request_id": REQUEST_ID},
+        {
+            "administrative_retry_request_id": REQUEST_ID,
+            "administrative_retry_work_kind": "candidate",
+        },
+        {
+            "administrative_retry_request_id": "123E4567-E89B-42D3-A456-426614174000",
+            "administrative_retry_work_kind": "candidate",
+            "administrative_retry_work_key": "secret-sentinel",
+        },
+        {
+            "administrative_retry_request_id": REQUEST_ID,
+            "administrative_retry_work_kind": "Bad Kind",
+            "administrative_retry_work_key": "secret-sentinel",
+        },
+        {
+            "administrative_retry_request_id": REQUEST_ID,
+            "administrative_retry_work_kind": "candidate",
+            "administrative_retry_work_key": "secret-sentinel\n",
+        },
+        {
+            "administrative_retry_request_id": REQUEST_ID,
+            "administrative_retry_work_kind": "candidate",
+            "administrative_retry_work_key": "s" * 257,
+        },
     ],
 )
 def test_invalid_options_fail_without_disclosing_input(tmp_path: Path, value: object) -> None:

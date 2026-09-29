@@ -329,6 +329,7 @@ def test_tampering_rebinding_temporal_order_and_schema_21_migration(tmp_path, mo
         with pytest.raises(DeploymentFinalizationError, match="state is invalid"):
             load_deployment_finalization(store, plan)
         store._connection.execute("DROP TABLE deployment_finalization")
+        store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
         store._connection.execute("PRAGMA user_version = 21")
         store._connection.commit()
     finally:
@@ -337,7 +338,7 @@ def test_tampering_rebinding_temporal_order_and_schema_21_migration(tmp_path, mo
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'deployment_finalization'"
         ).fetchone() == ("deployment_finalization",)

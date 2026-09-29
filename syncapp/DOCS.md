@@ -43,6 +43,9 @@ that writes from the app are denied.
 | `github_token` | unset | Credential used only for trusted Repo B operations |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
+| `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
+| `administrative_retry_work_kind` | unset | Exact durable work kind |
+| `administrative_retry_work_key` | unset | Exact durable work key; masked by Supervisor |
 
 `status_interval_seconds` controls status logging. `retrigger_interval_seconds`
 controls the separate recovery dispatcher and has no disable sentinel. If Repo B
@@ -52,6 +55,28 @@ shutdown. Unsupported keys, duplicate JSON keys and invalid values prevent start
 Recorder synchronization remains optional; omitting `recorder_database_path` skips
 only the Recorder recovery lane and does not disable Local, runtime, log or candidate
 recovery.
+
+### Explicit retry of blocked work
+
+The three `administrative_retry_*` options are an advanced, one-shot recovery
+control. Configure all three together only after correcting the deterministic cause
+of one known blocked item. Generate a new lowercase UUIDv4 for
+`administrative_retry_request_id` and supply the item's exact work kind and key.
+There is no wildcard, prefix, bulk or automatic unblock operation.
+
+A request UUID is consumed exactly once. Its first processing either rearms the
+exact blocked item with a fresh bounded retry budget or durably rejects a missing or
+non-blocked target. Keeping the same options across later App restarts produces only
+the sanitized `administrative_retry_skipped` event and can never rearm the item
+again. To make a later deliberate attempt, use a new request UUID after verifying
+the item is blocked and the underlying cause has changed.
+
+The durable receipt stores a one-way identity digest, fixed outcome and timestamp;
+it does not store the raw work kind or key. Logs contain only fixed
+`administrative_retry_completed`, `administrative_retry_rejected` or
+`administrative_retry_skipped` events. The option cannot bypass candidate
+validation, backup, deployment observation, promotion, rollback or normal Retrigger
+backoff rules.
 
 ## Retrigger recovery
 
@@ -98,6 +123,7 @@ start.
 | `repo_b_untrusted` | Verify the configured private Repo B target, credential and pinned repository identity. |
 | `state_unavailable` | Stop the app, preserve `/data/syncapp`, and inspect ownership, permissions, free space and database/schema validity. |
 | `retrigger_schedule_failed` | Inspect the sanitized scheduler reason and service availability; durable work remains preserved. |
+| `administrative_retry_failed` | Preserve `/data/syncapp`; the request or durable receipt failed closed and no retry authority was granted. |
 | `internal_error` | Preserve state and report the app version and sanitized event. |
 
 Exception text and raw options are deliberately omitted from logs. Startup

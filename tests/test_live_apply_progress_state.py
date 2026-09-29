@@ -21,14 +21,14 @@ def _columns(path: Path) -> tuple[str, ...]:
 
 
 def test_current_schema_contains_durable_live_apply_progress_table(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 34
+    assert SCHEMA_VERSION == 35
     with StateStore(tmp_path):
         pass
 
     path = tmp_path / "syncapp/state.sqlite3"
     assert _columns(path) == _EXPECTED_COLUMNS
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
 
 
 def test_schema_v8_migrates_live_apply_progress_without_losing_work(tmp_path: Path) -> None:
@@ -38,6 +38,7 @@ def test_schema_v8_migrates_live_apply_progress_without_losing_work(tmp_path: Pa
     path = tmp_path / "syncapp/state.sqlite3"
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE IF EXISTS live_apply_progress")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 8")
 
     with StateStore(tmp_path) as store:
@@ -47,7 +48,7 @@ def test_schema_v8_migrates_live_apply_progress_without_losing_work(tmp_path: Pa
 
     assert _columns(path) == _EXPECTED_COLUMNS
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35
 
 
 def test_schema_v9_adds_reconciliation_tables_without_losing_progress(tmp_path: Path) -> None:
@@ -57,6 +58,7 @@ def test_schema_v9_adds_reconciliation_tables_without_losing_progress(tmp_path: 
     with sqlite3.connect(path) as db:
         db.execute("DROP TABLE live_apply_mutation_guard")
         db.execute("DROP TABLE live_apply_reconciliation")
+        db.execute("DROP TABLE IF EXISTS administrative_retry_request")
         db.execute("PRAGMA user_version = 9")
 
     with StateStore(tmp_path):
@@ -69,4 +71,4 @@ def test_schema_v9_adds_reconciliation_tables_without_losing_progress(tmp_path: 
         }
         assert "live_apply_mutation_guard" in tables
         assert "live_apply_reconciliation" in tables
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 35

@@ -255,13 +255,14 @@ def test_schema_17_migrates_to_18(tmp_path, monkeypatch):
     store = chain[0]
     root = store._root
     store._connection.execute("DROP TABLE IF EXISTS resource_availability_observation")
+    store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
     store._connection.execute("PRAGMA user_version = 17")
     store._connection.commit()
     store.__exit__(None, None, None)
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'resource_availability_observation'"
         ).fetchone() == ("resource_availability_observation",)

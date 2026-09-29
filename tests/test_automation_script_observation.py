@@ -232,6 +232,7 @@ def test_tampering_and_schema_19_migration_fail_safe(tmp_path, monkeypatch):
         with pytest.raises(AutomationScriptObservationError, match="state is invalid"):
             load_automation_script_observation(store, target)
         store._connection.execute("DROP TABLE automation_script_observation")
+        store._connection.execute("DROP TABLE IF EXISTS administrative_retry_request")
         store._connection.execute("PRAGMA user_version = 19")
         store._connection.commit()
     finally:
@@ -240,7 +241,7 @@ def test_tampering_and_schema_19_migration_fail_safe(tmp_path, monkeypatch):
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 34
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 35
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'automation_script_observation'"
         ).fetchone() == ("automation_script_observation",)

@@ -14,3 +14,12 @@ configuration:
   recorder_retention_days:
     name: Recorder snapshot retention (days)
     description: Number of days to retain generated database snapshots, from 1 to 365.
+  administrative_retry_request_id:
+    name: Administrative retry request ID
+    description: Optional new lowercase UUIDv4 identifying one explicit retry request. Configure all three administrative retry fields together.
+  administrative_retry_work_kind:
+    name: Administrative retry work kind
+    description: Exact durable work kind for the one blocked item selected by this request.
+  administrative_retry_work_key:
+    name: Administrative retry work key
+    description: Exact durable work key for the selected blocked item. This value is masked and never logged.
