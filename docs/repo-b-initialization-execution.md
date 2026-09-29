@@ -48,7 +48,9 @@ If the process stops after journaling but before publication, the same source an
 preparation timestamp reproduce the exact commit. If it stops after the remote
 accepted the push but before local completion, the next execution completes only
 when the entire remote ref set is exactly `refs/heads/main` at the journaled
-commit. It never pushes that reconciled commit twice.
+commit. That reconciliation uses the durable snapshot/commit binding and therefore
+does not depend on current source bytes still matching after the already-confirmed
+push. It never pushes that reconciled commit twice.
 
 Transient transport failures enter `retry` with exponential delays of 2, 4, 8,
 16, 32 and then at most 60 minutes. A maximum of eight attempts is enforced.

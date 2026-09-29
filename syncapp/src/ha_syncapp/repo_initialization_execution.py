@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
+import stat
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -106,6 +109,7 @@ def execute_authorized_repo_b_initialization(
     when = _canonical_time(now)
     snapshot: Snapshot | None = None
     workspace: GitWorkspace | None = None
+    probe_directory: Path | None = None
     try:
         existing = load_repo_b_initialization_execution(store, request_id)
         if existing is not None and (existing.prepared_at > when or existing.updated_at > when):
@@ -129,6 +133,29 @@ def execute_authorized_repo_b_initialization(
                 _invalid()
             return _block(store, existing, authority, "authority_invalid", when)
 
+        remote_proven_empty = False
+        if existing is not None:
+            _validate_execution_authority_binding(existing, authority)
+            if not _proof_matches_authority(proof, authority):
+                return _block(store, existing, authority, "key_changed", when)
+            if store.synchronization_baseline(existing.target, "main") is not None:
+                return _block(store, existing, authority, "authority_invalid", when)
+            probe_directory = _create_probe_directory(workspace_root)
+            recovered_references = _read_references(
+                existing,
+                proof,
+                key_directory,
+                probe_directory,
+                known_hosts_file,
+                git_executable,
+                ssh_executable,
+            )
+            if _is_exact_completed_remote(recovered_references, existing):
+                return _complete(store, existing, authority, when)
+            if recovered_references.references:
+                return _block(store, existing, authority, "repository_diverged", when)
+            remote_proven_empty = True
+
         prepared_at = existing.prepared_at if existing is not None else when
         snapshot = capture_snapshot(source, snapshot_root, include_path=include_in_main)
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
@@ -148,19 +175,20 @@ def execute_authorized_repo_b_initialization(
         if not _proof_matches_authority(proof, authority):
             return _block(store, existing, authority, "key_changed", when)
 
-        references = _read_references(
-            existing,
-            proof,
-            key_directory,
-            workspace,
-            known_hosts_file,
-            git_executable,
-            ssh_executable,
-        )
-        if _is_exact_completed_remote(references, existing):
-            return _complete(store, existing, authority, when)
-        if references.references:
-            return _block(store, existing, authority, "repository_diverged", when)
+        if not remote_proven_empty:
+            references = _read_references(
+                existing,
+                proof,
+                key_directory,
+                workspace.tree_path,
+                known_hosts_file,
+                git_executable,
+                ssh_executable,
+            )
+            if _is_exact_completed_remote(references, existing):
+                return _complete(store, existing, authority, when)
+            if references.references:
+                return _block(store, existing, authority, "repository_diverged", when)
         if existing.attempt_count >= MAX_INITIALIZATION_ATTEMPTS:
             return _block(store, existing, authority, "attempts_exhausted", when)
 
@@ -203,7 +231,7 @@ def execute_authorized_repo_b_initialization(
                 publishing,
                 proof,
                 key_directory,
-                workspace,
+                workspace.tree_path,
                 known_hosts_file,
                 git_executable,
                 ssh_executable,
@@ -237,6 +265,8 @@ def execute_authorized_repo_b_initialization(
             shutil.rmtree(workspace.root, ignore_errors=True)
         if snapshot is not None:
             shutil.rmtree(snapshot.root, ignore_errors=True)
+        if probe_directory is not None:
+            shutil.rmtree(probe_directory, ignore_errors=True)
 
 
 def load_repo_b_initialization_execution(
@@ -291,7 +321,7 @@ def _read_references(
     execution: RepoBInitializationExecution,
     proof: DeployKeyAccessProof,
     key_directory: Path,
-    workspace: GitWorkspace,
+    work_directory: Path,
     known_hosts_file: Path,
     git_executable: Path,
     ssh_executable: Path,
@@ -302,12 +332,32 @@ def _read_references(
         execution.repository_id,
         key_directory,
         known_hosts_file=known_hosts_file,
-        work_directory=workspace.tree_path,
+        work_directory=work_directory,
         git_executable=git_executable,
         ssh_executable=ssh_executable,
     )
     _validate_reference_snapshot(snapshot, execution)
     return snapshot
+
+
+def _create_probe_directory(workspace_root: Path) -> Path:
+    try:
+        metadata = workspace_root.lstat()
+        if (
+            not workspace_root.is_absolute()
+            or workspace_root.is_symlink()
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+        ):
+            _invalid()
+        trusted_root = workspace_root.resolve(strict=True)
+        probe = Path(tempfile.mkdtemp(prefix=".repo-init-probe-", dir=trusted_root))
+        os.chmod(probe, 0o700)
+        return probe
+    except RepoBInitializationExecutionError:
+        raise
+    except OSError:
+        _invalid()
 
 
 def _validate_reference_snapshot(

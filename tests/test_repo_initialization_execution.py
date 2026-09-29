@@ -224,6 +224,8 @@ def test_restart_after_push_reconciles_only_exact_intended_main(
         interrupted = load_repo_b_initialization_execution(store, REQUEST_ID)
         assert interrupted is not None and interrupted.phase == "publishing"
 
+        paths[0].rename(tmp_path / "source-changed-after-push")
+
         monkeypatch.setattr(
             "ha_syncapp.repo_initialization_execution.push_publication_intent_with_deploy_key",
             lambda *a, **k: pytest.fail("reconciliation must not push twice"),
