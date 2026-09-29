@@ -258,6 +258,35 @@ def test_exceptional_sync_failure_uses_bounded_retry_state(
     assert result.work.next_attempt_at is not None
 
 
+def test_deterministic_authority_failure_blocks_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _open_store(tmp_path)
+    item = _claimed_local_sync(store)
+
+    def fail(*args: object, **kwargs: object) -> LocalSyncResult:
+        raise LocalSyncError("sanitized", transient=False)
+
+    monkeypatch.setattr(local_sync_work, "synchronize_local_configuration", fail)
+    try:
+        result = local_sync_work.execute_claimed_local_sync_work(
+            store,
+            item,
+            tmp_path / "source",
+            tmp_path / "snapshots",
+            tmp_path / "workspaces",
+            TARGET,
+            "token",
+        )
+        assert local_sync_work.claim_local_sync_work(store) is None
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.synchronization is None
+    assert result.work.status == "blocked"
+    assert result.work.next_attempt_at is None
+
+
 def test_executor_rejects_unrelated_claim_without_mutating_it(tmp_path: Path) -> None:
     store = _open_store(tmp_path)
     store.enqueue_work("candidate", "candidate-sha")

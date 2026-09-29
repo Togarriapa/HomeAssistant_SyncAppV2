@@ -223,3 +223,28 @@ def test_transport_failure_uses_existing_transient_retry_state(
     assert result.work.status == "retry"
     assert result.synchronization is None
     assert secret not in repr(result)
+
+
+def test_deterministic_log_authority_failure_blocks_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    root, artifact = _artifact(tmp_path)
+    log_sync_work.enqueue_log_sync_work(store, root, TARGET, artifact.artifact_id)
+    item = log_sync_work.claim_log_sync_work(store)
+    assert item is not None
+
+    def fail(*args: object, **kwargs: object) -> LogSyncResult:
+        raise LogSyncError("sanitized", transient=False)
+
+    monkeypatch.setattr(log_sync_work, "synchronize_log_artifact", fail)
+    try:
+        result = _execute(store, item, root, tmp_path)
+        assert log_sync_work.claim_log_sync_work(store) is None
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.synchronization is None
+    assert result.work.status == "blocked"
+    assert result.work.next_attempt_at is None

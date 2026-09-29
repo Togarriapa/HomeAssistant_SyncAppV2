@@ -184,6 +184,30 @@ def test_guarded_runtime_failure_uses_retry_without_leaking_token(
     assert secret not in repr(result)
 
 
+def test_deterministic_runtime_authority_failure_blocks_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    runtime_sync_work.enqueue_runtime_sync_work(store, TARGET)
+    item = runtime_sync_work.claim_runtime_sync_work(store)
+    assert item is not None
+
+    def fail(*args: object, **kwargs: object) -> RuntimeSyncResult:
+        raise RuntimeSyncError("sanitized", transient=False)
+
+    monkeypatch.setattr(runtime_sync_work, "synchronize_runtime_inventory", fail)
+    try:
+        result = _execute(store, item, tmp_path)
+        assert runtime_sync_work.claim_runtime_sync_work(store) is None
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.synchronization is None
+    assert result.work.status == "blocked"
+    assert result.work.next_attempt_at is None
+
+
 def test_claim_identity_must_match_explicit_target(tmp_path: Path) -> None:
     store = _store(tmp_path)
     runtime_sync_work.enqueue_runtime_sync_work(store, TARGET)
