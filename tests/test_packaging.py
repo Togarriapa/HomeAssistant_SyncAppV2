@@ -141,6 +141,10 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "No `--force`" in publication_docs
     assert "only through an inherited descriptor" in publication_docs
     assert "must never silently fall back to token-backed Git transport" in publication_docs
+    promotion_docs = (ROOT / "docs/deploy-key-promotion-transport.md").read_text()
+    assert "one `git push --atomic` transaction" in promotion_docs
+    assert "Cleanup is restricted to a resolved child" in promotion_docs
+    assert "must never silently fall back to a token-backed Git transport" in promotion_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:

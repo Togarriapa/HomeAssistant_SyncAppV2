@@ -106,7 +106,14 @@ def _workspace(tmp_path: Path) -> tuple[Path, Path, str, CandidateFetch]:
         workspace_root,
         home,
         candidate,
-        CandidateFetch(root, TARGET, REPOSITORY_ID, "candidate", candidate, "refs/syncapp/candidate-fetch"),
+        CandidateFetch(
+            root,
+            TARGET,
+            REPOSITORY_ID,
+            "candidate",
+            candidate,
+            "refs/syncapp/candidate-fetch",
+        ),
     )
 
 
@@ -278,7 +285,7 @@ def test_both_missing_refs_are_published_in_one_atomic_non_force_transaction(
     assert len(fetches) == 1
     assert len(pushes) == 1
     command, environment, _descriptors = pushes[0]
-    assert command[-8:] == (
+    assert command[-7:] == (
         "push",
         "--atomic",
         "--porcelain",
@@ -286,8 +293,10 @@ def test_both_missing_refs_are_published_in_one_atomic_non_force_transaction(
         "ssh://git@github.com/Owner/Home.git",
         "refs/syncapp/candidate-fetch:refs/heads/main",
         f"refs/syncapp/candidate-fetch:refs/tags/{intent.known_good_tag}",
-    )[-8:]
-    assert not any("force" in argument or "delete" in argument or "mirror" in argument for argument in command)
+    )
+    assert not any(
+        "force" in argument or "delete" in argument or "mirror" in argument for argument in command
+    )
     assert "credential.helper=" in command
     assert "protocol.file.allow=never" in command
     assert "push.recurseSubmodules=no" in command
@@ -394,7 +403,13 @@ def test_pre_push_generation_drift_blocks_without_mutation_and_cleans_workspace(
     workspace_root, home, candidate, fetched = _workspace(tmp_path)
     key_directory, known_hosts, proof = _authority(tmp_path)
     before = _snapshot(proof, candidate, BASELINE, None)
-    drifted = _snapshot(proof, candidate, BASELINE, None, generation="2" * 8 + "-2222-4222-8222-222222222222")
+    drifted = _snapshot(
+        proof,
+        candidate,
+        BASELINE,
+        None,
+        generation="2" * 8 + "-2222-4222-8222-222222222222",
+    )
     _install_reads(monkeypatch, [before, drifted])
     _install_fetch(monkeypatch, fetched)
     monkeypatch.setattr(transport, "run_bounded_repo_b_git", pytest.fail)
@@ -486,6 +501,39 @@ def test_unsafe_local_url_rewrite_is_rejected_before_push_and_cleaned(
         )
 
     assert not fetched.root.exists()
+
+
+def test_malformed_fetch_result_cannot_expand_cleanup_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_root, home, candidate, _fetched = _workspace(tmp_path)
+    key_directory, known_hosts, proof = _authority(tmp_path)
+    before = _snapshot(proof, candidate, BASELINE, None)
+    _install_reads(monkeypatch, [before])
+    outside = tmp_path / "must-survive"
+    outside.mkdir(mode=0o700)
+    malformed = CandidateFetch(
+        outside,
+        TARGET,
+        REPOSITORY_ID,
+        "candidate",
+        candidate,
+        "refs/syncapp/candidate-fetch",
+    )
+    _install_fetch(monkeypatch, malformed)
+
+    with pytest.raises(DeploymentPromotionTransportError, match="workspace"):
+        publish_promotion_refs_with_deploy_key(
+            _intent(candidate),
+            PromotionRemoteState(candidate, BASELINE, None),
+            proof,
+            key_directory,
+            workspace_root,
+            home,
+            known_hosts_file=known_hosts,
+        )
+
+    assert outside.is_dir()
 
 
 @pytest.mark.parametrize("transient", [False, True])

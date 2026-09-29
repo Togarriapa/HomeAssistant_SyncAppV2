@@ -110,6 +110,16 @@ not prove write permission or enable deploy-key transport. See
 [Repo B deploy-key rotation](../docs/deploy-key-rotation.md) for lifecycle,
 operator enrollment, recovery, blocking, and rollback boundaries.
 
+Proof-bound SSH primitives also exist for canonical reference reads, exact
+candidate fetch, ordinary non-force publication, and atomic deployment promotion
+plus known-good tagging. Each revalidates the protected generation immediately
+before use, passes the private key only through an inherited descriptor, and
+fails closed on rebound or conflicting evidence. These primitives are not yet
+selected by startup or runtime; the active token-backed lanes remain unchanged
+until initialization authority and status exposure are explicitly reviewed. See
+[Repo B deploy-key promotion transport](../docs/deploy-key-promotion-transport.md)
+for atomic reconciliation, retry and cleanup boundaries.
+
 ## Retrigger recovery
 
 The container launcher supervises the state-owning SyncApp service and triggers the
