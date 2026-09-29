@@ -101,6 +101,15 @@ or rotated. See [Repo B deploy-key generation](../docs/deploy-key-generation.md)
 and [Repo B deploy-key access test](../docs/deploy-key-access-test.md) for the
 exact storage, identity, host-key, privacy, and recovery boundaries.
 
+Deploy-key rotation is an explicit UUID-bound workflow: prepare a protected
+candidate, manually enroll its public key while retaining the prior GitHub key,
+prove read access for that exact candidate, and only then activate it locally.
+Activation is journaled and recoverable across both directory-renaming crash
+windows. The previous generation remains protected after activation; this does
+not prove write permission or enable deploy-key transport. See
+[Repo B deploy-key rotation](../docs/deploy-key-rotation.md) for lifecycle,
+operator enrollment, recovery, blocking, and rollback boundaries.
+
 ## Retrigger recovery
 
 The container launcher supervises the state-owning SyncApp service and triggers the
