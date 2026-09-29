@@ -50,6 +50,26 @@ def test_pass_recovers_stale_work_and_processes_only_one(tmp_path) -> None:
         assert len(processed) == 1
 
 
+def test_pass_forwards_deploy_key_authority_without_token(tmp_path) -> None:
+    authority = object()
+    with StateStore(tmp_path) as store:
+        store.enqueue_work("candidate_promote", "deployment-1", now=NOW)
+
+        def execute(owner, item, **kwargs):
+            assert kwargs["token"] is None
+            assert kwargs["promotion_authority"] is authority
+            return _complete(owner, item, **kwargs)
+
+        result = run_candidate_promotion_retrigger_pass(
+            store,
+            None,
+            promotion_authority=authority,
+            reference_time=NOW,
+            executor=execute,
+        )
+        assert result.processed == "promotion_completed"
+
+
 @pytest.mark.parametrize(
     ("transient", "expected_status"),
     [(True, "retry"), (False, "blocked")],
