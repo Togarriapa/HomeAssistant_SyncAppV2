@@ -64,6 +64,11 @@ def test_generation_uses_bounded_ed25519_command_contract(
     real = deploy_key._run_ssh_keygen
 
     def capture(command: tuple[str, ...], *, cwd: Path) -> bytes:
+        journal = key_path.parent / ".repo-b-deploy-key.generation.json"
+        assert journal.is_file()
+        assert stat.S_IMODE(journal.stat().st_mode) == 0o600
+        assert not key_path.exists()
+        assert stat.S_IMODE(cwd.stat().st_mode) == 0o700
         calls.append((command, cwd))
         return real(command, cwd=cwd)
 
