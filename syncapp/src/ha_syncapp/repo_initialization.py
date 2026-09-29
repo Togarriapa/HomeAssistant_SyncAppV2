@@ -134,8 +134,7 @@ def authorize_repo_b_initialization(
             if baselines is None or len(baselines) != 1 or type(baselines[0]) is not int:
                 _invalid()
             active = database.execute(
-                "SELECT COUNT(*) FROM repo_b_initialization "
-                "WHERE target=? AND phase='authorized'",
+                "SELECT COUNT(*) FROM repo_b_initialization WHERE target=? AND phase='authorized'",
                 (request.target,),
             ).fetchone()
             if active is None or len(active) != 1 or type(active[0]) is not int:
@@ -392,11 +391,7 @@ def _authority_from_row(row: tuple[object, ...]) -> RepoBInitializationAuthority
         terminal_at,
         record_sha256,
     ) = row
-    if (
-        type(request_id) is not str
-        or type(target) is not str
-        or type(repository_id) is not int
-    ):
+    if type(request_id) is not str or type(target) is not str or type(repository_id) is not int:
         _invalid()
     request = RepoBInitializationRequest(request_id, target, repository_id)
     _validate_request(request)

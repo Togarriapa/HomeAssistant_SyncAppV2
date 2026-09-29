@@ -221,17 +221,13 @@ def render_repo_b_initialization_runtime_status(
             or (row.phase in {"authorized", "completed"} and row.block_reason != "none")
             or (row.phase == "blocked" and row.block_reason == "none")
         ):
-            raise RetriggerRuntimeStatusError(
-                "Repo B initialization runtime evidence is invalid"
-            )
+            raise RetriggerRuntimeStatusError("Repo B initialization runtime evidence is invalid")
         recorded = _utc(
             row.recorded_at,
             "Repo B initialization runtime evidence is invalid",
         )
         if recorded > reference:
-            raise RetriggerRuntimeStatusError(
-                "Repo B initialization runtime evidence is invalid"
-            )
+            raise RetriggerRuntimeStatusError("Repo B initialization runtime evidence is invalid")
         total += 1
         phases[row.phase] += 1
         reasons[row.block_reason] += 1

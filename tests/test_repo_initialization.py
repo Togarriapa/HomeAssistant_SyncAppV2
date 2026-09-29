@@ -131,9 +131,7 @@ def test_exact_request_replays_from_journal_without_remote_evidence(tmp_path: Pa
             observed_at=None,
             now=NOW + timedelta(days=1),
         )
-        count = store._connection.execute(
-            "SELECT COUNT(*) FROM repo_b_initialization"
-        ).fetchone()
+        count = store._connection.execute("SELECT COUNT(*) FROM repo_b_initialization").fetchone()
     finally:
         store.__exit__(None, None, None)
 
@@ -199,9 +197,7 @@ def test_noncanonical_request_is_rejected_without_journal(
                 proof=_proof(),
                 snapshot=_snapshot(),
             )
-        count = store._connection.execute(
-            "SELECT COUNT(*) FROM repo_b_initialization"
-        ).fetchone()
+        count = store._connection.execute("SELECT COUNT(*) FROM repo_b_initialization").fetchone()
     finally:
         store.__exit__(None, None, None)
 
@@ -347,9 +343,7 @@ def test_authorization_failure_rolls_back_journal(tmp_path: Path) -> None:
         )
         with pytest.raises(RepoBInitializationError, match="failed closed") as error:
             _authorize(store, proof=_proof(), snapshot=_snapshot())
-        count = store._connection.execute(
-            "SELECT COUNT(*) FROM repo_b_initialization"
-        ).fetchone()
+        count = store._connection.execute("SELECT COUNT(*) FROM repo_b_initialization").fetchone()
     finally:
         store.__exit__(None, None, None)
 
