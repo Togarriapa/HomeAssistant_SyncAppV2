@@ -64,9 +64,13 @@ record fails closed.
 
 The old generation remains protected and available for a later reviewed rollback
 or finalization workflow. Do not remove the prior key from GitHub after local
-activation. Removal, cleanup of the retained generation, write-capability
-verification, deploy-key-backed production transport, runtime/UI wiring, and
-explicit Repo B initialization remain separate tasks under story #388.
+activation. The read-only
+[deploy-key reference transport](deploy-key-reference-transport.md) can consume
+an exact proof after re-inspecting the active generation; it does not authorize
+candidate fetch or repository writes. Removal, cleanup of the retained
+generation, write-capability verification, production transport integration,
+runtime/UI wiring, and explicit Repo B initialization remain separate tasks
+under story #388.
 
 Rotation grants no synchronization, deployment, promotion, rollback, or Retrigger
 authority. Existing token-backed Git transport and every validation, backup,
