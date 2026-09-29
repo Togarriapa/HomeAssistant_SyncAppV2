@@ -18,7 +18,10 @@ from .administrative_retry_request import (
     AdministrativeRetryRequestError,
     apply_administrative_retry_request,
 )
-from .candidate_deploy_key_ingress import DeployKeyCandidateIngress
+from .candidate_deploy_key_ingress import (
+    CandidateDeployKeyIngressError,
+    DeployKeyCandidateIngress,
+)
 from .candidate_detection_service import (
     CandidateDetectionService,
     CandidateDetectionServiceError,
@@ -433,10 +436,10 @@ def _candidate_deploy_key_ingress_if_configured(
         raise CandidateDetectionServiceError("candidate service repository is not trusted")
     if store.synchronization_baseline(config.repo_b, "main") is None:
         raise CandidateDetectionServiceError("candidate repository is not initialized")
-    protected = (data_dir / "syncapp").resolve(strict=True)
-    key_directory = protected / "repo-b-deploy-key"
-    access_work_directory = protected / "work" / "deploy-key-access"
     try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        key_directory = protected / "repo-b-deploy-key"
+        access_work_directory = protected / "work" / "deploy-key-access"
         _ensure_private_work_directory(protected, access_work_directory)
         proof = test_repo_b_deploy_key_access(
             config.repo_b,
@@ -446,7 +449,12 @@ def _candidate_deploy_key_ingress_if_configured(
             work_directory=access_work_directory,
         )
         return DeployKeyCandidateIngress(proof, key_directory, access_work_directory)
-    except (DeployKeyAccessError, OSError) as exc:
+    except (
+        CandidateDeployKeyIngressError,
+        DeployKeyAccessError,
+        RetriggerCycleError,
+        OSError,
+    ) as exc:
         raise CandidateDetectionServiceError(
             "candidate deploy-key authority is unavailable"
         ) from exc

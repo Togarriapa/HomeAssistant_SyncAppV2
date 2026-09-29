@@ -15,6 +15,7 @@ from ha_syncapp.candidate_fetch_stage_execution import (
 from ha_syncapp.candidate_orchestration import register_claimed_candidate
 from ha_syncapp.config import Config
 from ha_syncapp.deploy_key_access import (
+    DeployKeyAccessError,
     DeployKeyAccessProof,
     DeployKeyReference,
     DeployKeyReferenceSnapshot,
@@ -156,6 +157,37 @@ def test_service_builds_deploy_key_ingress_only_after_initialized_main(
         key,
     )
     assert "rest-identity-token" not in repr(ingress)
+
+
+def test_service_sanitizes_deploy_key_activation_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    config = Config(
+        repo_b=TARGET,
+        github_token="rest-identity-token",
+        repo_b_candidate_transport="deploy_key",
+    )
+    with StateStore(data) as store:
+        store.bind_repository(TARGET, REPOSITORY_ID)
+        store.record_synchronization_baseline(
+            TARGET, "main", "e" * 64, "c" * 40, synchronized_at=NOW
+        )
+        monkeypatch.setattr(
+            service,
+            "test_repo_b_deploy_key_access",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                DeployKeyAccessError("rest-identity-token private path detail")
+            ),
+        )
+        with pytest.raises(
+            service.CandidateDetectionServiceError,
+            match="candidate deploy-key authority is unavailable",
+        ) as caught:
+            service._candidate_deploy_key_ingress_if_configured(store, config, data)
+
+    assert "rest-identity-token" not in str(caught.value)
 
 
 def test_candidate_service_uses_deploy_key_ingress_without_token(
