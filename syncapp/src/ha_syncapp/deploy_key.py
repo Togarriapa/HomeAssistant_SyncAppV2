@@ -43,6 +43,19 @@ class DeployKeyEnrollment:
     generation_id: str
 
 
+def inspect_repo_b_deploy_key(key_directory: Path) -> DeployKeyEnrollment:
+    """Read one complete generation without creating or reconciling key state."""
+    if not key_directory.is_absolute() or Path(os.path.normpath(key_directory)) != key_directory:
+        raise DeployKeyError("Deploy key parent is invalid")
+    parent = key_directory.parent
+    _verify_parent(parent)
+    journal = parent / f".{key_directory.name}.generation.json"
+    if _lstat_optional(journal) is not None:
+        _read_journal(journal)
+        raise DeployKeyError("Deploy key state is incomplete")
+    return _inspect_generation(key_directory)
+
+
 def ensure_repo_b_deploy_key(
     key_directory: Path,
     *,

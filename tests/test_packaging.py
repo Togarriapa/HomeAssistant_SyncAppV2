@@ -123,9 +123,13 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "A request UUID is consumed exactly once" in operator_docs
     assert "## Repo B deploy-key foundation" in operator_docs
     deploy_key_docs = (ROOT / "docs/deploy-key-generation.md").read_text()
-    assert "does not yet enroll, test, rotate, or use the key" in deploy_key_docs
+    assert "does not enroll, rotate, or use the key" in deploy_key_docs
     assert "never returned or logged" in deploy_key_docs
-    assert "performs no network operation" in deploy_key_docs
+    assert "Generation performs no network operation" in deploy_key_docs
+    access_docs = (ROOT / "docs/deploy-key-access-test.md").read_text()
+    assert "Exactly one bounded, noninteractive `git ls-remote --refs`" in access_docs
+    assert "Strict host-key checking is mandatory" in access_docs
+    assert "proof grants no mutation or deployment authority" in access_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
@@ -162,3 +166,5 @@ def test_container_installs_only_locked_runtime_requirements() -> None:
     )
     assert "pip install websockets" not in dockerfile
     assert "openssh-client" in dockerfile
+    assert "COPY github_known_hosts /app/github_known_hosts" in dockerfile
+    assert (ROOT / "syncapp/github_known_hosts").is_file()
