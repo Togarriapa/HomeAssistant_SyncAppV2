@@ -66,11 +66,15 @@ included in errors.
 The separate [deploy-key candidate fetch transport](deploy-key-candidate-fetch.md)
 now composes this metadata read with a second exact-generation check and a
 descriptor-bound acquisition of one candidate commit. Production Fetch/Stage,
-publication push, and promotion mutation remain unchanged until durable
-initialization/runtime authority exists. Those paths must preserve non-force
-updates, fresh remote-state checks, candidate validation, backup, deployment
-observation, rollback, locking, idempotency, and deterministic blocking. No
-startup or Retrigger path invokes either deploy-key transport automatically yet.
+and the separate
+[deploy-key publication transport](deploy-key-publication-transport.md) compose
+the same proof with exact-generation revalidation for one candidate acquisition
+or one non-force branch push. Production Fetch/Stage, publication, and promotion
+paths remain unchanged until durable initialization/runtime authority exists.
+Those paths must preserve non-force updates, fresh remote-state checks,
+candidate validation, backup, deployment observation, rollback, locking,
+idempotency, and deterministic blocking. No startup or Retrigger path invokes
+these deploy-key transports automatically yet.
 
 No live Repo B, Home Assistant, Supervisor, enrollment, key-removal, deployment,
 promotion, or rollback operation is performed by this boundary.

@@ -137,6 +137,10 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     candidate_fetch_docs = (ROOT / "docs/deploy-key-candidate-fetch.md").read_text()
     assert "No GitHub token" in candidate_fetch_docs
     assert "must never silently return to token-backed Git transport" in candidate_fetch_docs
+    publication_docs = (ROOT / "docs/deploy-key-publication-transport.md").read_text()
+    assert "No `--force`" in publication_docs
+    assert "only through an inherited descriptor" in publication_docs
+    assert "must never silently fall back to token-backed Git transport" in publication_docs
 
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
