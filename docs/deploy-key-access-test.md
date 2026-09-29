@@ -48,11 +48,14 @@ Authentication, repository visibility, host-key, malformed-evidence, missing
 generation, and identity failures are deterministic. All errors are sanitized;
 raw stderr and repository content are never surfaced.
 
-This proof grants no mutation or deployment authority. Existing token-based Git
-transport and every validation, backup, observation, promotion, rollback,
-locking, and Retrigger safeguard remain unchanged. GitHub enrollment/removal,
-deploy-key transport, explicit Repo B initialization, runtime wiring, and
-administrative UI remain separate reviewed increments under story #388. The
-staged [deploy-key rotation workflow](deploy-key-rotation.md) reuses this proof
-but intentionally retains the previous generation and grants no transport
-authority.
+This proof grants no mutation or deployment authority. The separate
+[Repo B deploy-key reference transport](deploy-key-reference-transport.md)
+can consume it for a second bounded SSH metadata read only after re-inspecting
+the exact protected generation and matching the configured target and numeric
+repository ID. Existing token-based candidate fetch/publication and every
+validation, backup, observation, promotion, rollback, locking, and Retrigger
+safeguard remain unchanged. GitHub enrollment/removal, write transport, explicit
+Repo B initialization, runtime wiring, and administrative UI remain separate
+reviewed increments under story #388. The staged
+[deploy-key rotation workflow](deploy-key-rotation.md) also reuses this proof
+but intentionally retains the previous generation.

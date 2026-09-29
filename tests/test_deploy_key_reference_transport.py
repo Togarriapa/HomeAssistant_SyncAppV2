@@ -49,6 +49,8 @@ def _read(
     monkeypatch.setattr(deploy_key_access, "_run_git_ls_remote", lambda *args, **kwargs: output)
     return read_repo_b_deploy_key_references(
         proof,
+        TARGET,
+        REPOSITORY_ID,
         key_directory,
         known_hosts_file=known_hosts,
         work_directory=work,
@@ -117,6 +119,8 @@ def test_replaced_generation_is_rejected_before_ssh(
     with pytest.raises(DeployKeyAccessError, match="proof does not match"):
         read_repo_b_deploy_key_references(
             proof,
+            TARGET,
+            REPOSITORY_ID,
             key_directory,
             known_hosts_file=known_hosts,
             work_directory=work,
@@ -153,6 +157,8 @@ def test_forged_or_malformed_proof_is_rejected_before_ssh(
     with pytest.raises(DeployKeyAccessError, match="proof"):
         read_repo_b_deploy_key_references(
             forged,
+            TARGET,
+            REPOSITORY_ID,
             key_directory,
             known_hosts_file=known_hosts,
             work_directory=work,
@@ -182,6 +188,8 @@ def test_transport_reuses_confined_ssh_descriptor_without_credentials(
     monkeypatch.setattr(deploy_key_access, "_run_git_ls_remote", capture)
     read_repo_b_deploy_key_references(
         proof,
+        TARGET,
+        REPOSITORY_ID,
         key_directory,
         known_hosts_file=known_hosts,
         work_directory=work,
@@ -225,6 +233,8 @@ def test_transport_preserves_transient_failure_classification(
     with pytest.raises(DeployKeyAccessError) as error:
         read_repo_b_deploy_key_references(
             proof,
+            TARGET,
+            REPOSITORY_ID,
             key_directory,
             known_hosts_file=known_hosts,
             work_directory=work,

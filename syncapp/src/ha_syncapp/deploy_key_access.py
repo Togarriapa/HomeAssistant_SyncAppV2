@@ -15,6 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
+from uuid import UUID
 
 from .deploy_key import (
     MAX_PRIVATE_KEY_BYTES,
@@ -36,6 +37,12 @@ MAX_LS_REMOTE_REFS = 4_096
 MAX_STDERR_BYTES = 16_384
 COMMAND_TIMEOUT_SECONDS = 20.0
 _COMMIT_SHA = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+_OBSERVATION_SHA256 = re.compile(r"[0-9a-f]{64}")
+_TARGET = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/"
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})"
+)
 _SAFE_COMMAND_PATH = re.compile(r"/[A-Za-z0-9_./-]+")
 _TRANSIENT_MARKERS = (
     b"could not resolve hostname",
@@ -71,6 +78,26 @@ class DeployKeyAccessProof:
     key_fingerprint: str
     generation_id: str
     ref_count: int
+    observation_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeployKeyReference:
+    """One canonical branch or tag reference observed through the protected key."""
+
+    name: str
+    commit_sha: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeployKeyReferenceSnapshot:
+    """Immutable reference metadata bound to one exact repository and key generation."""
+
+    target: str
+    repository_id: int
+    key_fingerprint: str
+    generation_id: str
+    references: tuple[DeployKeyReference, ...]
     observation_sha256: str
 
 
@@ -118,30 +145,8 @@ def test_repo_b_deploy_key_access(
             known_hosts_file,
             private_descriptor,
         )
-        command = (
-            str(git_executable),
-            "-c",
-            f"core.hooksPath={os.devnull}",
-            "-c",
-            "credential.helper=",
-            "-c",
-            "protocol.file.allow=never",
-            "-c",
-            f"core.sshCommand={ssh_command}",
-            "ls-remote",
-            "--refs",
-            _repository_url(identity.target),
-        )
-        environment = {
-            "PATH": str(ssh_executable.parent),
-            "HOME": str(work_directory),
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_TERMINAL_PROMPT": "0",
-            "GCM_INTERACTIVE": "Never",
-            "GIT_SSH_VARIANT": "ssh",
-            "LC_ALL": "C",
-        }
+        command = _ls_remote_command(identity.target, git_executable, ssh_command)
+        environment = _git_environment(ssh_executable, work_directory)
         raw = _run_git_ls_remote(
             command,
             cwd=work_directory,
@@ -150,7 +155,7 @@ def test_repo_b_deploy_key_access(
         )
     finally:
         os.close(private_descriptor)
-    ref_count = _validate_reference_evidence(raw)
+    ref_count = len(_parse_reference_evidence(raw))
     return DeployKeyAccessProof(
         target=identity.target,
         repository_id=identity.repository_id,
@@ -159,6 +164,123 @@ def test_repo_b_deploy_key_access(
         ref_count=ref_count,
         observation_sha256=hashlib.sha256(raw).hexdigest(),
     )
+
+
+def read_repo_b_deploy_key_references(
+    proof: DeployKeyAccessProof,
+    target: str,
+    expected_repository_id: int,
+    key_directory: Path,
+    *,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    work_directory: Path,
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+) -> DeployKeyReferenceSnapshot:
+    """Read bounded canonical Git refs with one exact previously verified key generation."""
+    _validate_access_proof(proof)
+    if (
+        not isinstance(target, str)
+        or _TARGET.fullmatch(target) is None
+        or type(expected_repository_id) is not int
+        or expected_repository_id <= 0
+        or proof.target.casefold() != target.casefold()
+        or proof.repository_id != expected_repository_id
+    ):
+        raise DeployKeyAccessError("Deploy key access proof does not match repository identity")
+    try:
+        enrollment = inspect_repo_b_deploy_key(key_directory)
+    except DeployKeyError:
+        raise DeployKeyAccessError("protected deploy key is invalid") from None
+    if (
+        enrollment.fingerprint != proof.key_fingerprint
+        or enrollment.generation_id != proof.generation_id
+    ):
+        raise DeployKeyAccessError("Deploy key access proof does not match protected key")
+    _verify_known_hosts(known_hosts_file)
+    _verify_private_directory(work_directory)
+    _verify_executable(git_executable)
+    _verify_executable(ssh_executable)
+    _verify_safe_command_path(known_hosts_file)
+    _verify_safe_command_path(ssh_executable)
+
+    private_descriptor = _open_private_key(key_directory / "private_key")
+    try:
+        command = _ls_remote_command(
+            target,
+            git_executable,
+            _ssh_command(ssh_executable, known_hosts_file, private_descriptor),
+        )
+        raw = _run_git_ls_remote(
+            command,
+            cwd=work_directory,
+            environment=_git_environment(ssh_executable, work_directory),
+            pass_fds=(private_descriptor,),
+        )
+    finally:
+        os.close(private_descriptor)
+    references = _parse_reference_evidence(raw)
+    return DeployKeyReferenceSnapshot(
+        target=target,
+        repository_id=expected_repository_id,
+        key_fingerprint=enrollment.fingerprint,
+        generation_id=enrollment.generation_id,
+        references=references,
+        observation_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _validate_access_proof(proof: DeployKeyAccessProof) -> None:
+    if type(proof) is not DeployKeyAccessProof:
+        raise DeployKeyAccessError("Deploy key access proof is invalid")
+    canonical_generation = False
+    with suppress(ValueError, AttributeError):
+        canonical_generation = str(UUID(proof.generation_id)) == proof.generation_id
+    if (
+        _TARGET.fullmatch(proof.target) is None
+        or type(proof.repository_id) is not int
+        or proof.repository_id <= 0
+        or _FINGERPRINT.fullmatch(proof.key_fingerprint) is None
+        or not canonical_generation
+        or type(proof.ref_count) is not int
+        or proof.ref_count < 0
+        or _OBSERVATION_SHA256.fullmatch(proof.observation_sha256) is None
+    ):
+        raise DeployKeyAccessError("Deploy key access proof is invalid")
+
+
+def _ls_remote_command(
+    target: str,
+    git_executable: Path,
+    ssh_command: str,
+) -> tuple[str, ...]:
+    return (
+        str(git_executable),
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        f"core.sshCommand={ssh_command}",
+        "ls-remote",
+        "--refs",
+        _repository_url(target),
+    )
+
+
+def _git_environment(ssh_executable: Path, work_directory: Path) -> dict[str, str]:
+    return {
+        "PATH": str(ssh_executable.parent),
+        "HOME": str(work_directory),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+        "GIT_SSH_VARIANT": "ssh",
+        "LC_ALL": "C",
+    }
 
 
 def _verify_identity(identity: RepoIdentity, target: str, repository_id: int) -> None:
@@ -422,16 +544,22 @@ def _raise_command_failure(stderr: bytes) -> None:
 
 
 def _validate_reference_evidence(raw: bytes) -> int:
+    """Compatibility validator for the original content-free access proof."""
+    return len(_parse_reference_evidence(raw))
+
+
+def _parse_reference_evidence(raw: bytes) -> tuple[DeployKeyReference, ...]:
     if len(raw) > MAX_LS_REMOTE_BYTES:
         raise DeployKeyAccessError("Deploy key access returned invalid reference evidence")
     if not raw:
-        return 0
+        return ()
     if not raw.endswith(b"\n"):
         raise DeployKeyAccessError("Deploy key access returned invalid reference evidence")
     lines = raw[:-1].split(b"\n")
     if len(lines) > MAX_LS_REMOTE_REFS:
         raise DeployKeyAccessError("Deploy key access returned invalid reference evidence")
     previous: bytes | None = None
+    references: list[DeployKeyReference] = []
     for line in lines:
         fields = line.split(b"\t")
         if len(fields) != 2 or _COMMIT_SHA.fullmatch(fields[0]) is None:
@@ -439,8 +567,18 @@ def _validate_reference_evidence(raw: bytes) -> int:
         reference = fields[1]
         if not _valid_reference(reference) or (previous is not None and reference <= previous):
             raise DeployKeyAccessError("Deploy key access returned invalid reference evidence")
+        try:
+            references.append(
+                DeployKeyReference(
+                    name=reference.decode("ascii"), commit_sha=fields[0].decode("ascii")
+                )
+            )
+        except UnicodeError:
+            raise DeployKeyAccessError(
+                "Deploy key access returned invalid reference evidence"
+            ) from None
         previous = reference
-    return len(lines)
+    return tuple(references)
 
 
 def _valid_reference(reference: bytes) -> bool:
