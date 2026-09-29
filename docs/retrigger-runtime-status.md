@@ -44,6 +44,8 @@ The recovery file exposes:
   counts and the latest checkpoint timestamp.
 - `administrative_retry_requests` with the total number processed, fixed
   `retried` and `rejected` outcome counts, and the latest processed UTC timestamp.
+- `repo_b_initialization` with fixed authorized, blocked and completed phase counts,
+  fixed deterministic block-reason counts and the latest recorded UTC timestamp.
 
 Every known status is represented even when its count is zero, and an empty ledger
 produces an explicit empty summary. Candidate entries are status information only;
@@ -55,6 +57,12 @@ work keys, identity digests, receipt digests and raw App options are never selec
 Malformed, future-dated or oversized evidence fails closed. These aggregates confirm
 that explicit requests were consumed or rejected, but they cannot identify, rearm,
 claim, unblock or otherwise mutate any work item and grant no retry authority.
+
+Repo B initialization evidence uses a separate bounded read-only projection that
+selects only phase, block reason and recorded timestamp. Request UUID, repository
+target and ID, deploy-key fingerprint and generation, remote observation digest and
+record integrity digest are never selected. The aggregate reports explicit authority
+state but cannot initialize a repository, publish a ref or grant Git transport access.
 
 A successful `candidate_apply` item means only that the complete admission chain was
 freshly re-proven and an immutable live Apply intent was durably recorded. It does not

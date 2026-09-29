@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -143,20 +142,70 @@ def test_exact_request_replays_from_journal_without_remote_evidence(tmp_path: Pa
 
 
 @pytest.mark.parametrize(
-    "request",
+    "initialization_request",
     [
         _request(target="other/repository"),
         _request(repository_id=54321),
     ],
 )
-def test_request_id_cannot_be_rebound(tmp_path: Path, request) -> None:
+def test_request_id_cannot_be_rebound(tmp_path: Path, initialization_request) -> None:
     store = _store(tmp_path)
     try:
         _authorize(store, proof=_proof(), snapshot=_snapshot())
         with pytest.raises(RepoBInitializationError, match="failed closed"):
-            _authorize(store, request=request, observed_at=None, now=NOW)
+            _authorize(
+                store,
+                request=initialization_request,
+                observed_at=None,
+                now=NOW,
+            )
     finally:
         store.__exit__(None, None, None)
+
+
+def test_request_id_cannot_be_rebound_to_new_key_evidence(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        _authorize(store, proof=_proof(), snapshot=_snapshot())
+        changed_fingerprint = "SHA256:" + "B" * 43
+        with pytest.raises(RepoBInitializationError, match="failed closed"):
+            _authorize(
+                store,
+                proof=_proof(key_fingerprint=changed_fingerprint),
+                snapshot=_snapshot(key_fingerprint=changed_fingerprint),
+            )
+    finally:
+        store.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize(
+    "initialization_request",
+    [
+        _request(request_id=REQUEST_ID.upper()),
+        _request(target="owner//repository"),
+        _request(repository_id=True),
+    ],
+)
+def test_noncanonical_request_is_rejected_without_journal(
+    tmp_path: Path,
+    initialization_request: RepoBInitializationRequest,
+) -> None:
+    store = _store(tmp_path)
+    try:
+        with pytest.raises(RepoBInitializationError, match="failed closed"):
+            _authorize(
+                store,
+                request=initialization_request,
+                proof=_proof(),
+                snapshot=_snapshot(),
+            )
+        count = store._connection.execute(
+            "SELECT COUNT(*) FROM repo_b_initialization"
+        ).fetchone()
+    finally:
+        store.__exit__(None, None, None)
+
+    assert count == (0,)
 
 
 def test_nonempty_repo_is_durably_blocked_and_never_discovered(tmp_path: Path) -> None:
@@ -186,7 +235,7 @@ def test_existing_baseline_is_durably_blocked(tmp_path: Path) -> None:
         store.record_synchronization_baseline(
             TARGET,
             "main",
-            "snapshot-1",
+            "b" * 64,
             "a" * 40,
             synchronized_at=NOW - timedelta(minutes=1),
         )
@@ -259,6 +308,30 @@ def test_tampered_journal_fails_closed(tmp_path: Path) -> None:
         )
         with pytest.raises(RepoBInitializationError, match="failed closed"):
             load_repo_b_initialization(store, REQUEST_ID)
+        with pytest.raises(RepoBInitializationError, match="failed closed"):
+            discover_authorized_repo_b_initializations(store)
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_authorized_discovery_is_bounded(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        for index in range(17):
+            target = f"owner/private-repo-{index}"
+            request_id = f"123e4567-e89b-42d3-a456-4266141740{index:02d}"
+            repository_id = REPOSITORY_ID + index + 1
+            store.bind_repository(target, repository_id)
+            _authorize(
+                store,
+                request=_request(
+                    request_id=request_id,
+                    target=target,
+                    repository_id=repository_id,
+                ),
+                proof=_proof(target=target, repository_id=repository_id),
+                snapshot=_snapshot(target=target, repository_id=repository_id),
+            )
         with pytest.raises(RepoBInitializationError, match="failed closed"):
             discover_authorized_repo_b_initializations(store)
     finally:
@@ -362,7 +435,7 @@ def test_runtime_inventory_rejects_future_initialization_evidence(tmp_path: Path
         )
         with pytest.raises(RepoBInitializationError, match="failed closed"):
             load_repo_b_initialization(store, REQUEST_ID)
-        with pytest.raises(RetriggerRuntimeStatusError, match="unavailable"):
+        with pytest.raises(RetriggerRuntimeStatusError, match="invalid"):
             collect_retrigger_runtime_inventory(store, reference_time=NOW)
     finally:
         store.__exit__(None, None, None)
