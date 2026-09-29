@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from ha_syncapp.config import load_config
 
 
@@ -39,3 +40,12 @@ def test_rollback_transport_rejects_unknown_value(tmp_path) -> None:
     except ConfigError:
         return
     raise AssertionError("invalid rollback transport was accepted")
+
+
+def test_deploy_key_rollback_transport_requires_repo_b(tmp_path) -> None:
+    from ha_syncapp.config import ConfigError
+
+    path = tmp_path / "missing-repo.json"
+    path.write_text(json.dumps({"repo_b_rollback_transport": "deploy_key"}))
+    with pytest.raises(ConfigError):
+        load_config(path)
