@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .log_sync_work import (
     LogSyncWorkError,
     LogSyncWorkResult,
@@ -32,7 +33,7 @@ def run_log_sync_process(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> LogSyncProcessResult:
     """Claim and process at most one log artifact without recovery semantics."""
     if type(store) is not StateStore:

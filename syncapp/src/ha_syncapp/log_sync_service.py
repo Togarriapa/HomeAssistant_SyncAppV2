@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .log_collection import (
     LogCollectionError,
     LogCollectionResult,
@@ -53,6 +54,7 @@ class LogSyncService:
         *,
         core_token: str | None,
         interval_seconds: float,
+        publication_credential: PublicationCredential | None = None,
     ) -> None:
         if type(store) is not StateStore:
             raise LogSyncServiceError("logs service state store is invalid")
@@ -69,6 +71,7 @@ class LogSyncService:
         self._workspace_root = workspace_root
         self._target = target
         self._github_token = github_token
+        self._publication_credential = publication_credential or github_token
         self._core_token = core_token
         self._interval_seconds = float(interval_seconds)
         self._next_due: float | None = None
@@ -106,7 +109,7 @@ class LogSyncService:
                 self._snapshot_staging_root,
                 self._workspace_root,
                 self._target,
-                self._github_token,
+                self._publication_credential,
             )
             retention = run_log_retention_work_pass(
                 self._store,

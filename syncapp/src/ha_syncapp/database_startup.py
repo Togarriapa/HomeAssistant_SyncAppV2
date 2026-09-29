@@ -14,6 +14,7 @@ from .database_sync_schedule import (
     DatabaseSyncScheduleError,
     schedule_database_sync_generation,
 )
+from .deploy_key_publication_authority import PublicationCredential
 from .state import StateStore, WorkItem
 
 
@@ -36,7 +37,7 @@ def run_startup_database_sync(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
 ) -> DatabaseStartupResult:
     """Schedule one normal database generation and process at most one eligible item."""
     if type(store) is not StateStore:

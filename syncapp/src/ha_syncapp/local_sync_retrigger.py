@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ha_syncapp.deploy_key_publication_authority import PublicationCredential
 from ha_syncapp.local_sync_work import (
     LocalSyncWorkError,
     LocalSyncWorkResult,
@@ -32,7 +33,7 @@ def run_local_sync_retrigger_pass(
     snapshot_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
     *,
     branch: str = "main",
 ) -> LocalSyncRetriggerResult:

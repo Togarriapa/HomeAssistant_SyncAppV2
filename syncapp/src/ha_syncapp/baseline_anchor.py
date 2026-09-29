@@ -11,6 +11,12 @@ from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 
+from ha_syncapp.deploy_key_access import (
+    DeployKeyAccessError,
+    DeployKeyAccessProof,
+    open_repo_b_deploy_key_transport,
+    run_bounded_repo_b_git,
+)
 from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, verify_workspace_content
 from ha_syncapp.github_repo import BranchHead
 from ha_syncapp.local_git import GitError, inspect_repository
@@ -88,6 +94,111 @@ def anchor_trusted_baseline(
         _delete_fetch_ref(executable, tree, root)
         with suppress(OSError):
             askpass.unlink(missing_ok=True)
+
+
+def anchor_trusted_baseline_with_deploy_key(
+    workspace: GitWorkspace,
+    remote: BranchHead,
+    proof: DeployKeyAccessProof,
+    key_directory: Path,
+    *,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+) -> str:
+    """Fetch and anchor one exact baseline through a proven protected key."""
+    _validate_remote(remote)
+    try:
+        repository = inspect_repository(workspace)
+        snapshot_id = verify_workspace_content(workspace)
+    except (GitError, WorkspaceError) as exc:
+        raise BaselineAnchorError("isolated Git workspace could not be re-proven") from exc
+    if repository.default_branch != remote.branch:
+        raise BaselineAnchorError("trusted baseline branch does not match local branch")
+    if snapshot_id != workspace.snapshot_id:
+        raise BaselineAnchorError("isolated workspace snapshot identity changed")
+
+    root = workspace.root.resolve(strict=True)
+    tree = workspace.tree_path.resolve(strict=True)
+    executable = str(git_executable)
+    if _branch_exists(executable, tree, root, remote.branch):
+        raise BaselineAnchorError("local branch is already anchored or committed")
+    refspec = f"+refs/heads/{remote.branch}:{_FETCH_REF}"
+    try:
+        with open_repo_b_deploy_key_transport(
+            proof,
+            remote.target,
+            remote.repository_id,
+            key_directory,
+            known_hosts_file=known_hosts_file,
+            work_directory=tree,
+            git_executable=git_executable,
+            ssh_executable=ssh_executable,
+        ) as session:
+            run_bounded_repo_b_git(
+                _deploy_key_fetch_command(
+                    session.git_executable,
+                    session.ssh_command,
+                    remote.target,
+                    refspec,
+                ),
+                cwd=tree,
+                environment=session.environment,
+                pass_fds=(session.private_descriptor,),
+            )
+        fetched = _run_git(
+            executable, tree, root, ("rev-parse", "--verify", f"{_FETCH_REF}^{{commit}}")
+        )
+        if fetched != remote.commit_sha:
+            raise BaselineAnchorError("fetched baseline does not match trusted remote head")
+        verify_workspace_content(workspace)
+        _run_git(
+            executable,
+            tree,
+            root,
+            ("update-ref", f"refs/heads/{remote.branch}", remote.commit_sha),
+        )
+        anchored = _run_git(executable, tree, root, ("rev-parse", "--verify", "HEAD"))
+        if anchored != remote.commit_sha:
+            raise BaselineAnchorError("local branch did not anchor to trusted baseline")
+        if verify_workspace_content(workspace) != workspace.snapshot_id:
+            raise BaselineAnchorError("isolated workspace changed during baseline acquisition")
+        return anchored
+    except DeployKeyAccessError as exc:
+        raise BaselineAnchorError("trusted baseline acquisition failed") from exc
+    except (GitError, WorkspaceError) as exc:
+        raise BaselineAnchorError("trusted baseline acquisition failed") from exc
+    finally:
+        _delete_fetch_ref(executable, tree, root)
+
+
+def _deploy_key_fetch_command(
+    executable: Path,
+    ssh_command: str,
+    target: str,
+    refspec: str,
+) -> tuple[str, ...]:
+    owner, repository = target.split("/", 1)
+    url = f"ssh://git@github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
+    return (
+        str(executable),
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "fetch.fsckObjects=true",
+        "-c",
+        f"core.sshCommand={ssh_command}",
+        "fetch",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--depth=1",
+        url,
+        refspec,
+    )
 
 
 def _validate_remote(remote: BranchHead) -> None:

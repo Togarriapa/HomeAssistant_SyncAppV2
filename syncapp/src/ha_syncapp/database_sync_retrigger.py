@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .database_sync_process import DatabaseSyncProcessError, run_database_sync_process
 from .database_sync_work import DatabaseSyncWorkResult
+from .deploy_key_publication_authority import PublicationCredential
 from .state import StateError, StateStore
 
 
@@ -29,7 +30,7 @@ def run_database_sync_retrigger_pass(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: PublicationCredential,
 ) -> DatabaseSyncRetriggerResult:
     """Recover interrupted work, then delegate one normal database processing attempt."""
     if type(store) is not StateStore:

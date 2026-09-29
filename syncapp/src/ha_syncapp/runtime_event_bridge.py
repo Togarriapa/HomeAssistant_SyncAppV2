@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .runtime_event_mailbox import (
     RuntimeEventMailbox,
     RuntimeEventMailboxDrainResult,
@@ -33,7 +34,7 @@ class RuntimeEventBridgeError(RuntimeError):
 
 
 RuntimeProcessor = Callable[
-    [StateStore, Path, Path, Path, str, str],
+    [StateStore, Path, Path, Path, str, PublicationCredential],
     RuntimeSyncProcessResult,
 ]
 
@@ -56,7 +57,7 @@ class RuntimeEventBridge:
         snapshot_staging_root: Path,
         workspace_root: Path,
         target: str,
-        github_token: str,
+        github_token: PublicationCredential,
         *,
         core_token: str | None = None,
         consumer: RuntimeEventWorkerConsumer | None = None,

@@ -12,6 +12,7 @@ from .database_sync_work import (
     database_sync_work_key,
     execute_claimed_database_sync_work,
 )
+from .deploy_key_publication_authority import PublicationCredential
 from .state import StateError, StateStore
 
 
@@ -33,7 +34,7 @@ def run_database_sync_process(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
 ) -> DatabaseSyncProcessResult:
     """Claim and process at most one database item without recovery semantics."""
     if type(store) is not StateStore:

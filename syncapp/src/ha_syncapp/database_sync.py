@@ -13,6 +13,11 @@ from ha_syncapp.database_snapshot import (
     DatabaseSnapshotError,
     capture_sqlite_snapshot,
 )
+from ha_syncapp.deploy_key_publication_authority import (
+    DeployKeyPublicationAuthority,
+    DeployKeyPublicationAuthorityError,
+    resolve_publication_authority,
+)
 from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, prepare_git_workspace
 from ha_syncapp.github_repo import (
     BranchAbsence,
@@ -39,6 +44,10 @@ _DATABASE_BRANCH = "database"
 
 class DatabaseSyncError(RuntimeError):
     """A Recorder database publication cycle could not complete safely."""
+
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 class DatabaseSyncDisposition(StrEnum):
@@ -72,7 +81,7 @@ def synchronize_database_snapshot(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: str | DeployKeyPublicationAuthority,
 ) -> DatabaseSyncResult:
     """Capture, classify and when authorized publish one Recorder database backup."""
     if type(store) is not StateStore:
@@ -91,11 +100,16 @@ def synchronize_database_snapshot(
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=_DATABASE_BRANCH)
 
-        remote = fetch_optional_trusted_branch_head(
-            target,
-            token,
-            expected_id=repository_id,
-            branch=_DATABASE_BRANCH,
+        authority = resolve_publication_authority(
+            token=token if isinstance(token, str) else None,
+            authority=token if isinstance(token, DeployKeyPublicationAuthority) else None,
+        )
+        remote = (
+            fetch_optional_trusted_branch_head(
+                target, token, expected_id=repository_id, branch=_DATABASE_BRANCH
+            )
+            if isinstance(token, str)
+            else authority.observe(target, repository_id, _DATABASE_BRANCH)
         )
         baseline = store.synchronization_baseline(target, _DATABASE_BRANCH)
         refusal = _classify_refusal(
@@ -110,7 +124,10 @@ def synchronize_database_snapshot(
             return refusal
 
         if isinstance(remote, BranchHead):
-            anchor_trusted_baseline(workspace, remote, token)
+            if isinstance(token, str):
+                anchor_trusted_baseline(workspace, remote, token)
+            else:
+                authority.anchor(workspace, remote)
 
         local_commit_sha = create_snapshot_commit(workspace)
         if local_commit_sha is None:
@@ -130,7 +147,11 @@ def synchronize_database_snapshot(
         if not preflight.may_publish:
             raise DatabaseSyncError("database synchronization lost publication authorization")
         intent = build_publication_intent(workspace, preflight)
-        completed = complete_authorized_publication(store, workspace, intent, token)
+        completed = (
+            complete_authorized_publication(store, workspace, intent, token)
+            if isinstance(token, str)
+            else authority.complete(store, workspace, intent)
+        )
         disposition = (
             DatabaseSyncDisposition.INITIALIZED
             if preflight.disposition is PublicationDisposition.SAFE_TO_INITIALIZE
@@ -158,8 +179,14 @@ def synchronize_database_snapshot(
         PublicationPreflightError,
         PublicationIntentError,
         PublicationWorkflowError,
+        DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise DatabaseSyncError("database synchronization failed closed") from exc
+        raise DatabaseSyncError(
+            "database synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)

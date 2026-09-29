@@ -34,6 +34,10 @@ from .database_startup import (
 )
 from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
 from .deploy_key_access import DeployKeyAccessError, test_repo_b_deploy_key_access
+from .deploy_key_publication_authority import (
+    DeployKeyPublicationAuthority,
+    DeployKeyPublicationAuthorityError,
+)
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
@@ -199,6 +203,7 @@ def _run_startup_local_if_configured(
     config: Config,
     data_dir: Path,
     home_assistant_root: Path = Path("/homeassistant"),
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> LocalStartupResult | None:
     """Bootstrap one normal Local generation only for a trusted configured Repo B."""
     if config.repo_b is None or config.github_token is None:
@@ -213,7 +218,7 @@ def _run_startup_local_if_configured(
             snapshot_root,
             workspace_root,
             config.repo_b,
-            config.github_token,
+            publication_authority or config.github_token,
         )
     except (RetriggerCycleError, OSError) as exc:
         raise LocalStartupError("startup Local synchronization failed closed") from exc
@@ -224,6 +229,7 @@ def _local_change_service_if_configured(
     config: Config,
     data_dir: Path,
     home_assistant_root: Path = Path("/homeassistant"),
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> LocalChangeService | None:
     """Build, but do not start, event-driven Local synchronization after bootstrap."""
     if config.repo_b is None or config.github_token is None:
@@ -240,7 +246,7 @@ def _local_change_service_if_configured(
         snapshot_root,
         workspace_root,
         config.repo_b,
-        config.github_token,
+        publication_authority or config.github_token,
         quiet_seconds=_LOCAL_CHANGE_QUIET_SECONDS,
     )
 
@@ -250,6 +256,7 @@ def _run_startup_database_if_configured(
     config: Config,
     data_dir: Path,
     home_assistant_root: Path = Path("/homeassistant"),
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> DatabaseStartupResult | None:
     """Bootstrap one normal Recorder generation only after trust and explicit selection."""
     if (
@@ -279,7 +286,7 @@ def _run_startup_database_if_configured(
             snapshot_staging_root,
             workspace_root,
             config.repo_b,
-            config.github_token,
+            publication_authority or config.github_token,
         )
     except (RetriggerCycleError, OSError) as exc:
         raise DatabaseStartupError("startup database synchronization failed closed") from exc
@@ -290,6 +297,7 @@ def _database_sync_service_if_configured(
     config: Config,
     data_dir: Path,
     home_assistant_root: Path = Path("/homeassistant"),
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> DatabaseSyncService | None:
     """Build periodic Recorder processing only after the trusted startup generation."""
     if (
@@ -325,6 +333,7 @@ def _database_sync_service_if_configured(
         config.github_token,
         interval_seconds=_DATABASE_SYNC_INTERVAL_SECONDS,
         retention_days=config.recorder_retention_days,
+        publication_credential=publication_authority,
     )
 
 
@@ -332,6 +341,7 @@ def _run_startup_runtime_if_configured(
     store: StateStore,
     config: Config,
     data_dir: Path,
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> RuntimeStartupResult | None:
     """Bootstrap one normal runtime generation only for a trusted configured Repo B."""
     if config.repo_b is None or config.github_token is None:
@@ -347,7 +357,7 @@ def _run_startup_runtime_if_configured(
         runtime_snapshot_root,
         runtime_workspace_root,
         config.repo_b,
-        config.github_token,
+        publication_authority or config.github_token,
         core_token=os.environ.get("SUPERVISOR_TOKEN"),
     )
 
@@ -356,6 +366,7 @@ def _runtime_event_bridge_if_configured(
     store: StateStore,
     config: Config,
     data_dir: Path,
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> RuntimeEventBridge | None:
     """Build, but do not start, normal runtime event processing after trust/bootstrap."""
     if config.repo_b is None or config.github_token is None:
@@ -371,7 +382,7 @@ def _runtime_event_bridge_if_configured(
         runtime_snapshot_root,
         runtime_workspace_root,
         config.repo_b,
-        config.github_token,
+        publication_authority or config.github_token,
         core_token=os.environ.get("SUPERVISOR_TOKEN"),
     )
 
@@ -380,6 +391,7 @@ def _log_sync_service_if_configured(
     store: StateStore,
     config: Config,
     data_dir: Path,
+    publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> LogSyncService | None:
     """Build periodic log collection only for a trusted configured Repo B."""
     if config.repo_b is None or config.github_token is None:
@@ -399,6 +411,7 @@ def _log_sync_service_if_configured(
         config.github_token,
         core_token=os.environ.get("SUPERVISOR_TOKEN"),
         interval_seconds=_LOG_SYNC_INTERVAL_SECONDS,
+        publication_credential=publication_authority,
     )
 
 
@@ -460,12 +473,54 @@ def _candidate_deploy_key_ingress_if_configured(
         ) from exc
 
 
+def _deploy_key_publication_authority_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> DeployKeyPublicationAuthority | None:
+    """Build ordinary non-force SSH publication authority after initialization."""
+    if config.repo_b_publication_transport == "token":
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise LocalStartupError("publication deploy-key configuration is invalid")
+    repository_id = store.repository_id(config.repo_b)
+    if repository_id is None:
+        raise LocalStartupError("publication repository is not trusted")
+    if store.synchronization_baseline(config.repo_b, "main") is None:
+        raise LocalStartupError("publication repository is not initialized")
+    try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        key_directory = protected / "repo-b-deploy-key"
+        access_work_directory = protected / "work" / "deploy-key-publication-access"
+        _ensure_private_work_directory(protected, access_work_directory)
+        proof = test_repo_b_deploy_key_access(
+            config.repo_b,
+            config.github_token,
+            repository_id,
+            key_directory,
+            work_directory=access_work_directory,
+        )
+        return DeployKeyPublicationAuthority(
+            proof,
+            key_directory,
+            access_work_directory,
+        )
+    except (
+        DeployKeyAccessError,
+        DeployKeyPublicationAuthorityError,
+        RetriggerCycleError,
+        OSError,
+    ) as exc:
+        raise LocalStartupError("publication deploy-key authority is unavailable") from exc
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
     data_dir: Path,
     request: RetriggerRequest,
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
+    deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
 ) -> str:
     """Execute one bounded outbound cycle while the service retains state ownership."""
     if config.repo_b is None or config.github_token is None:
@@ -508,6 +563,7 @@ def _handle_retrigger_request(
             config.repo_b,
             config.github_token,
             candidate_deploy_key_ingress=candidate_deploy_key_ingress,
+            deploy_key_publication_authority=deploy_key_publication_authority,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
@@ -539,6 +595,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             else:
                 emit("administrative_retry_rejected", level="warning")
         candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None
+        deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -550,6 +607,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             candidate_deploy_key_ingress = _candidate_deploy_key_ingress_if_configured(
                 store, config, data_dir
             )
+            deploy_key_publication_authority = _deploy_key_publication_authority_if_configured(
+                store, config, data_dir
+            )
         boot = store.start_run()
         local_change_service: LocalChangeService | None = None
         database_sync_service: DatabaseSyncService | None = None
@@ -557,21 +617,79 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         log_sync_service: LogSyncService | None = None
         candidate_detection_service: CandidateDetectionService | None = None
         if not stop.requested:
-            _run_startup_local_if_configured(store, config, data_dir)
-            if not stop.requested:
-                local_change_service = _local_change_service_if_configured(store, config, data_dir)
-            if not stop.requested:
-                _run_startup_database_if_configured(store, config, data_dir)
-            if not stop.requested:
-                database_sync_service = _database_sync_service_if_configured(
-                    store, config, data_dir
+            if deploy_key_publication_authority is None:
+                _run_startup_local_if_configured(store, config, data_dir)
+            else:
+                _run_startup_local_if_configured(
+                    store,
+                    config,
+                    data_dir,
+                    publication_authority=deploy_key_publication_authority,
                 )
             if not stop.requested:
-                _run_startup_runtime_if_configured(store, config, data_dir)
+                if deploy_key_publication_authority is None:
+                    local_change_service = _local_change_service_if_configured(
+                        store, config, data_dir
+                    )
+                else:
+                    local_change_service = _local_change_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
             if not stop.requested:
-                runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
+                if deploy_key_publication_authority is None:
+                    _run_startup_database_if_configured(store, config, data_dir)
+                else:
+                    _run_startup_database_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
             if not stop.requested:
-                log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
+                if deploy_key_publication_authority is None:
+                    database_sync_service = _database_sync_service_if_configured(
+                        store, config, data_dir
+                    )
+                else:
+                    database_sync_service = _database_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
+            if not stop.requested:
+                if deploy_key_publication_authority is None:
+                    _run_startup_runtime_if_configured(store, config, data_dir)
+                else:
+                    _run_startup_runtime_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
+            if not stop.requested:
+                if deploy_key_publication_authority is None:
+                    runtime_bridge = _runtime_event_bridge_if_configured(store, config, data_dir)
+                else:
+                    runtime_bridge = _runtime_event_bridge_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
+            if not stop.requested:
+                if deploy_key_publication_authority is None:
+                    log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
+                else:
+                    log_sync_service = _log_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
             if not stop.requested:
                 if candidate_deploy_key_ingress is None:
                     candidate_detection_service = _candidate_detection_service_if_configured(
@@ -631,6 +749,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                                 data_dir,
                                 request,
                                 candidate_deploy_key_ingress,
+                                deploy_key_publication_authority,
                             ),
                             timeout_seconds=0.25,
                         )

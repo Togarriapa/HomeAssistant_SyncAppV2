@@ -192,6 +192,31 @@ def test_guarded_database_failure_uses_retry_without_leaking_token(
     assert secret not in repr(result)
 
 
+def test_deterministic_database_authority_failure_blocks_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    database = _database(tmp_path)
+    database_sync_work.enqueue_database_sync_work(store, TARGET, database)
+    item = database_sync_work.claim_database_sync_work(store)
+    assert item is not None
+
+    def fail(*args: object, **kwargs: object) -> DatabaseSyncResult:
+        raise DatabaseSyncError("sanitized", transient=False)
+
+    monkeypatch.setattr(database_sync_work, "synchronize_database_snapshot", fail)
+    try:
+        result = _execute(store, item, database, tmp_path)
+        assert database_sync_work.claim_database_sync_work(store) is None
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.synchronization is None
+    assert result.work.status == "blocked"
+    assert result.work.next_attempt_at is None
+
+
 def test_claim_identity_must_match_explicit_database_path(tmp_path: Path) -> None:
     store = _store(tmp_path)
     database = _database(tmp_path)

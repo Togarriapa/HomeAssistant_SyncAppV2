@@ -8,6 +8,11 @@ from enum import StrEnum
 from pathlib import Path
 
 from ha_syncapp.baseline_anchor import BaselineAnchorError, anchor_trusted_baseline
+from ha_syncapp.deploy_key_publication_authority import (
+    DeployKeyPublicationAuthority,
+    DeployKeyPublicationAuthorityError,
+    resolve_publication_authority,
+)
 from ha_syncapp.git_workspace import GitWorkspace, WorkspaceError, prepare_git_workspace
 from ha_syncapp.github_repo import (
     BranchAbsence,
@@ -35,6 +40,10 @@ _LOGS_BRANCH = "logs"
 
 class LogSyncError(RuntimeError):
     """A log artifact publication cycle could not complete safely."""
+
+    def __init__(self, message: str, *, transient: bool = True) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 class LogSyncDisposition(StrEnum):
@@ -68,7 +77,7 @@ def synchronize_log_artifact(
     snapshot_staging_root: Path,
     workspace_root: Path,
     target: str,
-    token: str,
+    token: str | DeployKeyPublicationAuthority,
 ) -> LogSyncResult:
     """Classify and, when authorized, publish one already-staged log artifact."""
     if type(store) is not StateStore:
@@ -86,11 +95,16 @@ def synchronize_log_artifact(
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=_LOGS_BRANCH)
 
-        remote = fetch_optional_trusted_branch_head(
-            target,
-            token,
-            expected_id=repository_id,
-            branch=_LOGS_BRANCH,
+        authority = resolve_publication_authority(
+            token=token if isinstance(token, str) else None,
+            authority=token if isinstance(token, DeployKeyPublicationAuthority) else None,
+        )
+        remote = (
+            fetch_optional_trusted_branch_head(
+                target, token, expected_id=repository_id, branch=_LOGS_BRANCH
+            )
+            if isinstance(token, str)
+            else authority.observe(target, repository_id, _LOGS_BRANCH)
         )
         baseline = store.synchronization_baseline(target, _LOGS_BRANCH)
         refusal = _classify_refusal(
@@ -105,7 +119,10 @@ def synchronize_log_artifact(
             return refusal
 
         if isinstance(remote, BranchHead):
-            anchor_trusted_baseline(workspace, remote, token)
+            if isinstance(token, str):
+                anchor_trusted_baseline(workspace, remote, token)
+            else:
+                authority.anchor(workspace, remote)
 
         local_commit_sha = create_snapshot_commit(workspace)
         if local_commit_sha is None:
@@ -125,7 +142,11 @@ def synchronize_log_artifact(
         if not preflight.may_publish:
             raise LogSyncError("logs synchronization lost publication authorization")
         intent = build_publication_intent(workspace, preflight)
-        completed = complete_authorized_publication(store, workspace, intent, token)
+        completed = (
+            complete_authorized_publication(store, workspace, intent, token)
+            if isinstance(token, str)
+            else authority.complete(store, workspace, intent)
+        )
         disposition = (
             LogSyncDisposition.INITIALIZED
             if preflight.disposition is PublicationDisposition.SAFE_TO_INITIALIZE
@@ -153,8 +174,14 @@ def synchronize_log_artifact(
         PublicationPreflightError,
         PublicationIntentError,
         PublicationWorkflowError,
+        DeployKeyPublicationAuthorityError,
     ) as exc:
-        raise LogSyncError("logs synchronization failed closed") from exc
+        raise LogSyncError(
+            "logs synchronization failed closed",
+            transient=(
+                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+            ),
+        ) from exc
     finally:
         if workspace is not None:
             shutil.rmtree(workspace.root, ignore_errors=True)

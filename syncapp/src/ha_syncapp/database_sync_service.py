@@ -18,6 +18,7 @@ from .database_sync_process import (
     run_database_sync_process,
 )
 from .database_sync_schedule import DatabaseSyncScheduleError, schedule_database_sync_generation
+from .deploy_key_publication_authority import PublicationCredential
 from .state import StateStore
 
 
@@ -49,6 +50,7 @@ class DatabaseSyncService:
         *,
         interval_seconds: float,
         retention_days: int | None = None,
+        publication_credential: PublicationCredential | None = None,
     ) -> None:
         if type(store) is not StateStore:
             raise DatabaseSyncServiceError("database service state store is invalid")
@@ -66,6 +68,7 @@ class DatabaseSyncService:
         self._workspace_root = workspace_root
         self._target = target
         self._github_token = github_token
+        self._publication_credential = publication_credential or github_token
         self._interval_seconds = float(interval_seconds)
         if retention_days is not None and (
             type(retention_days) is not int or not 1 <= retention_days <= 365
@@ -108,7 +111,7 @@ class DatabaseSyncService:
                 self._snapshot_staging_root,
                 self._workspace_root,
                 self._target,
-                self._github_token,
+                self._publication_credential,
             )
             retention = (
                 None

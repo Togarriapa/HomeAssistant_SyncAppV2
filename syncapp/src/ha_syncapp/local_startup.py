@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .deploy_key_publication_authority import PublicationCredential
 from .local_sync_process import (
     LocalSyncProcessError,
     LocalSyncProcessResult,
@@ -32,7 +33,7 @@ def run_startup_local_sync(
     snapshot_root: Path,
     workspace_root: Path,
     target: str,
-    github_token: str,
+    github_token: PublicationCredential,
     *,
     branch: str = "main",
 ) -> LocalStartupResult:
