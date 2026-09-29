@@ -41,6 +41,12 @@ merged, overwritten, or deleted. Promotion performs no Home Assistant,
 Supervisor, backup, Apply, restart, observation, or rollback mutation and does
 not erase rejected-candidate history.
 
+A proof-bound deploy-key alternative now exists for later runtime adoption. It
+reconciles the same safe states through fresh SSH reference proofs and publishes
+both missing refs in one atomic, non-force Git push. It is intentionally not
+selected by the production lane yet; see
+[Repo B deploy-key promotion transport](deploy-key-promotion-transport.md).
+
 ## Production recovery
 
 Retrigger claims only exact `candidate_promote` work created atomically by a
