@@ -5,15 +5,32 @@ from ha_syncapp import __version__
 from ha_syncapp.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
+CORE_VERSION = "2026.9.4"
+CORE_IMAGE_INDEX = "3e6710a7ab2a61311d9d899b719f6c3657791c63e8f4942cec4ebc42401d6b76"
 
 
 def test_core_validator_base_is_versioned_and_digest_pinned() -> None:
     dockerfile = (ROOT / "syncapp/Dockerfile").read_text()
     bases = [line for line in dockerfile.splitlines() if line.startswith("FROM ")]
     assert bases == [
-        "FROM ghcr.io/home-assistant/home-assistant:2026.9.3@sha256:"
-        "d8922685169707fd91e8b9729902d975f06157d005e422874d201e0261dda196"
+        f"FROM ghcr.io/home-assistant/home-assistant:{CORE_VERSION}@sha256:{CORE_IMAGE_INDEX}"
     ]
+
+
+def test_core_validator_version_bindings_and_documentation_are_consistent() -> None:
+    semantics = (ROOT / "syncapp/src/ha_syncapp/candidate_semantics.py").read_text()
+    fixture_probe = (ROOT / "scripts/core_fixture_probe.py").read_text()
+    validation_docs = (ROOT / "docs/candidate-validation.md").read_text()
+    development_docs = (ROOT / "docs/development.md").read_text()
+
+    assert f'BUNDLED_CORE_VERSION = "{CORE_VERSION}"' in semantics
+    assert f'Path(sys.argv[1]), "{CORE_VERSION}"' in fixture_probe
+    assert f"Core **{CORE_VERSION}** runtime" in validation_docs
+    assert f"core/blob/{CORE_VERSION}/homeassistant/scripts/check_config.py" in validation_docs
+    assert f"Core `{CORE_VERSION}` tag" in development_docs
+    assert CORE_IMAGE_INDEX in development_docs
+    assert "e47c978e1b801466e7f62f612fd552bc3a228e077b31a3f1c22c05cf63d754da" in development_docs
+    assert "35e6df56a9ce632c9b15df869ac73a17af6cdd2cfb99830527ffac9cc5218ba2" in development_docs
 
 
 def test_packaging_exposes_only_required_read_only_home_assistant_access() -> None:
