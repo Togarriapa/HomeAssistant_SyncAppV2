@@ -10,6 +10,21 @@ staging, copies that verified snapshot again into a separate mutable Git
 workspace, and only then initializes or runs Git. Git is never initialized or
 executed in `/homeassistant`.
 
+## Current integration status
+
+The state-owning service creates `LocalChangeService` only after Repo B identity
+has been verified and the required private work roots are available. Service
+startup closes the initial watch-installation race, while normalized inotify
+signals pass through a bounded mailbox and debounce boundary. An eligible
+generation is then claimed and executed through `run_local_sync_process()` on
+the state-owner thread.
+
+The protected Retrigger IPC path invokes `run_local_sync_retrigger_pass()` for
+interruption recovery and at most one eligible retry. It shares the durable
+work identity and execution boundary without turning Retrigger into the normal
+event scheduler. Deterministically blocked Local work therefore remains blocked
+until the separately authorized administrative retry boundary is used.
+
 ## Safety sequence
 
 For each cycle the coordinator:
@@ -55,10 +70,9 @@ baseline, contains no Git content change to publish. No push occurs.
 
 ## Deliberate boundaries
 
-This coordinator is not yet invoked by the long-running service. Event-driven
-change detection, debounce scheduling and Retrigger Work Cron Job integration are
-separate increments. Remote `candidate` processing is also separate and remains
-subject to integrity/dependency/risk validation, Home Assistant validation,
-pre-deployment backup, apply, reload/restart, observation and automatic rollback.
-Nothing in this local synchronization cycle grants write access to the live Home
-Assistant configuration tree.
+This coordinator grants no candidate-deployment authority. Remote `candidate`
+processing remains a separate evidence-bound pipeline subject to
+integrity/dependency/risk validation, Home Assistant validation, pre-deployment
+backup, apply, reload/restart, observation and automatic rollback. Nothing in
+this local synchronization cycle grants write access to the live Home Assistant
+configuration tree.

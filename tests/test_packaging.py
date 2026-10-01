@@ -296,6 +296,7 @@ def test_current_architecture_documentation_contract() -> None:
 def test_specialist_runtime_documents_describe_live_service_integration() -> None:
     local_cycle = (ROOT / "docs/local-sync-cycle.md").read_text()
     routine = (ROOT / "docs/routine-work-scheduling.md").read_text()
+    normalized_routine = " ".join(routine.split())
 
     for required in (
         "## Current integration status",
@@ -317,7 +318,7 @@ def test_specialist_runtime_documents_describe_live_service_integration() -> Non
         "`RuntimeEventMailbox`",
         "state-owning service loop",
     ):
-        assert required in routine
+        assert required in normalized_routine
 
     for stale_claim in (
         "does not yet attach asynchronous event consumption",
@@ -325,7 +326,7 @@ def test_specialist_runtime_documents_describe_live_service_integration() -> Non
         "A future transport owner",
         "Those ownership decisions remain a separate service-integration gate.",
     ):
-        assert stale_claim not in routine
+        assert stale_claim not in normalized_routine
 
 
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
