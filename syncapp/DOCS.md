@@ -51,6 +51,8 @@ that writes from the app are denied.
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
 | `administrative_retry_work_kind` | unset | Exact durable work kind |
 | `administrative_retry_work_key` | unset | Exact durable work key; masked by Supervisor |
+| `repo_b_admin_action` | unset | `generate`, `test`, `rotate_prepare`, `rotate_verify`, `rotate_activate`, `initialize` |
+| `repo_b_admin_request_id` | unset | Canonical lowercase UUIDv4 for the selected action |
 
 `status_interval_seconds` controls status logging. `retrigger_interval_seconds`
 controls the separate recovery dispatcher and has no disable sentinel. If Repo B
@@ -90,11 +92,21 @@ digests and raw options and grants no retry authority.
 
 ## Repo B deploy-key foundation
 
-The protected Ed25519 generation boundary is implemented but generation and GitHub
-enrollment are not automatic App-startup operations. It returns only the
+The protected Ed25519 generation boundary is exposed through explicit one-shot App
+options; GitHub enrollment remains deliberately manual. It returns only the
 public key, SHA-256 fingerprint, algorithm, and generation UUID; private key bytes
 remain in an app-owned `0700` directory as a `0600` file. Existing generations are
 validated and replayed without running `ssh-keygen` again.
+
+Configure `repo_b_admin_action` and `repo_b_admin_request_id` together. Generate a new UUIDv4 for every new action; retaining the same pair replays its durable receipt
+without repeating a completed or deterministically blocked action. Transient access
+failures use bounded exponential backoff and stop after eight attempts. Actions are
+processed only after the configured private repository's numeric identity is pinned.
+Logs expose fixed outcomes plus enrollment-safe public metadata when manual GitHub
+enrollment is required; they never expose the token, private key, repository refs,
+source paths, or commit identities. See
+[Deploy-key operator controls](../docs/deploy-key-operator-controls.md) for the exact
+sequence and recovery rules.
 
 Do not treat generation as proof that GitHub accepted the key. The separate
 read-only access-test boundary re-proves the private Repo B numeric identity with
@@ -125,12 +137,13 @@ to its compatibility token transport. See
 [Repo B deploy-key promotion transport](../docs/deploy-key-promotion-transport.md)
 for atomic reconciliation, retry and cleanup boundaries.
 
-An explicit [Repo B initialization executor](../docs/repo-b-initialization-execution.md)
-now consumes one journaled empty-repository authority, prepares a deterministic
+The `initialize` operator action invokes the explicit
+[Repo B initialization executor](../docs/repo-b-initialization-execution.md), which
+consumes one journaled empty-repository authority and prepares a deterministic
 initial `main` commit, publishes it through the descriptor-only non-force deploy-key
-transport, and reconciles interruption by exact remote commit evidence. It is not
-selected by routine startup, synchronization or Retrigger yet; broader deploy-key
-transport adoption remains a separate reviewed increment.
+transport, and reconciles interruption by exact remote commit evidence. Routine
+startup, synchronization and Retrigger cannot create this authority; they may only
+observe or recover work that the explicit request safely established.
 
 Candidate ingress can now be explicitly switched to the verified deploy key with
 `repo_b_candidate_transport: deploy_key`. Activation requires the trusted Repo B
@@ -223,6 +236,7 @@ start.
 | `state_unavailable` | Stop the app, preserve `/data/syncapp`, and inspect ownership, permissions, free space and database/schema validity. |
 | `retrigger_schedule_failed` | Inspect the sanitized scheduler reason and service availability; durable work remains preserved. |
 | `administrative_retry_failed` | Preserve `/data/syncapp`; the request or durable receipt failed closed and no retry authority was granted. |
+| `deploy_key_administration_failed` | Preserve `/data/syncapp`; verify the action UUID, protected key state and pinned Repo B identity before retrying. |
 | `internal_error` | Preserve state and report the app version and sanitized event. |
 
 Exception text and raw options are deliberately omitted from logs. Startup

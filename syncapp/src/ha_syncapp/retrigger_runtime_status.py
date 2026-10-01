@@ -45,6 +45,7 @@ from .runtime_inventory import RuntimeInventoryInput
 from .state import (
     MAX_RECOVERY_WORK_EVIDENCE_ROWS,
     AdministrativeRetryRuntimeEvidence,
+    DeployKeyAdministrativeRuntimeEvidence,
     DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
     RepoBInitializationExecutionRuntimeEvidence,
@@ -92,6 +93,7 @@ def collect_retrigger_runtime_inventory(
     try:
         evidence = store.recovery_work_evidence()
         administrative_retry_evidence = store.administrative_retry_runtime_evidence()
+        deploy_key_administrative_evidence = store.deploy_key_administrative_runtime_evidence()
         initialization_evidence = store.repo_b_initialization_runtime_evidence()
         initialization_execution_evidence = store.repo_b_initialization_execution_runtime_evidence()
         rollback_evidence = store.deployment_rollback_runtime_evidence()
@@ -117,6 +119,12 @@ def collect_retrigger_runtime_inventory(
     recovery["administrative_retry_requests"] = render_administrative_retry_runtime_status(
         administrative_retry_evidence,
         reference_time=reference_time,
+    )
+    recovery["deploy_key_administrative_requests"] = (
+        render_deploy_key_administrative_runtime_status(
+            deploy_key_administrative_evidence,
+            reference_time=reference_time,
+        )
     )
     recovery["repo_b_initialization"] = render_repo_b_initialization_runtime_status(
         initialization_evidence,
@@ -196,6 +204,82 @@ def render_administrative_retry_runtime_status(
     return {
         "total": total,
         "outcomes": outcomes,
+        "latest_processed_at": None if latest is None else latest.isoformat(),
+    }
+
+
+def render_deploy_key_administrative_runtime_status(
+    evidence: Iterable[DeployKeyAdministrativeRuntimeEvidence],
+    *,
+    reference_time: datetime,
+) -> dict[str, object]:
+    """Aggregate deploy-key actions without request, repository or key identity."""
+
+    reference = _utc(reference_time, "deploy-key administrative reference time is invalid")
+    action_names = (
+        "generate",
+        "initialize",
+        "rotate_activate",
+        "rotate_prepare",
+        "rotate_verify",
+        "test",
+    )
+    actions = {action: 0 for action in action_names}
+    statuses = {status: 0 for status in ("blocked", "completed", "retry")}
+    latest: datetime | None = None
+    next_attempt: datetime | None = None
+    attempts_total = 0
+    attempts_maximum = 0
+    total = 0
+    for row in evidence:
+        if total >= MAX_RECOVERY_EVIDENCE_ROWS:
+            raise RetriggerRuntimeStatusError(
+                "deploy-key administrative runtime evidence exceeds the limit"
+            )
+        if (
+            type(row) is not DeployKeyAdministrativeRuntimeEvidence
+            or row.action not in actions
+            or row.status not in statuses
+            or type(row.outcome) is not str
+            or not row.outcome
+            or type(row.attempts) is not int
+            or not 1 <= row.attempts <= 8
+        ):
+            raise RetriggerRuntimeStatusError(
+                "deploy-key administrative runtime evidence is invalid"
+            )
+        processed = _utc(
+            row.processed_at,
+            "deploy-key administrative runtime evidence is invalid",
+        )
+        scheduled = (
+            None
+            if row.next_attempt_at is None
+            else _utc(
+                row.next_attempt_at,
+                "deploy-key administrative runtime evidence is invalid",
+            )
+        )
+        if processed > reference or (row.status == "retry") != (scheduled is not None):
+            raise RetriggerRuntimeStatusError(
+                "deploy-key administrative runtime evidence is invalid"
+            )
+        total += 1
+        actions[row.action] += 1
+        statuses[row.status] += 1
+        attempts_total += row.attempts
+        attempts_maximum = max(attempts_maximum, row.attempts)
+        latest = processed if latest is None or processed > latest else latest
+        if scheduled is not None:
+            next_attempt = (
+                scheduled if next_attempt is None or scheduled < next_attempt else next_attempt
+            )
+    return {
+        "total": total,
+        "actions": actions,
+        "statuses": statuses,
+        "attempts": {"maximum": attempts_maximum, "total": attempts_total},
+        "next_attempt_at": None if next_attempt is None else next_attempt.isoformat(),
         "latest_processed_at": None if latest is None else latest.isoformat(),
     }
 

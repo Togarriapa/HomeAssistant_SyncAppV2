@@ -460,8 +460,8 @@ def test_schema_36_migrates_execution_state_without_losing_authority(tmp_path: P
         store._connection.execute("PRAGMA user_version = 36")
 
     with StateStore(tmp_path) as migrated:
-        assert SCHEMA_VERSION == 37
-        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (37,)
+        assert SCHEMA_VERSION == 38
+        assert migrated._connection.execute("PRAGMA user_version").fetchone() == (38,)
         assert migrated.repository_id(TARGET) == REPOSITORY_ID
         assert load_repo_b_initialization_execution(migrated, REQUEST_ID) is None
 

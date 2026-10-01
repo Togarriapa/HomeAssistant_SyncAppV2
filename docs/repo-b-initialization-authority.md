@@ -49,8 +49,8 @@ another repository, key generation or observation fails closed.
 `discover_authorized_repo_b_initializations()` returns at most sixteen
 integrity-checked authorized records in deterministic order. This is the bounded
 handoff for the explicit [initialization executor](repo-b-initialization-execution.md)
-and a later Retrigger lane. The executor exists but is not automatically selected
-by startup, routine synchronization or Retrigger.
+and the explicit operator-controlled initialization executor. Routine
+synchronization and Retrigger cannot create this authority.
 
 Runtime inventory exposes only aggregate initialization phase counts, fixed block
 reason counts and the latest recorded timestamp. The runtime query never selects
@@ -58,8 +58,8 @@ request UUIDs, repository targets or IDs, key fingerprints, generation UUIDs,
 observation digests or record digests. Malformed, oversized or future-dated
 runtime evidence fails closed.
 
-The current production token-backed synchronization and promotion selection is
-unchanged. A later transport-adoption task must select the executor
-without bypassing validation, backup, Apply observation, promotion, rollback,
-locking, idempotency or controlled retry/backoff safeguards. Missing authority
-must never cause implicit initialization or silent transport fallback.
+Transport selection remains independent. The `initialize` operator action may
+select the executor only after a fresh, exact empty-reference observation; it does
+not bypass validation, backup, Apply observation, promotion, rollback, locking,
+idempotency or controlled retry/backoff safeguards. Missing authority must never
+cause implicit initialization or silent transport fallback.

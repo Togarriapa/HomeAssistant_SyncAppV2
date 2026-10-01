@@ -108,6 +108,12 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert manifest["schema"]["administrative_retry_request_id"] == "str?"
     assert manifest["schema"]["administrative_retry_work_kind"] == "str?"
     assert manifest["schema"]["administrative_retry_work_key"] == "password?"
+    assert "repo_b_admin_action" not in manifest["options"]
+    assert "repo_b_admin_request_id" not in manifest["options"]
+    assert manifest["schema"]["repo_b_admin_action"] == (
+        "list(generate|test|rotate_prepare|rotate_verify|rotate_activate|initialize)?"
+    )
+    assert manifest["schema"]["repo_b_admin_request_id"] == "str?"
 
     translations = yaml.safe_load((ROOT / "syncapp/translations/en.yaml").read_text())
     assert "retrigger_interval_seconds" in translations["configuration"]
@@ -115,8 +121,20 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "administrative_retry_request_id" in translations["configuration"]
     assert "administrative_retry_work_kind" in translations["configuration"]
     assert "administrative_retry_work_key" in translations["configuration"]
+    assert "repo_b_admin_action" in translations["configuration"]
+    assert "repo_b_admin_request_id" in translations["configuration"]
+    operator_control_docs = (ROOT / "docs/deploy-key-operator-controls.md").read_text()
+    assert "generate → manually enroll → test" in operator_control_docs
+    assert (
+        "rotate_prepare → manually enroll → rotate_verify → rotate_activate"
+        in operator_control_docs
+    )
+    assert "never enrolls or removes a GitHub deploy key" in operator_control_docs
+    assert "does not bypass validation, backup, observation, or rollback" in operator_control_docs
 
     operator_docs = (ROOT / "syncapp/DOCS.md").read_text()
+    assert "`repo_b_admin_action`" in operator_docs
+    assert "Generate a new UUIDv4 for every new action" in operator_docs
     assert "`retrigger_interval_seconds` | `300` | Integer from 30 through 3600" in operator_docs
     assert "`recorder_retention_days` | `7` | Integer from 1 through 365" in operator_docs
     assert "`administrative_retry_request_id`" in operator_docs
@@ -131,7 +149,7 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
     assert "Strict host-key checking is mandatory" in access_docs
     assert "proof grants no mutation or deployment authority" in access_docs
     rotation_docs = (ROOT / "docs/deploy-key-rotation.md").read_text()
-    assert "Rotation is not connected to startup or Retrigger" in rotation_docs
+    assert "Retrigger and periodic services never start or advance it" in rotation_docs
     assert "does **not** establish write permission" in rotation_docs
     assert "previous generation is retained" in rotation_docs
     candidate_fetch_docs = (ROOT / "docs/deploy-key-candidate-fetch.md").read_text()

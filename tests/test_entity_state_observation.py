@@ -266,7 +266,7 @@ def test_schema_18_migrates_to_19(tmp_path, monkeypatch):
     from ha_syncapp.state import StateStore
 
     with StateStore(root) as reopened:
-        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 37
+        assert reopened._connection.execute("PRAGMA user_version").fetchone()[0] == 38
         assert reopened._connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'entity_state_observation'"
         ).fetchone() == ("entity_state_observation",)

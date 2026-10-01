@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp.administrative_retry_request import AdministrativeRetryRequest
-from ha_syncapp.config import Config, ConfigError, load_config
+from ha_syncapp.config import Config, ConfigError, DeployKeyAdministrativeRequest, load_config
 
 REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000"
 
@@ -46,6 +46,8 @@ def test_explicit_options(tmp_path: Path) -> None:
                 "administrative_retry_request_id": REQUEST_ID,
                 "administrative_retry_work_kind": "candidate",
                 "administrative_retry_work_key": "blocked-candidate-sha",
+                "repo_b_admin_action": "generate",
+                "repo_b_admin_request_id": REQUEST_ID,
             },
         )
     )
@@ -65,6 +67,10 @@ def test_explicit_options(tmp_path: Path) -> None:
         REQUEST_ID,
         "candidate",
         "blocked-candidate-sha",
+    )
+    assert config.deploy_key_administrative_request == DeployKeyAdministrativeRequest(
+        REQUEST_ID,
+        "generate",
     )
     assert "blocked-candidate-sha" not in repr(config)
 
@@ -144,6 +150,24 @@ def test_explicit_options(tmp_path: Path) -> None:
         {"recorder_retention_days": -1},
         {"recorder_retention_days": 366},
         {"administrative_retry_request_id": REQUEST_ID},
+        {"repo_b_admin_action": "generate"},
+        {"repo_b_admin_request_id": REQUEST_ID},
+        {
+            "repo_b": "Owner/Home",
+            "github_token": "secret-sentinel",
+            "repo_b_admin_action": "invalid",
+            "repo_b_admin_request_id": REQUEST_ID,
+        },
+        {
+            "repo_b": "Owner/Home",
+            "github_token": "secret-sentinel",
+            "repo_b_admin_action": "generate",
+            "repo_b_admin_request_id": "123E4567-E89B-42D3-A456-426614174000",
+        },
+        {
+            "repo_b_admin_action": "generate",
+            "repo_b_admin_request_id": REQUEST_ID,
+        },
         {
             "administrative_retry_request_id": REQUEST_ID,
             "administrative_retry_work_kind": "candidate",

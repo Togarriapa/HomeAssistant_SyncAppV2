@@ -34,6 +34,11 @@ from .database_startup import (
 )
 from .database_sync_service import DatabaseSyncService, DatabaseSyncServiceError
 from .deploy_key_access import DeployKeyAccessError, test_repo_b_deploy_key_access
+from .deploy_key_administration import (
+    DeployKeyAdministrationError,
+    DeployKeyAdministrativeResult,
+    apply_deploy_key_administrative_request,
+)
 from .deploy_key_promotion_authority import (
     DeployKeyPromotionAuthority,
     DeployKeyPromotionAuthorityError,
@@ -659,6 +664,84 @@ def _deploy_key_retention_authority_if_configured(
         raise RetriggerCycleError("retention deploy-key authority is unavailable") from exc
 
 
+def _run_deploy_key_administration_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    repository_id: int,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> DeployKeyAdministrativeResult | None:
+    """Apply one explicit lifecycle action after Repo B identity is pinned."""
+
+    request = config.deploy_key_administrative_request
+    if request is None:
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise DeployKeyAdministrationError("deploy-key administration is not configured")
+    try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        work = protected / "work"
+        access = work / "deploy-key-administration-access"
+        snapshots = work / "repo-b-initialization-snapshots"
+        workspaces = work / "repo-b-initialization-workspaces"
+        for directory in (access, snapshots, workspaces):
+            _ensure_private_work_directory(protected, directory)
+        result = apply_deploy_key_administrative_request(
+            store,
+            request,
+            target=config.repo_b,
+            repository_id=repository_id,
+            github_token=config.github_token,
+            key_directory=protected / "repo-b-deploy-key",
+            work_directory=access,
+            source=home_assistant_root,
+            snapshot_root=snapshots,
+            workspace_root=workspaces,
+        )
+    except (RetriggerCycleError, OSError) as exc:
+        raise DeployKeyAdministrationError(
+            "deploy-key administrative work roots are unavailable"
+        ) from exc
+
+    if result.replayed:
+        emit(
+            "repo_b_admin_skipped",
+            action=request.action,
+            outcome=result.outcome,
+        )
+    elif result.outcome in {"blocked", "retry"}:
+        emit(
+            "repo_b_admin_deferred",
+            level="warning",
+            action=request.action,
+            outcome=result.outcome,
+        )
+    elif result.public_key is not None:
+        emit(
+            "repo_b_admin_completed",
+            action=request.action,
+            outcome=result.outcome,
+            public_key=result.public_key,
+            fingerprint=result.fingerprint,
+            generation_id=result.generation_id,
+        )
+    elif result.fingerprint is not None:
+        emit(
+            "repo_b_admin_completed",
+            action=request.action,
+            outcome=result.outcome,
+            fingerprint=result.fingerprint,
+            generation_id=result.generation_id,
+        )
+    else:
+        emit(
+            "repo_b_admin_completed",
+            action=request.action,
+            outcome=result.outcome,
+        )
+    return result
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -758,6 +841,12 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 expected_id=expected_id,
             )
             store.bind_repository(config.repo_b, identity.repository_id)
+            _run_deploy_key_administration_if_configured(
+                store,
+                config,
+                data_dir,
+                identity.repository_id,
+            )
             candidate_deploy_key_ingress = _candidate_deploy_key_ingress_if_configured(
                 store, config, data_dir
             )
@@ -1112,6 +1201,9 @@ def main() -> int:
     except AdministrativeRetryRequestError:
         emit("service_failed", level="error", reason="administrative_retry_failed")
         return 14
+    except DeployKeyAdministrationError:
+        emit("service_failed", level="error", reason="deploy_key_administration_failed")
+        return 15
     except Exception:
         emit("service_failed", level="error", reason="internal_error")
         return 1

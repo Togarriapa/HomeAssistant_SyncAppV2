@@ -48,3 +48,5 @@ schema:
   administrative_retry_request_id: str?
   administrative_retry_work_kind: str?
   administrative_retry_work_key: password?
+  repo_b_admin_action: list(generate|test|rotate_prepare|rotate_verify|rotate_activate|initialize)?
+  repo_b_admin_request_id: str?
