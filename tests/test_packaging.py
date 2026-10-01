@@ -184,6 +184,64 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     assert "websockets" not in (ROOT / "requirements-dev.txt").read_text()
 
 
+def test_consolidated_deploy_key_operator_runbook_contract() -> None:
+    operator_docs = (ROOT / "syncapp/DOCS.md").read_text()
+    runbook_path = ROOT / "docs/repo-b-deploy-key-operations.md"
+    assert runbook_path.is_file()
+    runbook = runbook_path.read_text()
+
+    assert "[Repo B deploy-key operations]" in operator_docs
+    for option in (
+        "repo_b_candidate_transport",
+        "repo_b_publication_transport",
+        "repo_b_promotion_transport",
+        "repo_b_rollback_transport",
+        "repo_b_retention_transport",
+    ):
+        assert f"`{option}`" in runbook
+
+    required_sections = (
+        "## Prerequisites and authority boundaries",
+        "## First enrollment and initialization",
+        "## Staged transport rollout",
+        "## Verification",
+        "## Rotation",
+        "## Failure and recovery matrix",
+        "## Compatibility rollback",
+        "## Key removal",
+    )
+    for section in required_sections:
+        assert section in runbook
+
+    normalized = " ".join(runbook.split())
+    for boundary in (
+        "GitHub REST identity verification",
+        "Settings → Deploy keys",
+        "Allow write access",
+        "never delete the only working credential",
+        "does not bypass candidate validation",
+        "does not bypass backup",
+        "does not bypass deployment observation",
+        "does not bypass rollback",
+        "Retrigger remains enabled",
+        "explicit administrative retry",
+    ):
+        assert boundary in normalized
+
+    for specialist in (
+        "deploy-key-generation.md",
+        "deploy-key-access-test.md",
+        "deploy-key-rotation.md",
+        "repo-b-initialization-execution.md",
+        "deploy-key-candidate-ingress-adoption.md",
+        "deploy-key-snapshot-publication-adoption.md",
+        "deploy-key-promotion-adoption.md",
+        "deploy-key-rollback-adoption.md",
+        "deploy-key-retention-adoption.md",
+    ):
+        assert specialist in runbook
+
+
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
