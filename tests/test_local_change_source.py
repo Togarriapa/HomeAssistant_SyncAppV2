@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from ha_syncapp.main_routing import build_main_path_router
 from ha_syncapp.local_change_source import (
     LocalChangeSourceError,
     observe_local_change_source,
@@ -52,6 +53,25 @@ def test_observation_tracks_nested_main_routed_files(tmp_path: Path) -> None:
     observed = observe_local_change_source(source)
 
     assert tuple(entry.path for entry in observed.entries) == (".storage/core.entity_registry",)
+
+
+def test_observation_ignores_configured_recorder_family(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    recorder = source / "storage" / "recorder.db"
+    recorder.parent.mkdir(parents=True)
+    (source / "configuration.yaml").write_text("homeassistant:\n", encoding="utf-8")
+    recorder.write_bytes(b"first")
+    wal = recorder.with_name("recorder.db-wal")
+    wal.write_bytes(b"first")
+    include = build_main_path_router(source, recorder)
+
+    before = observe_local_change_source(source, include_path=include)
+    recorder.write_bytes(b"second-generation")
+    wal.write_bytes(b"second-generation")
+    after = observe_local_change_source(source, include_path=include)
+
+    assert before == after
+    assert tuple(entry.path for entry in after.entries) == ("configuration.yaml",)
 
 
 def test_observation_rejects_source_symlink(tmp_path: Path) -> None:
