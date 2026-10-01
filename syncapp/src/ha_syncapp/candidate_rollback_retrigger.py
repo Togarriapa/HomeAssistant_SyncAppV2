@@ -14,6 +14,7 @@ from .candidate_rollback_execution import (
     CandidateRollbackExecutionResult,
     execute_candidate_rollback_once,
 )
+from .deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from .deployment_rollback import BackupReader, RepositoryReader
 from .deployment_rollback_transport import (
     read_rollback_backup_proof,
@@ -58,7 +59,8 @@ def run_candidate_rollback_retrigger_pass(
     github_token: str | None,
     supervisor_token: str | None,
     *,
-    repository_reader: RepositoryReader = read_rollback_repository_proof,
+    repository_reader: RepositoryReader | None = None,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     backup_reader: BackupReader = read_rollback_backup_proof,
     reference_time: datetime | None = None,
     executor: Executor = execute_candidate_rollback_once,
@@ -101,15 +103,30 @@ def run_candidate_rollback_retrigger_pass(
             if changed.rowcount != 1:
                 _error(False)
         claimed = store._get_work(item.work_kind, item.work_key)
-        result = executor(
-            store,
-            claimed,
-            github_token=github_token,
-            supervisor_token=supervisor_token,
-            repository_reader=repository_reader,
-            backup_reader=backup_reader,
-            now=when,
-        )
+        selected_reader = repository_reader
+        if repository_authority is None and selected_reader is None:
+            selected_reader = read_rollback_repository_proof
+        if repository_authority is None:
+            result = executor(
+                store,
+                claimed,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=selected_reader,
+                backup_reader=backup_reader,
+                now=when,
+            )
+        else:
+            result = executor(
+                store,
+                claimed,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=selected_reader,
+                repository_authority=repository_authority,
+                backup_reader=backup_reader,
+                now=when,
+            )
         current_work = store._get_work(claimed.work_kind, claimed.work_key)
         if (
             result.action != "rollback_authorized"

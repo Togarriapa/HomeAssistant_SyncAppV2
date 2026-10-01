@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .automation_script_observation import derive_automation_script_target
+from .deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from .deployment_rollback import (
     BackupReader,
     DeploymentRollback,
@@ -263,21 +264,33 @@ def execute_rollback_restore(
     store: StateStore,
     rollback: DeploymentRollback,
     *,
-    github_token: str,
+    github_token: str | None,
     supervisor_token: str,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
     backup_reader: BackupReader,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     attempted_at: datetime,
 ) -> RollbackRestoreResult:
     """Request one exact restore through the existing journal-before-mutation guard."""
     try:
         plan = load_rollback_recovery_plan(store, rollback)
+        if repository_authority is None:
+            return request_deployment_restore_once(
+                store,
+                plan,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=repository_reader,
+                backup_reader=backup_reader,
+                requested_at=attempted_at,
+            )
         return request_deployment_restore_once(
             store,
             plan,
             github_token=github_token,
             supervisor_token=supervisor_token,
             repository_reader=repository_reader,
+            repository_authority=repository_authority,
             backup_reader=backup_reader,
             requested_at=attempted_at,
         )
@@ -291,20 +304,31 @@ def complete_rollback_observation(
     store: StateStore,
     rollback: DeploymentRollback,
     *,
-    github_token: str,
+    github_token: str | None,
     supervisor_token: str,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     observed_at: datetime,
 ) -> RollbackRestoreResult:
     """Complete only the exact restored deployment after bounded health proofs."""
     try:
         plan = load_rollback_recovery_plan(store, rollback)
+        if repository_authority is None:
+            return complete_deployment_rollback_once(
+                store,
+                plan,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=repository_reader,
+                observed_at=observed_at,
+            )
         return complete_deployment_rollback_once(
             store,
             plan,
             github_token=github_token,
             supervisor_token=supervisor_token,
             repository_reader=repository_reader,
+            repository_authority=repository_authority,
             observed_at=observed_at,
         )
     except DeploymentRollbackRetriggerError:
@@ -344,7 +368,8 @@ def run_deployment_rollback_retrigger_pass(
     core_token: str | None,
     *,
     reference_time: datetime,
-    repository_reader: RepositoryReader = read_rollback_repository_proof,
+    repository_reader: RepositoryReader | None = None,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     backup_reader: BackupReader = read_rollback_backup_proof,
 ) -> DeploymentRollbackRetriggerResult:
     """Claim and process at most one rollback item without bypassing safeguards."""
@@ -357,7 +382,20 @@ def run_deployment_rollback_retrigger_pass(
     considered = len(pending)
     if not pending:
         return DeploymentRollbackRetriggerResult(0, 0, None)
-    github_credential = _validate_token(github_token, "GitHub token")
+    if repository_authority is None:
+        github_credential: str | None = _validate_token(github_token, "GitHub token")
+        selected_reader = repository_reader or read_rollback_repository_proof
+    else:
+        if (
+            github_token is not None
+            or repository_reader is not None
+            or type(repository_authority) is not DeployKeyRollbackRepositoryAuthority
+        ):
+            raise DeploymentRollbackRetriggerError(
+                "rollback repository requires exactly one transport authority"
+            )
+        github_credential = None
+        selected_reader = None
     supervisor_credential = _validate_token(core_token, "Core token")
     recovered, claimed, rollback = _claim_discovered_work(store, pending, reference_time)
     if claimed is None or rollback is None:
@@ -376,7 +414,8 @@ def run_deployment_rollback_retrigger_pass(
                 rollback,
                 github_token=github_credential,
                 supervisor_token=supervisor_credential,
-                repository_reader=repository_reader,
+                repository_reader=selected_reader,
+                repository_authority=repository_authority,
                 observed_at=reference_time,
             )
         elif rollback_requires_reconciliation(rollback):
@@ -397,7 +436,8 @@ def run_deployment_rollback_retrigger_pass(
                 rollback,
                 github_token=github_credential,
                 supervisor_token=supervisor_credential,
-                repository_reader=repository_reader,
+                repository_reader=selected_reader,
+                repository_authority=repository_authority,
                 backup_reader=backup_reader,
                 attempted_at=reference_time,
             )

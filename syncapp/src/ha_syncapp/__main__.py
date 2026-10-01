@@ -42,6 +42,10 @@ from .deploy_key_publication_authority import (
     DeployKeyPublicationAuthority,
     DeployKeyPublicationAuthorityError,
 )
+from .deploy_key_rollback_authority import (
+    DeployKeyRollbackRepositoryAuthority,
+    DeployKeyRollbackRepositoryAuthorityError,
+)
 from .github_repo import RepositoryVerificationError, fetch_and_verify_private_repository
 from .local_change_service import LocalChangeService, LocalChangeServiceError
 from .local_startup import LocalStartupError, LocalStartupResult, run_startup_local_sync
@@ -561,6 +565,47 @@ def _deploy_key_promotion_authority_if_configured(
         raise RetriggerCycleError("promotion deploy-key authority is unavailable") from exc
 
 
+def _deploy_key_rollback_authority_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> DeployKeyRollbackRepositoryAuthority | None:
+    """Build read-only rollback repository authority after durable initialization."""
+    if config.repo_b_rollback_transport == "token":
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise RetriggerCycleError("rollback deploy-key configuration is invalid")
+    repository_id = store.repository_id(config.repo_b)
+    if repository_id is None:
+        raise RetriggerCycleError("rollback repository is not trusted")
+    if store.synchronization_baseline(config.repo_b, "main") is None:
+        raise RetriggerCycleError("rollback repository is not initialized")
+    try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        key_directory = protected / "repo-b-deploy-key"
+        access_work_directory = protected / "work" / "deploy-key-rollback-access"
+        _ensure_private_work_directory(protected, access_work_directory)
+        proof = test_repo_b_deploy_key_access(
+            config.repo_b,
+            config.github_token,
+            repository_id,
+            key_directory,
+            work_directory=access_work_directory,
+        )
+        return DeployKeyRollbackRepositoryAuthority(
+            proof,
+            key_directory,
+            access_work_directory,
+        )
+    except (
+        DeployKeyAccessError,
+        DeployKeyRollbackRepositoryAuthorityError,
+        RetriggerCycleError,
+        OSError,
+    ) as exc:
+        raise RetriggerCycleError("rollback deploy-key authority is unavailable") from exc
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -569,6 +614,7 @@ def _handle_retrigger_request(
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
+    deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None,
 ) -> str:
     """Execute one bounded outbound cycle while the service retains state ownership."""
     if config.repo_b is None or config.github_token is None:
@@ -613,6 +659,7 @@ def _handle_retrigger_request(
             candidate_deploy_key_ingress=candidate_deploy_key_ingress,
             deploy_key_publication_authority=deploy_key_publication_authority,
             deploy_key_promotion_authority=deploy_key_promotion_authority,
+            deploy_key_rollback_authority=deploy_key_rollback_authority,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
@@ -646,6 +693,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None
         deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None
         deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None
+        deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -662,6 +710,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             )
             deploy_key_promotion_authority = _deploy_key_promotion_authority_if_configured(
                 store, config, data_dir, Path("/homeassistant")
+            )
+            deploy_key_rollback_authority = _deploy_key_rollback_authority_if_configured(
+                store, config, data_dir
             )
         boot = store.start_run()
         local_change_service: LocalChangeService | None = None
@@ -804,6 +855,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                                 candidate_deploy_key_ingress,
                                 deploy_key_publication_authority,
                                 deploy_key_promotion_authority,
+                                deploy_key_rollback_authority,
                             ),
                             timeout_seconds=0.25,
                         )
