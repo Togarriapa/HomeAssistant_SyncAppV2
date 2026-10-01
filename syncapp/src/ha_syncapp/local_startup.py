@@ -36,6 +36,7 @@ def run_startup_local_sync(
     github_token: PublicationCredential,
     *,
     branch: str = "main",
+    recorder_database: Path | None = None,
 ) -> LocalStartupResult:
     """Schedule one normal Local generation and process at most one eligible item."""
     if type(store) is not StateStore:
@@ -51,6 +52,7 @@ def run_startup_local_sync(
             target,
             github_token,
             branch=branch,
+            recorder_database=recorder_database,
         )
     except (LocalSyncScheduleError, LocalSyncProcessError) as exc:
         raise LocalStartupError("startup Local synchronization failed closed") from exc

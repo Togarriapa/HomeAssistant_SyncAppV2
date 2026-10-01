@@ -23,8 +23,16 @@ a dedicated standard database/log artifact therefore do not make a `main`
 snapshot unstable, while any selected configuration mutation continues to fail
 closed.
 
-This increment does not claim to discover arbitrary custom Recorder database or
-log destinations. Automatic periodic synchronization remains gated until those
-locations can be explicitly discovered or configured and routed to their proper
-dedicated branches. It also does not implement database/log publication or any
-remote `candidate` deployment behavior.
+An explicitly configured `recorder_database_path` is converted to one validated
+path relative to the same Home Assistant source root. That exact database path
+and its SQLite sidecar family are excluded consistently from repository
+initialization, startup and routine Local snapshots, event observation, and
+Retrigger processing. The router rejects relative, root, traversal, and
+out-of-source Recorder paths; it does not broadly discard unrelated nested
+`.db` files.
+
+Recorder publication, Core/Supervisor log collection and publication, and remote
+`candidate` deployment are implemented by separate guarded lanes. This routing
+component grants none of their authority. Custom log destinations are not
+discovered or guessed; the Local route continues to separate only the standard
+root-level Home Assistant log family.

@@ -44,6 +44,7 @@ def test_startup_schedules_before_processing(
         github_token: str,
         *,
         branch: str = "main",
+        recorder_database: Path | None = None,
     ) -> LocalSyncProcessResult:
         assert state is store
         assert source == tmp_path / "homeassistant"
@@ -52,6 +53,7 @@ def test_startup_schedules_before_processing(
         assert target == TARGET
         assert github_token == "github-token"
         assert branch == "main"
+        assert recorder_database == tmp_path / "homeassistant/storage/recorder.db"
         events.append("process")
         return LocalSyncProcessResult(None)
 
@@ -65,6 +67,7 @@ def test_startup_schedules_before_processing(
             tmp_path / "workspaces",
             TARGET,
             "github-token",
+            recorder_database=tmp_path / "homeassistant/storage/recorder.db",
         )
     finally:
         store.__exit__(None, None, None)

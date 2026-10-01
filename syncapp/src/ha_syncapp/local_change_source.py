@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,7 +38,11 @@ class LocalChangeSnapshot:
     entries: tuple[LocalChangeEntry, ...]
 
 
-def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
+def observe_local_change_source(
+    source: Path,
+    *,
+    include_path: Callable[[str], bool] = include_in_main,
+) -> LocalChangeSnapshot:
     """Observe Repo B main-routed source metadata without reading or mutating file contents."""
     try:
         root_metadata = source.lstat()
@@ -74,7 +79,7 @@ def observe_local_change_source(source: Path) -> LocalChangeSnapshot:
                     continue
 
                 try:
-                    included = include_in_main(relative_path)
+                    included = include_path(relative_path)
                 except ValueError as exc:
                     raise LocalChangeSourceError("local change source path routing failed") from exc
                 if not included:

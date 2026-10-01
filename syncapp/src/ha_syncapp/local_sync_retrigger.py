@@ -36,6 +36,7 @@ def run_local_sync_retrigger_pass(
     token: PublicationCredential,
     *,
     branch: str = "main",
+    recorder_database: Path | None = None,
 ) -> LocalSyncRetriggerResult:
     """Recover interrupted work and process at most one eligible Local-sync item."""
     if type(store) is not StateStore:
@@ -55,6 +56,7 @@ def run_local_sync_retrigger_pass(
             target,
             token,
             branch=branch,
+            recorder_database=recorder_database,
         )
         return LocalSyncRetriggerResult(recovered_interrupted=recovered, processed=processed)
     except (StateError, LocalSyncWorkError) as exc:

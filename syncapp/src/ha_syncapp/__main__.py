@@ -236,6 +236,11 @@ def _run_startup_local_if_configured(
             workspace_root,
             config.repo_b,
             publication_authority or config.github_token,
+            recorder_database=(
+                None
+                if config.recorder_database_path is None
+                else Path(config.recorder_database_path)
+            ),
         )
     except (RetriggerCycleError, OSError) as exc:
         raise LocalStartupError("startup Local synchronization failed closed") from exc
@@ -265,6 +270,9 @@ def _local_change_service_if_configured(
         config.repo_b,
         publication_authority or config.github_token,
         quiet_seconds=_LOCAL_CHANGE_QUIET_SECONDS,
+        recorder_database=(
+            None if config.recorder_database_path is None else Path(config.recorder_database_path)
+        ),
     )
 
 

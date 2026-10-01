@@ -21,7 +21,7 @@ from ha_syncapp.github_repo import (
     fetch_optional_trusted_branch_head,
 )
 from ha_syncapp.local_git import GitError, create_snapshot_commit, initialize_repository
-from ha_syncapp.main_routing import include_in_main
+from ha_syncapp.main_routing import build_main_path_router
 from ha_syncapp.publication_intent import PublicationIntentError, build_publication_intent
 from ha_syncapp.publication_preflight import (
     PublicationDisposition,
@@ -67,9 +67,15 @@ class LocalSyncResult:
     baseline: SynchronizationBaseline | None
 
 
-def capture_snapshot(source: Path, staging_root: Path) -> Snapshot:
+def capture_snapshot(
+    source: Path,
+    staging_root: Path,
+    *,
+    recorder_database: Path | None = None,
+) -> Snapshot:
     """Capture only files explicitly routed to Repo B main."""
-    return _capture_snapshot(source, staging_root, include_path=include_in_main)
+    include_path = build_main_path_router(source, recorder_database)
+    return _capture_snapshot(source, staging_root, include_path=include_path)
 
 
 def synchronize_local_configuration(
@@ -81,6 +87,7 @@ def synchronize_local_configuration(
     token: str | DeployKeyPublicationAuthority,
     *,
     branch: str = "main",
+    recorder_database: Path | None = None,
 ) -> LocalSyncResult:
     """Capture, classify and when authorized publish one stable local configuration snapshot."""
     if type(store) is not StateStore:
@@ -95,7 +102,11 @@ def synchronize_local_configuration(
         if repository_id is None:
             raise LocalSyncError("local synchronization repository is not pinned")
 
-        snapshot = capture_snapshot(source, snapshot_root)
+        snapshot = capture_snapshot(
+            source,
+            snapshot_root,
+            recorder_database=recorder_database,
+        )
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch=branch)
 
@@ -179,11 +190,14 @@ def synchronize_local_configuration(
         PublicationIntentError,
         PublicationWorkflowError,
         DeployKeyPublicationAuthorityError,
+        ValueError,
     ) as exc:
         raise LocalSyncError(
             "local synchronization failed closed",
             transient=(
-                exc.transient if isinstance(exc, DeployKeyPublicationAuthorityError) else True
+                exc.transient
+                if isinstance(exc, DeployKeyPublicationAuthorityError)
+                else not isinstance(exc, ValueError)
             ),
         ) from exc
     finally:

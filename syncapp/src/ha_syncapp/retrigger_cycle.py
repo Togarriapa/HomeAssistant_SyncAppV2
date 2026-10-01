@@ -256,6 +256,7 @@ def run_retrigger_cycle(
             local_workspace_root,
             target,
             publication_credential,
+            recorder_database=recorder_database,
         )
         if recorder_database is None:
             database_sync = DatabaseSyncRetriggerResult(recovered_interrupted=0, processed=None)
