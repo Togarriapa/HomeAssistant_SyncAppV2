@@ -36,6 +36,7 @@ def run_local_sync_process(
     github_token: PublicationCredential,
     *,
     branch: str = "main",
+    recorder_database: Path | None = None,
 ) -> LocalSyncProcessResult:
     """Claim and process at most one Local item without recovery semantics."""
     if type(store) is not StateStore:
@@ -59,6 +60,7 @@ def run_local_sync_process(
             target,
             github_token,
             branch=branch,
+            recorder_database=recorder_database,
         )
         return LocalSyncProcessResult(processed=processed)
     except (StateError, LocalSyncWorkError) as exc:
