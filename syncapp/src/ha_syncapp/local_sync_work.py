@@ -86,6 +86,7 @@ def execute_claimed_local_sync_work(
     token: PublicationCredential,
     *,
     branch: str = "main",
+    recorder_database: Path | None = None,
 ) -> LocalSyncWorkResult:
     """Execute exactly one already-claimed Local-sync item and persist its outcome."""
     _validate_claim(store, item, target, branch)
@@ -98,6 +99,7 @@ def execute_claimed_local_sync_work(
             target,
             token,
             branch=branch,
+            recorder_database=recorder_database,
         )
     except LocalSyncError as exc:
         try:
