@@ -329,6 +329,51 @@ def test_specialist_runtime_documents_describe_live_service_integration() -> Non
         assert stale_claim not in normalized_routine
 
 
+def test_slice_era_documents_match_current_integration_status() -> None:
+    core = " ".join((ROOT / "docs/runtime-core-bundle.md").read_text().split())
+    database = " ".join((ROOT / "docs/database-sync.md").read_text().split())
+    history = " ".join(
+        (ROOT / "docs/database-history-replacement.md").read_text().split()
+    )
+    prepared = " ".join(
+        (ROOT / "docs/prepared-deployment-state.md").read_text().split()
+    )
+
+    for required in ("integrations", "floors", "labels", "recovery"):
+        assert required in core
+    assert (
+        "Integrations/config entries, floors, labels, Supervisor data, hardware data, "
+        "topology/dependency analysis and deployment observation remain separate future "
+        "increments."
+        not in core
+    )
+
+    for required in (
+        "## Current integration status",
+        "`DatabaseSyncService`",
+        "`run_database_sync_retrigger_pass()`",
+        "`database_retention`",
+    ):
+        assert required in database
+    assert "This increment does not implement database scheduling, retention pruning" not in database
+
+    assert "## Current integration status" in history
+    assert "Service orchestration and durable Retrigger scheduling are separate increments." not in history
+
+    for required in (
+        "## Current integration status",
+        "`candidate_apply`",
+        "`candidate_apply_execute`",
+        "rollback",
+    ):
+        assert required in prepared
+    assert (
+        "Runtime publication of these records and interrupted deployment execution remain "
+        "future integration work."
+        not in prepared
+    )
+
+
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
