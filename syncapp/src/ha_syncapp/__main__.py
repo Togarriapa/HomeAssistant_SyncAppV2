@@ -42,6 +42,10 @@ from .deploy_key_publication_authority import (
     DeployKeyPublicationAuthority,
     DeployKeyPublicationAuthorityError,
 )
+from .deploy_key_retention_authority import (
+    DeployKeyRetentionAuthority,
+    DeployKeyRetentionAuthorityError,
+)
 from .deploy_key_rollback_authority import (
     DeployKeyRollbackRepositoryAuthority,
     DeployKeyRollbackRepositoryAuthorityError,
@@ -306,6 +310,7 @@ def _database_sync_service_if_configured(
     data_dir: Path,
     home_assistant_root: Path = Path("/homeassistant"),
     publication_authority: DeployKeyPublicationAuthority | None = None,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> DatabaseSyncService | None:
     """Build periodic Recorder processing only after the trusted startup generation."""
     if (
@@ -342,6 +347,7 @@ def _database_sync_service_if_configured(
         interval_seconds=_DATABASE_SYNC_INTERVAL_SECONDS,
         retention_days=config.recorder_retention_days,
         publication_credential=publication_authority,
+        retention_authority=retention_authority,
     )
 
 
@@ -400,6 +406,7 @@ def _log_sync_service_if_configured(
     config: Config,
     data_dir: Path,
     publication_authority: DeployKeyPublicationAuthority | None = None,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> LogSyncService | None:
     """Build periodic log collection only for a trusted configured Repo B."""
     if config.repo_b is None or config.github_token is None:
@@ -420,6 +427,7 @@ def _log_sync_service_if_configured(
         core_token=os.environ.get("SUPERVISOR_TOKEN"),
         interval_seconds=_LOG_SYNC_INTERVAL_SECONDS,
         publication_credential=publication_authority,
+        retention_authority=retention_authority,
     )
 
 
@@ -606,6 +614,51 @@ def _deploy_key_rollback_authority_if_configured(
         raise RetriggerCycleError("rollback deploy-key authority is unavailable") from exc
 
 
+def _deploy_key_retention_authority_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+) -> DeployKeyRetentionAuthority | None:
+    """Build generated-history SSH authority after durable initialization."""
+
+    if config.repo_b_retention_transport == "token":
+        return None
+    if config.repo_b is None or config.github_token is None:
+        raise RetriggerCycleError("retention deploy-key configuration is invalid")
+    repository_id = store.repository_id(config.repo_b)
+    if repository_id is None:
+        raise RetriggerCycleError("retention repository is not trusted")
+    if store.synchronization_baseline(config.repo_b, "main") is None:
+        raise RetriggerCycleError("retention repository is not initialized")
+    try:
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        key_directory = protected / "repo-b-deploy-key"
+        access_work_directory = protected / "work" / "deploy-key-retention-access"
+        staging_root = protected / "work" / "deploy-key-retention"
+        _ensure_private_work_directory(protected, access_work_directory)
+        _ensure_private_work_directory(protected, staging_root)
+        proof = test_repo_b_deploy_key_access(
+            config.repo_b,
+            config.github_token,
+            repository_id,
+            key_directory,
+            work_directory=access_work_directory,
+        )
+        return DeployKeyRetentionAuthority(
+            proof,
+            key_directory,
+            access_work_directory,
+            staging_root,
+        )
+    except (
+        DeployKeyAccessError,
+        DeployKeyRetentionAuthorityError,
+        RetriggerCycleError,
+        OSError,
+    ) as exc:
+        raise RetriggerCycleError("retention deploy-key authority is unavailable") from exc
+
+
 def _handle_retrigger_request(
     store: StateStore,
     config: Config,
@@ -615,6 +668,7 @@ def _handle_retrigger_request(
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
     deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None,
+    deploy_key_retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> str:
     """Execute one bounded outbound cycle while the service retains state ownership."""
     if config.repo_b is None or config.github_token is None:
@@ -660,6 +714,7 @@ def _handle_retrigger_request(
             deploy_key_publication_authority=deploy_key_publication_authority,
             deploy_key_promotion_authority=deploy_key_promotion_authority,
             deploy_key_rollback_authority=deploy_key_rollback_authority,
+            deploy_key_retention_authority=deploy_key_retention_authority,
             core_token=os.environ.get("SUPERVISOR_TOKEN"),
             log_artifact_root=log_artifact_root,
             log_snapshot_root=log_snapshot_root,
@@ -694,6 +749,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None
         deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None
         deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None
+        deploy_key_retention_authority: DeployKeyRetentionAuthority | None = None
         if config.repo_b is not None and config.github_token is not None:
             expected_id = store.repository_id(config.repo_b)
             identity = fetch_and_verify_private_repository(
@@ -712,6 +768,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                 store, config, data_dir, Path("/homeassistant")
             )
             deploy_key_rollback_authority = _deploy_key_rollback_authority_if_configured(
+                store, config, data_dir
+            )
+            deploy_key_retention_authority = _deploy_key_retention_authority_if_configured(
                 store, config, data_dir
             )
         boot = store.start_run()
@@ -753,9 +812,28 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         publication_authority=deploy_key_publication_authority,
                     )
             if not stop.requested:
-                if deploy_key_publication_authority is None:
+                if (
+                    deploy_key_publication_authority is None
+                    and deploy_key_retention_authority is None
+                ):
                     database_sync_service = _database_sync_service_if_configured(
-                        store, config, data_dir
+                        store,
+                        config,
+                        data_dir,
+                    )
+                elif deploy_key_publication_authority is None:
+                    database_sync_service = _database_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        retention_authority=deploy_key_retention_authority,
+                    )
+                elif deploy_key_retention_authority is None:
+                    database_sync_service = _database_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
                     )
                 else:
                     database_sync_service = _database_sync_service_if_configured(
@@ -763,6 +841,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         config,
                         data_dir,
                         publication_authority=deploy_key_publication_authority,
+                        retention_authority=deploy_key_retention_authority,
                     )
             if not stop.requested:
                 if deploy_key_publication_authority is None:
@@ -785,14 +864,36 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         publication_authority=deploy_key_publication_authority,
                     )
             if not stop.requested:
-                if deploy_key_publication_authority is None:
-                    log_sync_service = _log_sync_service_if_configured(store, config, data_dir)
+                if (
+                    deploy_key_publication_authority is None
+                    and deploy_key_retention_authority is None
+                ):
+                    log_sync_service = _log_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                    )
+                elif deploy_key_publication_authority is None:
+                    log_sync_service = _log_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        retention_authority=deploy_key_retention_authority,
+                    )
+                elif deploy_key_retention_authority is None:
+                    log_sync_service = _log_sync_service_if_configured(
+                        store,
+                        config,
+                        data_dir,
+                        publication_authority=deploy_key_publication_authority,
+                    )
                 else:
                     log_sync_service = _log_sync_service_if_configured(
                         store,
                         config,
                         data_dir,
                         publication_authority=deploy_key_publication_authority,
+                        retention_authority=deploy_key_retention_authority,
                     )
             if not stop.requested:
                 if candidate_deploy_key_ingress is None:
@@ -856,6 +957,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                                 deploy_key_publication_authority,
                                 deploy_key_promotion_authority,
                                 deploy_key_rollback_authority,
+                                deploy_key_retention_authority,
                             ),
                             timeout_seconds=0.25,
                         )

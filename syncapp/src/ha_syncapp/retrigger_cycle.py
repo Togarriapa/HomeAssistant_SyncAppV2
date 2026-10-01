@@ -133,6 +133,7 @@ from ha_syncapp.database_sync_retrigger import (
 )
 from ha_syncapp.deploy_key_promotion_authority import DeployKeyPromotionAuthority
 from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
+from ha_syncapp.deploy_key_retention_authority import DeployKeyRetentionAuthority
 from ha_syncapp.deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from ha_syncapp.deployment_rollback_retrigger import (
     DeploymentRollbackRetriggerError,
@@ -227,6 +228,7 @@ def run_retrigger_cycle(
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
     deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None,
+    deploy_key_retention_authority: DeployKeyRetentionAuthority | None = None,
     core_token: str | None = None,
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
@@ -279,9 +281,10 @@ def run_retrigger_cycle(
                     store,
                     database_workspace_root / "retention",
                     target,
-                    github_token,
+                    None if deploy_key_retention_authority is not None else github_token,
                     retention_days=recorder_retention_days,
                     reference_time=retention_reference_time or datetime.now(UTC),
+                    retention_authority=deploy_key_retention_authority,
                 )
         runtime_sync = run_runtime_sync_retrigger_pass(
             store,
@@ -310,9 +313,10 @@ def run_retrigger_cycle(
                 store,
                 log_workspace_root / "retention",
                 target,
-                github_token,
+                None if deploy_key_retention_authority is not None else github_token,
                 reference_time=datetime.now(UTC),
                 recover_interrupted=True,
+                retention_authority=deploy_key_retention_authority,
             )
 
         if deploy_key_rollback_authority is None:

@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
 
+from ha_syncapp.deploy_key_access import (
+    DeployKeyAccessError,
+    DeployKeyAccessProof,
+    open_repo_b_deploy_key_transport,
+    run_bounded_repo_b_git,
+)
 from ha_syncapp.log_history_replacement import LogHistoryReplacementAuthorization
 
 LOG_HISTORY_BRANCH = "logs"
@@ -231,6 +237,87 @@ def replace_logs_history(
             kind=LogHistoryReplacementFailureKind.REJECTED,
         )
     return True
+
+
+def replace_logs_history_with_deploy_key(
+    *,
+    authorization: LogHistoryReplacementAuthorization,
+    artifact: LogHistoryReplacementArtifact | None,
+    proof: DeployKeyAccessProof,
+    key_directory: Path,
+    known_hosts_file: Path = Path("/app/github_known_hosts"),
+    git_executable: Path = Path("/usr/bin/git"),
+    ssh_executable: Path = Path("/usr/bin/ssh"),
+    timeout: float = 30.0,
+    runner: CommandRunner = _run_git,
+) -> bool:
+    """Publish one validated logs replacement with the exact deploy-key generation."""
+
+    _validate_authorization_boundary(authorization)
+    if not authorization.requires_replacement:
+        return False
+    _validate_artifact(authorization=authorization, artifact=artifact)
+    if artifact is None:
+        raise LogHistoryReplacementTransportError("logs replacement artifact is invalid")
+    timeout_value = _validate_timeout(timeout)
+    _validate_artifact_history(
+        authorization=authorization,
+        artifact=artifact,
+        timeout=timeout_value,
+        runner=runner,
+    )
+    ref = f"refs/heads/{LOG_HISTORY_BRANCH}"
+    try:
+        with open_repo_b_deploy_key_transport(
+            proof,
+            authorization.target,
+            authorization.repository_id,
+            key_directory,
+            known_hosts_file=known_hosts_file,
+            work_directory=artifact.repository,
+            git_executable=git_executable,
+            ssh_executable=ssh_executable,
+        ) as session:
+            command = (
+                str(session.git_executable),
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "credential.helper=",
+                "-c",
+                "protocol.file.allow=never",
+                "-c",
+                f"core.sshCommand={session.ssh_command}",
+                "push",
+                "--porcelain",
+                "--no-verify",
+                _deploy_key_repository_url(authorization.target),
+                f"{artifact.replacement_head_sha}:{ref}",
+                f"--force-with-lease={ref}:{authorization.expected_head_sha}",
+            )
+            run_bounded_repo_b_git(
+                command,
+                cwd=artifact.repository,
+                environment=session.environment,
+                pass_fds=(session.private_descriptor,),
+            )
+    except DeployKeyAccessError as error:
+        raise LogHistoryReplacementTransportError(
+            "logs history replacement transport failed"
+            if error.transient
+            else "logs history replacement was rejected",
+            kind=(
+                LogHistoryReplacementFailureKind.TRANSIENT
+                if error.transient
+                else LogHistoryReplacementFailureKind.REJECTED
+            ),
+        ) from None
+    return True
+
+
+def _deploy_key_repository_url(target: str) -> str:
+    owner, repository = target.split("/", 1)
+    return f"ssh://git@github.com/{quote(owner, safe='')}/{quote(repository, safe='')}.git"
 
 
 def _validate_authorization_boundary(

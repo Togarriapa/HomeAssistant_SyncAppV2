@@ -45,6 +45,7 @@ that writes from the app are denied.
 | `repo_b_publication_transport` | `token` | `token`, `deploy_key` |
 | `repo_b_promotion_transport` | `token` | `token`, `deploy_key` |
 | `repo_b_rollback_transport` | `token` | `token`, `deploy_key` |
+| `repo_b_retention_transport` | `token` | `token`, `deploy_key` |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
@@ -114,13 +115,13 @@ not prove write permission or enable deploy-key transport. See
 [Repo B deploy-key rotation](../docs/deploy-key-rotation.md) for lifecycle,
 operator enrollment, recovery, blocking, and rollback boundaries.
 
-Proof-bound SSH primitives also exist for canonical reference reads, exact
-candidate fetch, ordinary non-force publication, and atomic deployment promotion
-plus known-good tagging. Each revalidates the protected generation immediately
-before use, passes the private key only through an inherited descriptor, and
-fails closed on rebound or conflicting evidence. These primitives are not yet
-selected by startup or runtime; the active token-backed lanes remain unchanged
-until initialization authority and status exposure are explicitly reviewed. See
+Proof-bound SSH primitives exist for canonical reference reads, exact candidate
+fetch, ordinary non-force publication, atomic deployment promotion plus known-good
+tagging, rollback repository proof, and generated-history retention. Each
+revalidates the protected generation immediately before use, passes the private
+key only through an inherited descriptor, and fails closed on rebound or
+conflicting evidence. Each runtime lane remains independently opt-in and defaults
+to its compatibility token transport. See
 [Repo B deploy-key promotion transport](../docs/deploy-key-promotion-transport.md)
 for atomic reconciliation, retry and cleanup boundaries.
 
@@ -166,7 +167,15 @@ re-proof, post-restore observation completion, stale-work recovery, and retry th
 read the exact `refs/heads/main` value through descriptor-bound, host-pinned SSH
 without token Git or fallback. Backup proof, backup restore, health checks, and
 restore reconciliation remain on the Home Assistant Supervisor token. Retention
-history rewrites remain token-backed. See [Deploy-key rollback repository-proof adoption](../docs/deploy-key-rollback-adoption.md).
+history rewrites remain independently selected. See [Deploy-key rollback repository-proof adoption](../docs/deploy-key-rollback-adoption.md).
+
+Generated `logs` and Recorder `database` history retention can use the verified
+deploy key by selecting `repo_b_retention_transport: deploy_key`. SyncApp reads the
+exact branch reference, fetches and validates the complete bounded linear history,
+re-proves the expected head immediately before publication, and writes only the
+builder-produced replacement through an exact force-with-lease. Token and deploy-key
+retention authorities cannot be mixed, and the deploy-key path has no token Git
+fallback. See [Deploy-key retention history adoption](../docs/deploy-key-retention-adoption.md).
 
 ## Retrigger recovery
 

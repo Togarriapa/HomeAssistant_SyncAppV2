@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from .deploy_key_retention_authority import (
+    DeployKeyRetentionAuthority,
+    DeployKeyRetentionAuthorityError,
+)
 from .github_repo import RepositoryVerificationError, fetch_trusted_branch_head
 from .log_history_evidence import TrustedLogHistoryEvidence
 from .log_history_prewrite import LogHistoryPrewriteError, reprove_log_history_prewrite
@@ -101,9 +105,10 @@ def log_retention_work_key(evidence: TrustedLogHistoryEvidence) -> str:
 def discover_log_retention_work(
     store: StateStore,
     target: str,
-    token: str,
+    token: str | None,
     *,
     reference_time: datetime,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> WorkItem:
     """Read fresh trusted logs history and idempotently enqueue its exact policy outcome."""
 
@@ -112,11 +117,16 @@ def discover_log_retention_work(
         repository_id = store.repository_id(target)
         if repository_id is None:
             raise LogRetentionWorkError("logs retention repository is not pinned")
-        evidence = fetch_trusted_log_history_evidence(
-            target=target,
-            token=token,
-            expected_id=repository_id,
-            reference_time=reference_time,
+        _require_one_authority(token, retention_authority)
+        evidence = (
+            retention_authority.read_log_history(reference_time)
+            if retention_authority is not None
+            else fetch_trusted_log_history_evidence(
+                target=target,
+                token=_require_token(token),
+                expected_id=repository_id,
+                reference_time=reference_time,
+            )
         )
         if (
             evidence.target.casefold() != target.casefold()
@@ -130,7 +140,7 @@ def discover_log_retention_work(
         )
     except LogRetentionWorkError:
         raise
-    except (LogHistoryReadError, StateError):
+    except (DeployKeyRetentionAuthorityError, LogHistoryReadError, StateError):
         raise LogRetentionWorkError("logs retention discovery failed closed") from None
 
 
@@ -148,20 +158,28 @@ def run_log_retention_work_pass(
     store: StateStore,
     staging_root: Path,
     target: str,
-    token: str,
+    token: str | None,
     *,
     reference_time: datetime | None = None,
     recover_interrupted: bool = False,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> LogRetentionPassResult:
     """Discover current policy and process at most one durable logs-retention item."""
 
     _validate_store(store)
     current = reference_time or datetime.now(UTC)
     try:
+        _require_one_authority(token, retention_authority)
         recovered = store.recover_interrupted_work(now=current) if recover_interrupted else 0
         item = claim_log_retention_work(store, now=current)
         if item is None:
-            discover_log_retention_work(store, target, token, reference_time=current)
+            discover_log_retention_work(
+                store,
+                target,
+                token,
+                reference_time=current,
+                retention_authority=retention_authority,
+            )
             item = claim_log_retention_work(store, now=current)
             if item is None:
                 return LogRetentionPassResult(recovered, None)
@@ -172,6 +190,7 @@ def run_log_retention_work_pass(
             target,
             token,
             reference_time=current,
+            retention_authority=retention_authority,
         )
         return LogRetentionPassResult(recovered, processed)
     except (StateError, LogRetentionWorkError):
@@ -183,9 +202,10 @@ def _execute_claimed(
     item: WorkItem,
     staging_root: Path,
     target: str,
-    token: str,
+    token: str | None,
     *,
     reference_time: datetime,
+    retention_authority: DeployKeyRetentionAuthority | None,
 ) -> LogRetentionWorkResult:
     if (
         type(item) is not WorkItem
@@ -208,11 +228,15 @@ def _execute_claimed(
                 or intent.repository_id != repository_id
             ):
                 return _fail(store, item, transient=False, now=reference_time)
-            current = fetch_trusted_branch_head(
-                target,
-                token,
-                expected_id=repository_id,
-                branch=LOG_HISTORY_BRANCH,
+            current = (
+                retention_authority.observe(target, repository_id, LOG_HISTORY_BRANCH)
+                if retention_authority is not None
+                else fetch_trusted_branch_head(
+                    target,
+                    _require_token(token),
+                    expected_id=repository_id,
+                    branch=LOG_HISTORY_BRANCH,
+                )
             )
             if current.commit_sha == intent.replacement_head_sha:
                 baseline = store.synchronization_baseline(target, LOG_HISTORY_BRANCH)
@@ -234,11 +258,15 @@ def _execute_claimed(
                 blocked = store.fail_work(item, transient=False, now=reference_time)
                 return LogRetentionWorkResult(blocked, LogRetentionWorkDisposition.STALE)
 
-        evidence = fetch_trusted_log_history_evidence(
-            target=target,
-            token=token,
-            expected_id=repository_id,
-            reference_time=item.created_at,
+        evidence = (
+            retention_authority.read_log_history(item.created_at)
+            if retention_authority is not None
+            else fetch_trusted_log_history_evidence(
+                target=target,
+                token=_require_token(token),
+                expected_id=repository_id,
+                reference_time=item.created_at,
+            )
         )
         if item.work_key != log_retention_work_key(evidence):
             blocked = store.fail_work(item, transient=False, now=reference_time)
@@ -253,16 +281,24 @@ def _execute_claimed(
         ):
             return _fail(store, item, transient=False, now=reference_time)
 
-        prewrite = reprove_log_history_prewrite(evidence=evidence, token=token)
+        prewrite = (
+            retention_authority.prewrite_log(evidence)
+            if retention_authority is not None
+            else reprove_log_history_prewrite(evidence=evidence, token=_require_token(token))
+        )
         authorization = authorize_log_history_replacement(evidence=evidence, prewrite=prewrite)
         if not authorization.requires_replacement:
             completed = store.complete_work(item, now=reference_time)
             return LogRetentionWorkResult(completed, LogRetentionWorkDisposition.NO_CHANGE)
 
-        repository = prepare_log_history_staging(
-            evidence=evidence,
-            staging_root=staging_root,
-            token=token,
+        repository = (
+            retention_authority.stage_log_history(evidence)
+            if retention_authority is not None
+            else prepare_log_history_staging(
+                evidence=evidence,
+                staging_root=staging_root,
+                token=_require_token(token),
+            )
         )
         artifact = build_log_history_replacement(
             authorization=authorization,
@@ -279,11 +315,14 @@ def _execute_claimed(
         )
         if persisted_intent.replacement_head_sha != artifact.replacement_head_sha:
             return _fail(store, item, transient=False, now=reference_time)
-        replace_logs_history(
-            authorization=authorization,
-            artifact=artifact,
-            token=token,
-        )
+        if retention_authority is None:
+            replace_logs_history(
+                authorization=authorization,
+                artifact=artifact,
+                token=_require_token(token),
+            )
+        else:
+            retention_authority.replace_log(authorization, artifact)
         store.record_synchronization_baseline(
             target,
             LOG_HISTORY_BRANCH,
@@ -295,6 +334,8 @@ def _execute_claimed(
         return LogRetentionWorkResult(completed, LogRetentionWorkDisposition.REPLACED)
     except LogHistoryReplacementTransportError as error:
         return _fail(store, item, transient=error.retryable, now=reference_time)
+    except DeployKeyRetentionAuthorityError as error:
+        return _fail(store, item, transient=error.transient, now=reference_time)
     except LogHistoryReadError as error:
         return _fail(store, item, transient=_read_failure_is_transient(error), now=reference_time)
     except LogHistoryPrewriteError as error:
@@ -361,3 +402,19 @@ def _staging_failure_is_transient(error: LogRetentionStagingError) -> bool:
 def _validate_store(store: StateStore) -> None:
     if type(store) is not StateStore:
         raise LogRetentionWorkError("logs retention state store is invalid")
+
+
+def _require_one_authority(
+    token: str | None,
+    authority: DeployKeyRetentionAuthority | None,
+) -> None:
+    if (token is None) == (authority is None):
+        raise LogRetentionWorkError("logs retention requires exactly one transport authority")
+    if authority is not None and type(authority) is not DeployKeyRetentionAuthority:
+        raise LogRetentionWorkError("logs retention authority is invalid")
+
+
+def _require_token(token: str | None) -> str:
+    if not isinstance(token, str) or not token:
+        raise LogRetentionWorkError("logs retention token authority is invalid")
+    return token
