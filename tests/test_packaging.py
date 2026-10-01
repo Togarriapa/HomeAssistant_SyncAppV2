@@ -293,6 +293,41 @@ def test_current_architecture_documentation_contract() -> None:
         assert "## Current integration status" in content
 
 
+def test_specialist_runtime_documents_describe_live_service_integration() -> None:
+    local_cycle = (ROOT / "docs/local-sync-cycle.md").read_text()
+    routine = (ROOT / "docs/routine-work-scheduling.md").read_text()
+
+    for required in (
+        "## Current integration status",
+        "`LocalChangeService`",
+        "`run_local_sync_process()`",
+        "`run_local_sync_retrigger_pass()`",
+    ):
+        assert required in local_cycle
+
+    for stale_claim in (
+        "This coordinator is not yet invoked by the long-running service.",
+        "Event-driven change detection, debounce scheduling and Retrigger Work Cron Job "
+        "integration are separate increments.",
+    ):
+        assert stale_claim not in local_cycle
+
+    for required in (
+        "`RuntimeEventBridge`",
+        "`RuntimeEventMailbox`",
+        "state-owning service loop",
+    ):
+        assert required in routine
+
+    for stale_claim in (
+        "does not yet attach asynchronous event consumption",
+        "intended for future cross-context event transport",
+        "A future transport owner",
+        "Those ownership decisions remain a separate service-integration gate.",
+    ):
+        assert stale_claim not in routine
+
+
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
