@@ -4,6 +4,16 @@ The sole product specification for this behavior is the initial V2 `README.md` a
 
 The README separates **normal synchronization**, which should be event-driven wherever practical, from the **Retrigger Work Cron Job**, which exists to recover interrupted or transiently failed work. These are different lifecycle responsibilities and must remain different in code.
 
+## Current integration status
+
+Current `main` wires bounded startup, event and cadence producers for Local,
+Recorder, runtime inventory, logs and candidate observation into the state-owning
+service. The separately supervised Retrigger schedule reaches the same service over
+protected IPC and runs only recovery lanes. The separation defined in this document
+therefore remains the active production architecture; see
+[Current architecture](architecture.md) and
+[Bounded Retrigger cycle](retrigger-cycle.md).
+
 `work_schedule.schedule_routine_work()` is the durable boundary for a normal producer to announce a new generation of work. A missing identity becomes `pending`. A previously `succeeded` identity is rearmed as a fresh `pending` generation with attempts reset to zero and fresh scheduling timestamps. Repeated routine signals are coalesced while work is already `pending`, `running`, or `retry`.
 
 A `blocked` item is never rearmed by routine scheduling. Deterministic failures remain blocked exactly as required by the README. Only the separately authorized administrative retry boundary may make blocked work eligible again.
@@ -86,4 +96,8 @@ transport thread never owns or mutates StateStore; `RuntimeEventBridge.tick()`
 drains normalized signals and performs bounded processing only on the synchronous
 owner loop.
 
-This work intentionally does **not** make Retrigger a periodic normal scheduler. It also does not implement Candidate deployment, semantic Home Assistant validation, backup, Apply, reload/restart, observation, promotion, rollback, or writes to the live Home Assistant configuration tree.
+This work intentionally does **not** make Retrigger a periodic normal scheduler.
+Candidate deployment, semantic validation, backup, Apply, restart, observation,
+promotion and rollback are now implemented by separate evidence-bound lanes; none
+of that authority is granted to routine scheduling or the event transport described
+here.

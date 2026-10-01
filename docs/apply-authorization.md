@@ -4,6 +4,15 @@ The sole product specification for this gate is the initial V2 root `README.md` 
 
 `authorize_candidate_apply()` is the final side-effect-free trust boundary before a later task may attempt live candidate mutation. It consumes only one exact persisted `PreparedDeployment`, its exact already re-proven `CandidateBackupEvidence`, and exact `PreApplyFreshnessEvidence` produced after fresh Repo B identity/head verification.
 
+## Current integration status
+
+This document preserves the narrow authorization boundary introduced before live
+Apply existed. Current `main` consumes this authorization through candidate Apply
+admission, the recovery-aware live Apply controller/writer, restart, observation,
+finalization, promotion and rollback lanes described in
+[Current architecture](architecture.md). Authorization itself remains
+side-effect-free and is not standalone mutation authority.
+
 ## Exact binding
 
 Authorization requires equality across:
@@ -24,7 +33,11 @@ Any mismatch fails closed. The privileged authorization object cannot be normall
 
 Apply authorization is intentionally ephemeral. It is not persisted as durable deployment authority and it does not classify a candidate as successful, observed, known-good, promoted, or safe to retry indefinitely.
 
-A future Apply implementation must freshly re-verify the isolated Stage bytes against the authorized Stage manifest immediately before the first live write. It must then preserve the remaining initial-README lifecycle: controlled Apply, appropriate reload/restart, health observation, result recording, promotion only after success, and rollback/rejection on failure.
+The integrated Apply admission/execution path freshly re-verifies the isolated Stage
+bytes against the authorized Stage manifest before live writing. It preserves the
+remaining initial-README lifecycle: controlled Apply, appropriate restart, health
+observation, result recording, promotion only after success, and
+rollback/rejection on failure.
 
 ## Explicit non-authority
 

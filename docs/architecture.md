@@ -1,139 +1,170 @@
-# Foundation architecture
+# Current architecture
 
-> **Specification authority:** this document describes implementation only. The sole
-> product specification is the initial `README.md` from root commit
-> `71d284ce447d79b044e332c9bc01ae801dc91947`. Nothing here creates requirements
-> beyond that baseline.
+> **Specification authority:** this document describes the implementation on the
+> current `main` branch. The sole product specification remains the initial root
+> `README.md` at commit `71d284ce447d79b044e332c9bc01ae801dc91947`.
+> Increment-specific documents retain the narrower authority boundaries that were
+> true when each component was introduced; this document is the current system map.
 
-## Implemented boundary
+## System boundary
 
-Supervisor options → strict config validation → exclusive protected state store →
-optional private Repo B identity verification → passive lifecycle and durable work
-bookkeeping. The app currently requests no Home Assistant configuration mount or
-API privilege and performs no synchronization or deployment.
+Home Assistant Supervisor starts one protected SyncApp service through the container
+launcher. Strict option validation occurs before durable state ownership. The app
+receives `/homeassistant` read-only, uses the Home Assistant Core and Supervisor APIs
+only through bounded purpose-specific clients, and stores app-owned state, credentials,
+snapshots, Git workspaces and journals below `/data/syncapp`.
 
-`syncapp/src/ha_syncapp/config.py` handles bounded options parsing and rejects
-coercions, ambiguous JSON and unsupported settings. `github_repo.py` performs the
-bounded authenticated GitHub metadata check for an explicitly configured Repo B.
-`state.py` owns SQLite, the lifetime process lock, installation identity, repository
-identity pins and recoverable work state. `__main__.py` handles lifecycle and
-sanitized logging. Signal handlers only set a flag; they never take Python threading
-locks. The idle wait checks that flag at most every 250 ms using monotonic time.
+The launcher owns process supervision and the interval timer, but never opens the
+state database. The service owns the stable process lock, schema 38 SQLite store and
+all durable state transitions. A same-owner Unix socket carries only bounded Retrigger
+requests from the launcher to that state-owning process.
 
-## Protected state
+Repo B must be an explicitly configured private GitHub repository. Before repository
+work, SyncApp verifies the canonical target through GitHub REST, requires a positive
+numeric repository identity, and pins that identity durably. A repository recreated at
+the same path fails closed. Git operations always use isolated app-owned workspaces;
+the live Home Assistant configuration directory is never a Git working tree.
 
-`/data/syncapp` is app-owned (0700). Its regular files are 0600. The data root and
-state directory must not themselves be symlinks; state/lock/SQLite sidecar files
-must be regular, single-link files owned by the app's user. This assumes a trusted
-Supervisor-managed data volume, not a filesystem concurrently controlled by an
-attacker with the same UID or host privileges.
+## Protected state and durable identities
 
-`instance.lock` is a stable inode with a nonblocking `flock` for the entire service
-lifetime. It is never unlinked. SQLite closes before the lock descriptor closes.
-SIGKILL and reboots release the OS lock, avoiding unsafe age-based lock stealing.
+`/data/syncapp` and its protected children reject symlinks, unsafe ownership or mode,
+unexpected file types and ambiguous hard links. The stable `instance.lock` inode is
+held with nonblocking `flock` for the service lifetime and is never age-stolen or
+unlinked. SQLite uses transactions and `synchronous=FULL`; unknown schemas, integrity
+failures and unsafe recovery files fail closed rather than triggering a destructive
+reset.
 
-`state.sqlite3` uses SQLite transactions and `synchronous=FULL`. Unknown schemas,
-empty/truncated databases, integrity failures, orphaned SQLite recovery files and
-missing/invalid identities fail closed. Initialization is allowed only for a newly
-created database. Migrations are sequential and non-destructive: schema 1 adds the
-recoverable-work table at schema 2; schema 2 adds repository identity bindings at
-schema 3; schema 3 adds synchronization baselines at schema 4; schema 4 adds
-[immutable prepared candidate/backup records](prepared-deployment-state.md) at schema 5.
-Installation identity, existing work, repository pins and baselines are preserved. There is no
-destructive reset fallback.
+The schema 38 store includes:
 
-The single `installation` record contains:
+- installation/run identity and clean/interrupted lifecycle evidence;
+- pinned repository identities and exact branch synchronization baselines;
+- unique durable work identities, attempts, status and bounded retry timestamps;
+- candidate orchestration checkpoints and producer-issued evidence bindings;
+- backup, Apply, restart, observation, finalization, promotion and rollback journals;
+- log/database retention evidence and replacement intent;
+- Repo B initialization, deploy-key generation/rotation and one-shot administrative
+  action receipts; and
+- identity-free runtime/deployment projections for troubleshooting.
 
-| Field | Purpose |
-| --- | --- |
-| `singleton` | Constrained singleton key (1) |
-| `installation_id` | Stable canonical UUID |
-| `boot_count` | Number of successfully committed starts |
-| `active_run_id` | Current UUID, cleared only on committed clean shutdown |
-| `last_started_at` | UTC timestamp of the latest start |
-| `last_stopped_at` | UTC timestamp of the latest clean stop |
+Re-enqueueing the same work identity is idempotent. Interrupted `running` work can be
+reconciled by its owning lane. Transient failures use controlled exponential backoff;
+deterministic failures block without looping. Blocked work is eligible again only when
+its source identity changes or an operator supplies the exact separately authorized
+administrative retry request.
 
-A committed start reports the prior active UUID before replacing it with the new
-one. This detects process interruption without claiming that deployment recovery
-has happened.
+## Routine producers
 
-## Durable recoverable work
+Routine production is deliberately separate from recovery. Startup bootstraps and
+bounded event/cadence services schedule or process Local configuration, Recorder
+database, generated runtime inventory, sanitized logs and candidate-head observations.
+Repeated signals coalesce against the lane's deterministic durable identity. A routine
+producer never rearms blocked work and never imports interrupted-work recovery
+semantics.
 
-Schema 2 adds a `work` table. It intentionally stores only scheduling/lifecycle
-metadata: a validated `work_kind`, deterministic `work_key`, status, attempt count
-and timestamps. This primitive does not store Home Assistant configuration,
-credentials or arbitrary diagnostic payloads.
+Local configuration is snapshotted byte-for-byte into protected staging before any
+publication. Recorder uses a consistent staged snapshot. Runtime inventory normalizes
+Home Assistant, Supervisor and analysis data for AI consumption. Log collection and
+database/log retention remain bounded and use dedicated branches. Branch routing keeps
+`main`, `candidate`, `database`, `runtime` and `logs` responsibilities separate.
 
-A deterministic `(work_kind, work_key)` is unique. Re-enqueueing it returns the
-existing state rather than creating duplicate active work. Eligible pending/retry
-work is claimed transactionally and moves to `running` with an incremented attempt
-counter. Work left `running` after process interruption can be returned to `retry`
-when the next service instance performs recovery.
+## Retrigger recovery
 
-Transient failures use exponential backoff beginning at 60 seconds and capped at
-one hour. After eight claimed attempts the item becomes `blocked`; permanent
-failures block immediately. Blocked and successful identities are not automatically
-re-executed. A changed source identity (for example, a different candidate commit)
-can be represented by a different deterministic key, while an explicit future
-administrative retry can be designed as a separate controlled transition.
+The launcher sends the first Retrigger request one full configured interval after
+startup. Missed intervals coalesce; a failed dispatch advances the deadline instead of
+forming a tight loop. The service then runs one deterministic bounded cycle across the
+implemented Local, Recorder, retention, runtime, log, rollback and candidate lanes.
 
-This establishes the durable substrate required by the initial README's
-**Retrigger Work Cron Job**, but does not implement the scheduler itself.
+Each lane recovers only its own interrupted or eligible retry work and performs at most
+its documented bounded action. Candidate lanes are ordered so one cycle cannot skip
+ahead through multiple deployment phases. Retrigger cannot create administrative
+authority, unblock deterministic failures, bypass validation, repeat an uncertain
+mutation blindly, or become the routine periodic producer.
 
-## Private Repo B trust gate
+See [Bounded Retrigger cycle](retrigger-cycle.md),
+[Retrigger schedule](retrigger-schedule.md) and
+[Retrigger runtime status](retrigger-runtime-status.md).
 
-Repo B configuration is optional while the app remains passive. When enabled, the
-administrator supplies an exact `owner/repository` target and GitHub token together
-through Home Assistant App options. The token is rendered as a password option and
-is held only in the protected app-options boundary; it is not copied into SQLite,
-repository URLs, logs or Repo B.
+## Candidate deployment
 
-Before a configured service run is recorded, SyncApp sends one bounded authenticated
-request to GitHub's repository metadata endpoint. The response is accepted only if
-it is valid JSON, names the configured target, has a positive stable repository ID
-and explicitly reports the repository as private. Response bodies and transport
-exception text are never surfaced in application errors.
+An exact trusted `candidate` commit advances through durable, evidence-bound gates:
 
-Schema 3 pins the verified GitHub repository ID by configured target. A later
-verification of the same `owner/repository` must return the same stable ID; a
-replacement repository at the same path fails closed. A separately configured
-target may establish its own independent binding.
+1. identity-bound detection and isolated Fetch/Stage;
+2. integrity/static analysis, dependency analysis and risk classification;
+3. exact-version isolated Home Assistant semantic validation;
+4. journaled Supervisor backup creation or exact interruption reconciliation;
+5. fresh repository, backup, Stage, plan and live-path Apply admission proof;
+6. journal-before-mutation controlled Apply with per-operation verification;
+7. authorized Core restart and staged Core, Supervisor, integration, startup-error,
+   resource, entity, automation/script and assertion observations;
+8. finalization and atomic non-force promotion plus known-good tagging on success; or
+9. durable rejection and separately authorized exact-backup rollback on failure.
 
-This trust gate performs no Git clone/fetch/pull/push and does not grant access to
-the Home Assistant configuration tree. It is a prerequisite for later repository
-operations, not synchronization itself.
+Every successor is created from persisted producer-issued evidence. A failed candidate
+SHA remains blocked; retry/backoff is limited to classified transient failure. Backup,
+observation, promotion and rollback cannot be skipped by startup, routine work,
+Retrigger or administrative controls.
 
-## Safety boundary still in force
+## Deploy-key administration and transport
 
-No current code applies Git content to the live Home Assistant configuration. The
-initial README's remote candidate model remains the required boundary: integrity
-checking, dependency/risk analysis, Home Assistant validation, recoverable backup,
-apply/reload, health observation, result recording, promotion on success and
-rollback on failure must exist before candidate changes can be considered safe.
-Git operations for local synchronization must likewise occur in staging rather
-than inside the live Home Assistant configuration directory.
+GitHub REST still uses the configured token for private/numeric repository identity and
+metadata operations. Git/SSH lanes can independently use the protected repository-scoped
+Ed25519 deploy key. No credential is embedded in repository URLs, logs, durable work
+identities or generated artifacts.
 
-## Next incremental capabilities
+One-shot UUIDv4-bound operator actions expose protected generation, read-only access
+testing, staged prepare/verify/activate rotation and explicit empty-repository
+initialization. Completed or deterministically blocked requests replay their durable
+receipt without repeating side effects; transient failures retain the shared bounded
+retry policy. GitHub enrollment and old-key removal remain manual, and the previous key
+is retained through activation.
 
-The initial README does not require these to be implemented in a fixed order.
-Each capability must receive its own tracked acceptance criteria and TDD increment.
-High-value remaining prerequisites include:
+Candidate fetch, ordinary publication, promotion, rollback repository proof and
+generated-history retention have separate opt-in deploy-key selectors. Each revalidates
+the exact protected generation and repository proof immediately before use, passes the
+private key only through an inherited descriptor, pins GitHub's host identity and has no
+silent token-Git fallback. See the consolidated
+[Repo B deploy-key operations](repo-b-deploy-key-operations.md) runbook.
 
-1. Build stable local staging snapshots outside the live configuration tree with
-   byte-for-byte content verification and the README-defined branch separation for
-   configuration, Recorder database, runtime data and logs.
-2. Connect the durable work state machine to event-driven scheduling plus the
-   separate Retrigger Work Cron Job.
-3. Collect normalized runtime inventory and topology information required for AI
-   analysis of entities, devices, integrations, areas, services and dependencies.
-4. Implement isolated Repo B Git transport only after the verified-repository
-   identity can be carried into least-privilege fetch/push operations.
-5. Implement candidate integrity/diff/conflict analysis, risk classification and
-   static/Home Assistant validation without live writes.
-6. Add recoverable backup, guarded apply, reload/restart, observation, rollback,
-   rejected-SHA blocking, known-good promotion and tagging as one tested deployment
-   transaction.
-7. Add consistent Recorder snapshots and bounded log retention/history management.
+## Runtime and deployment observability
 
-A working foundation, trust gate or recovery primitive is not evidence that
-bidirectional synchronization or controlled deployment is complete.
+Generated runtime artifacts and fixed structured log events expose bounded state for
+routine synchronization, retry/backoff, blocked work, initialization, deploy-key
+administration and deployment progress. Projections omit tokens, private keys, private
+paths, repository targets, branch/commit identities, request UUIDs, raw API/command
+responses and exception text where those values are not required for operator action.
+
+Runtime visibility is read-only and grants no retry, Apply, promotion or rollback
+authority. Detailed evidence remains in the protected state store; public diagnostics
+use counts, fixed outcome categories, timestamps and phase/action summaries.
+
+## Safety invariants
+
+- `/homeassistant` remains read-only to ordinary snapshot and validation paths; only
+  the reviewed Apply writer receives narrowly scoped mutation authority after every
+  upstream gate passes.
+- Git never runs in the live configuration tree.
+- Repo B identity pinning precedes repository work, and mutation uses non-force or
+  exact-lease semantics appropriate to the lane.
+- Configuration validation, backup, deployment observation, promotion and rollback
+  remain independent required safeguards.
+- Locking, unique work/commit identities, journaling, bounded retry and deterministic
+  blocking protect every recovery path.
+- Routine scheduling, Retrigger recovery and explicit administrative retry remain
+  separate authority domains.
+
+## Physical HAOS release gates
+
+Native amd64/aarch64 CI proves the reproducible container, AppArmor and semantic
+validator contracts, but it cannot prove the exact Supervisor/AppArmor behavior of an
+installed app on physical Home Assistant OS hardware. The following release gates
+therefore remain open and must not be inferred complete from source or CI:
+
+- [issue #212](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/212) —
+  semantic-validator confinement on physical Home Assistant OS;
+- [issue #251](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/251) —
+  application lifecycle, persistence and reboot behavior on physical Home Assistant OS.
+
+Use [Physical HAOS release evidence](haos-release-evidence.md) on a dedicated test
+installation. Its checker validates the evidence document's shape and integrity; it
+cannot establish that the physical observations occurred or were truthful. Neither
+gate may be closed without reviewed evidence from the designated HAOS system.

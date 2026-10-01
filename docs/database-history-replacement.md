@@ -8,6 +8,16 @@ The `database` branch is one-way Home Assistant → Repo B snapshot history. Ret
 
 `build_database_history_replacement()` and `replace_database_history()` implement only the history-replacement transport required after a trusted retention plan has already been produced and freshly authorized. Service orchestration and durable Retrigger scheduling are separate increments.
 
+## Current integration status
+
+This document preserves the mutation boundary introduced before service adoption.
+Current `main` integrates it into the routine Recorder retention service and the
+dedicated Retrigger retention lane. The compatibility token transport and the
+independently selected proof-bound deploy-key transport both retain the exact
+history, prewrite and lease safeguards described here. See
+[Current architecture](architecture.md) and
+[Deploy-key retention history adoption](deploy-key-retention-adoption.md).
+
 ## Generated replacement artifact
 
 A caller cannot nominate an arbitrary replacement Git commit SHA. The builder consumes an exact `DatabaseHistoryReplacementAuthorization` and an isolated SyncApp staging Git repository containing the authorized commit objects.
@@ -46,4 +56,4 @@ Only `transient` sets `retryable=True`. This deliberately prevents deterministic
 
 ## Candidate deployment isolation
 
-This retention transport does not alter candidate staging, configuration validation, backup creation, deployment observation, promotion, rollback, rejected-candidate SHA tracking, or any other candidate deployment safeguard from the initial V2 README. The recurring Retrigger mechanism remains enabled; integration of this transport into its durable work lanes is intentionally deferred to a separate task.
+This retention transport does not alter candidate staging, configuration validation, backup creation, deployment observation, promotion, rollback, rejected-candidate SHA tracking, or any other candidate deployment safeguard from the initial V2 README. The recurring Retrigger mechanism remains enabled; its dedicated retention lane consumes this transport without acquiring candidate-deployment authority.
