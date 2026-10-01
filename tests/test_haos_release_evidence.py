@@ -83,6 +83,18 @@ def test_complete_physical_evidence_has_stable_content_free_summary() -> None:
         "check_count": 26,
         "failed_count": 0,
         "evidence_sha256": result.sha256,
+        "gates": {
+            "application_lifecycle": {
+                "passed": True,
+                "check_count": 14,
+                "failed_count": 0,
+            },
+            "validator_confinement": {
+                "passed": True,
+                "check_count": 12,
+                "failed_count": 0,
+            },
+        },
     }
     summary = json.dumps(result.summary(), sort_keys=True)
     assert "123e4567" not in summary
@@ -100,6 +112,42 @@ def test_failed_observation_is_valid_evidence_but_not_a_release_pass() -> None:
 
     assert result.passed is False
     assert result.failed_count == 1
+    assert result.summary()["gates"] == {
+        "application_lifecycle": {
+            "passed": False,
+            "check_count": 14,
+            "failed_count": 1,
+        },
+        "validator_confinement": {
+            "passed": True,
+            "check_count": 12,
+            "failed_count": 0,
+        },
+    }
+
+
+def test_validator_failure_does_not_fail_application_lifecycle_gate() -> None:
+    evidence = _valid()
+    validator = evidence["validator"]
+    assert isinstance(validator, dict)
+    validator["ipv6_socket_denied"] = False
+
+    result = validate_haos_release_evidence(json.dumps(evidence), reference_time=NOW)
+
+    assert result.passed is False
+    assert result.failed_count == 1
+    assert result.summary()["gates"] == {
+        "application_lifecycle": {
+            "passed": True,
+            "check_count": 14,
+            "failed_count": 0,
+        },
+        "validator_confinement": {
+            "passed": False,
+            "check_count": 12,
+            "failed_count": 1,
+        },
+    }
 
 
 @pytest.mark.parametrize(
@@ -167,6 +215,11 @@ def test_cli_emits_only_content_free_summary_for_pass_and_failure(
         "check_count",
         "failed_count",
         "evidence_sha256",
+        "gates",
+    }
+    assert set(passed["gates"]) == {
+        "application_lifecycle",
+        "validator_confinement",
     }
 
     lifecycle = evidence["lifecycle"]
@@ -191,3 +244,17 @@ def test_cli_sanitizes_invalid_document_error(
     assert output.out == ""
     assert output.err == "HAOS release evidence is invalid\n"
     assert "secret-sentinel" not in output.err
+
+
+def test_runbook_defines_issue_specific_content_free_review() -> None:
+    runbook = (Path(__file__).resolve().parents[1] / "docs/haos-release-evidence.md").read_text()
+
+    for required in (
+        "application_lifecycle",
+        "validator_confinement",
+        "issues/212",
+        "issues/251",
+        "does not prove",
+        "original evidence document remains private",
+    ):
+        assert required in runbook

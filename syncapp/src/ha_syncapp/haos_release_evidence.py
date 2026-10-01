@@ -88,8 +88,18 @@ class HaosReleaseEvidence:
     """Content-free result of validating one physical evidence document."""
 
     sha256: str
-    check_count: int
-    failed_count: int
+    lifecycle_check_count: int
+    lifecycle_failed_count: int
+    validator_check_count: int
+    validator_failed_count: int
+
+    @property
+    def check_count(self) -> int:
+        return self.lifecycle_check_count + self.validator_check_count
+
+    @property
+    def failed_count(self) -> int:
+        return self.lifecycle_failed_count + self.validator_failed_count
 
     @property
     def passed(self) -> bool:
@@ -102,6 +112,16 @@ class HaosReleaseEvidence:
             "check_count": self.check_count,
             "failed_count": self.failed_count,
             "evidence_sha256": self.sha256,
+            "gates": {
+                "application_lifecycle": _gate_summary(
+                    self.lifecycle_check_count,
+                    self.lifecycle_failed_count,
+                ),
+                "validator_confinement": _gate_summary(
+                    self.validator_check_count,
+                    self.validator_failed_count,
+                ),
+            },
         }
 
 
@@ -153,8 +173,7 @@ def validate_haos_release_evidence(
         ):
             _invalid()
 
-        checks = [
-            True,
+        lifecycle_checks = [
             True,
             *(
                 _boolean(security[key])
@@ -168,9 +187,12 @@ def validate_haos_release_evidence(
             ),
         ]
         lifecycle = _exact_object(root["lifecycle"], _LIFECYCLE_KEYS)
-        checks.extend(_boolean(lifecycle[key]) for key in sorted(_LIFECYCLE_KEYS))
+        lifecycle_checks.extend(_boolean(lifecycle[key]) for key in sorted(_LIFECYCLE_KEYS))
         validator_checks = _exact_object(root["validator"], _VALIDATOR_KEYS)
-        checks.extend(_boolean(validator_checks[key]) for key in sorted(_VALIDATOR_KEYS))
+        confinement_checks = [True]
+        confinement_checks.extend(
+            _boolean(validator_checks[key]) for key in sorted(_VALIDATOR_KEYS)
+        )
 
         canonical = json.dumps(
             parsed,
@@ -181,8 +203,10 @@ def validate_haos_release_evidence(
         ).encode("ascii")
         return HaosReleaseEvidence(
             hashlib.sha256(canonical).hexdigest(),
-            len(checks),
-            sum(not check for check in checks),
+            len(lifecycle_checks),
+            sum(not check for check in lifecycle_checks),
+            len(confinement_checks),
+            sum(not check for check in confinement_checks),
         )
     except HaosReleaseEvidenceError:
         raise
@@ -220,6 +244,14 @@ def _document_bytes(document: str | bytes) -> bytes:
     if not raw or len(raw) > _MAX_BYTES:
         _invalid()
     return raw
+
+
+def _gate_summary(check_count: int, failed_count: int) -> dict[str, object]:
+    return {
+        "passed": failed_count == 0,
+        "check_count": check_count,
+        "failed_count": failed_count,
+    }
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
