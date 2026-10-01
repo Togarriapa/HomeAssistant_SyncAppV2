@@ -1213,6 +1213,8 @@ class StateStore:
             raise StateError("State integrity check failed")
         db.execute("PRAGMA synchronous = FULL")
         db.execute("PRAGMA foreign_keys = ON")
+        if db.execute("PRAGMA foreign_keys").fetchone() != (1,):
+            raise StateError("Unable to enforce state foreign keys")
         if created:
             if version != 0:
                 raise StateError("Unsupported state schema")
