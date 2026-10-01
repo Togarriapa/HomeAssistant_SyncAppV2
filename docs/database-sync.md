@@ -5,6 +5,19 @@ branch. `synchronize_database_snapshot()` publishes one explicitly supplied
 Recorder database through the same trusted, isolated and non-force publication
 boundaries used elsewhere in V2.
 
+## Current integration status
+
+After repository trust is established, `DatabaseSyncService` schedules and
+processes the normal startup/cadence path on the state-owner thread.
+`run_database_sync_retrigger_pass()` separately performs interruption recovery
+and at most one eligible retry. Successful snapshot publication can schedule the
+dedicated `database_retention` lane, whose fresh plan, authorization and
+lease-protected history replacement may prune old Repo B snapshot commits.
+
+Routine scheduling never rearms deterministic blocked work, and Retrigger does
+not become the normal cadence scheduler. Both paths require the configured
+absolute Recorder source; neither guesses a custom location.
+
 The cycle is deliberately layered:
 
 1. create a consistent SQLite online backup in isolated database staging;
@@ -29,6 +42,8 @@ and failure. Git is never initialized in the Home Assistant configuration tree.
 The caller must provide the Recorder database path explicitly; V2 does not guess
 custom Recorder locations.
 
-This increment does not implement database scheduling, retention pruning, restore,
-custom path discovery, remote database mutation, or the `candidate` deployment
-workflow. Those remain separately guarded work.
+Database restore and custom path discovery remain outside this publication
+boundary. Authorized retention rewriting is the only force-with-lease mutation
+of the `database` branch, and it grants no restore or candidate-deployment
+authority. Candidate validation, backup, Apply, observation, promotion and
+rollback remain separate guarded lanes.

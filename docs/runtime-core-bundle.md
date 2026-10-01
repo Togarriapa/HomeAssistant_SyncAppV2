@@ -31,11 +31,16 @@ The guarded runtime publication path can now carry these Home Assistant Core dat
 - entity registry records;
 - device registry records;
 - area registry records;
+- `floors` registry records;
+- `labels` registry records;
+- `integrations` config-entry records;
 - the REST Core configuration summary and collector counts in the runtime manifest.
 
-This does not claim that the README runtime inventory is complete. Integrations/config entries,
-floors, labels, Supervisor data, hardware data, topology/dependency analysis and deployment
-observation remain separate future increments.
+The normal runtime processor merges this Core bundle with bounded, content-free
+Retrigger recovery status before publication. This collector does not claim that
+the README runtime inventory is complete: Supervisor and hardware datasets are
+still not collected here, and topology/dependency or deployment evidence remains
+owned by its dedicated guarded analysis and deployment lanes.
 
 ## Unchanged safety properties
 

@@ -6,7 +6,11 @@ This document records the narrow Recorder/database retention mutation boundary d
 
 The `database` branch is one-way Home Assistant → Repo B snapshot history. Retention may prune old snapshot history, but retention never grants authority to deploy database content back into Home Assistant and never grants authority over `main`, `candidate`, `runtime`, or `logs`.
 
-`build_database_history_replacement()` and `replace_database_history()` implement only the history-replacement transport required after a trusted retention plan has already been produced and freshly authorized. Service orchestration and durable Retrigger scheduling are separate increments.
+`build_database_history_replacement()` and `replace_database_history()` remain
+the narrow history-replacement transport used only after a trusted retention
+plan has been produced and freshly authorized. Routine service orchestration and
+the durable Retrigger retention lane call this boundary without inheriting any
+additional branch or restore authority.
 
 ## Current integration status
 
