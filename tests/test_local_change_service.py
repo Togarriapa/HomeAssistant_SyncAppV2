@@ -283,6 +283,82 @@ def test_real_processor_hands_transient_failure_to_durable_retry(
         store.__exit__(None, None, None)
 
 
+def test_service_routes_configured_recorder_for_observation_and_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    source = _source(tmp_path)
+    recorder = source / "storage" / "recorder.db"
+    recorder.parent.mkdir()
+    recorder.write_bytes(b"first")
+    recorder.with_name("recorder.db-wal").write_bytes(b"first")
+    snapshot, workspace = _roots(tmp_path)
+    notify: list[Callable[[], None]] = []
+    routed: list[Path | None] = []
+
+    def fail(*args: object, **kwargs: object) -> LocalSyncResult:
+        del args
+        routed.append(kwargs.get("recorder_database"))  # type: ignore[arg-type]
+        raise LocalSyncError("sanitized")
+
+    monkeypatch.setattr(local_sync_work, "synchronize_local_configuration", fail)
+
+    try:
+        service = LocalChangeService(
+            store,
+            source,
+            snapshot,
+            workspace,
+            TARGET,
+            TOKEN,
+            quiet_seconds=1.0,
+            recorder_database=recorder,
+            consumer=_blocking_consumer(notify),
+        )
+        service.start(50.0)
+
+        recorder.write_bytes(b"second-generation")
+        recorder.with_name("recorder.db-wal").write_bytes(b"second-generation")
+        notify[0]()
+        assert service.tick(50.0) is None
+        assert service.tick(51.0) is None
+        assert routed == []
+
+        (source / "configuration.yaml").write_text("homeassistant:\n  name: changed\n")
+        notify[0]()
+        assert service.tick(52.0) is None
+        result = service.tick(53.0)
+
+        assert result is not None
+        assert result.processed is not None
+        assert result.processed.work.status == "retry"
+        assert routed == [recorder]
+        service.stop()
+    finally:
+        store.__exit__(None, None, None)
+
+
+def test_service_rejects_recorder_outside_source(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    source = _source(tmp_path)
+    snapshot, workspace = _roots(tmp_path)
+    try:
+        with pytest.raises(LocalChangeServiceError, match="initialization failed closed"):
+            LocalChangeService(
+                store,
+                source,
+                snapshot,
+                workspace,
+                TARGET,
+                TOKEN,
+                quiet_seconds=1.0,
+                recorder_database=tmp_path / "outside/recorder.db",
+            )
+    finally:
+        store.__exit__(None, None, None)
+
+
 def test_service_fails_closed_if_event_transport_stops(tmp_path: Path) -> None:
     store = _store(tmp_path)
     source = _source(tmp_path)
