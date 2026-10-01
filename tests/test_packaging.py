@@ -242,6 +242,40 @@ def test_consolidated_deploy_key_operator_runbook_contract() -> None:
         assert specialist in runbook
 
 
+def test_current_architecture_documentation_contract() -> None:
+    architecture = (ROOT / "docs/architecture.md").read_text()
+
+    for required in (
+        "# Current architecture",
+        "schema 38",
+        "Routine producers",
+        "Retrigger recovery",
+        "Candidate deployment",
+        "Deploy-key administration and transport",
+        "Runtime and deployment observability",
+        "Physical HAOS release gates",
+        "haos-release-evidence.md",
+        "issues/212",
+        "issues/251",
+    ):
+        assert required in architecture
+
+    for stale_claim in (
+        "performs no synchronization or deployment",
+        "does not implement the scheduler itself",
+        "High-value remaining prerequisites include",
+    ):
+        assert stale_claim not in architecture
+
+    for specialist in (
+        "apply-authorization.md",
+        "database-history-replacement.md",
+        "routine-work-scheduling.md",
+    ):
+        content = (ROOT / f"docs/{specialist}").read_text()
+        assert "## Current integration status" in content
+
+
 def test_quality_ci_installs_runtime_hashes_separately() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "python -m pip install --require-hashes -r syncapp/requirements.txt" in workflow
