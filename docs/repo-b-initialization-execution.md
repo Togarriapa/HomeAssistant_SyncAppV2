@@ -2,8 +2,8 @@
 
 SyncApp can execute one previously journaled Repo B initialization authority by
 publishing exactly one routed Home Assistant configuration snapshot to an empty
-repository's `main` branch. The executor is an explicit API boundary; ordinary
-startup, Local synchronization and Retrigger scheduling do not call it yet.
+repository's `main` branch. Only the explicit `initialize` startup control calls
+the executor; ordinary Local synchronization and Retrigger scheduling cannot.
 
 ## Preconditions
 

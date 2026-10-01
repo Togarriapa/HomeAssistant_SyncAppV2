@@ -2,8 +2,9 @@
 
 SyncApp provides a narrow, explicit staged workflow for replacing one protected
 Repo B deploy-key generation without silently discarding the previous working
-credential. Rotation is not connected to startup or Retrigger and never runs on
-a schedule. Every workflow is bound to one canonical request UUID, the configured
+credential. Rotation is invoked only by the explicit `repo_b_admin_action` startup
+control; Retrigger and periodic services never start or advance it. Every workflow
+is bound to one canonical request UUID, the configured
 private repository target and numeric repository ID, and the exact active key
 generation.
 
@@ -68,9 +69,9 @@ activation. The read-only
 [deploy-key reference transport](deploy-key-reference-transport.md) can consume
 an exact proof after re-inspecting the active generation; it does not authorize
 candidate fetch or repository writes. Removal, cleanup of the retained
-generation, write-capability verification, production transport integration,
-runtime/UI wiring, and explicit Repo B initialization remain separate tasks
-under story #388.
+generation and automated GitHub key removal remain deliberate operator tasks.
+Write-capable production lanes remain independently selected and require their own
+fresh access proof. Repo B initialization is exposed as a separate one-shot action.
 
 Rotation grants no synchronization, deployment, promotion, rollback, or Retrigger
 authority. Existing token-backed Git transport and every validation, backup,

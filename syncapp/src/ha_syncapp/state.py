@@ -25,7 +25,7 @@ from .prepared_deployment import (
 if TYPE_CHECKING:
     from .candidate_backup import CandidateBackupEvidence
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 _WORK_KIND = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -79,6 +79,18 @@ class AdministrativeRetryRuntimeEvidence:
 
     outcome: str
     processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeployKeyAdministrativeRuntimeEvidence:
+    """Identity-free deploy-key operator action evidence."""
+
+    action: str
+    status: str
+    outcome: str
+    attempts: int
+    processed_at: datetime
+    next_attempt_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +346,23 @@ class StateStore:
             "identity_sha256 TEXT NOT NULL, "
             "outcome TEXT NOT NULL CHECK (outcome IN ('retried','rejected')), "
             "processed_at TEXT NOT NULL, record_sha256 TEXT NOT NULL)"
+        )
+
+    @staticmethod
+    def _create_deploy_key_administrative_request_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS deploy_key_administrative_request ("
+            "request_id TEXT NOT NULL, action TEXT NOT NULL, "
+            "target_sha256 TEXT NOT NULL, repository_id INTEGER NOT NULL "
+            "CHECK (repository_id > 0), status TEXT NOT NULL "
+            "CHECK (status IN ('completed','retry','blocked')), "
+            "outcome TEXT NOT NULL, attempts INTEGER NOT NULL "
+            "CHECK (attempts > 0 AND attempts <= 8), next_attempt_at TEXT, "
+            "processed_at TEXT NOT NULL, public_key TEXT, fingerprint TEXT, "
+            "generation_id TEXT, record_sha256 TEXT NOT NULL, "
+            "PRIMARY KEY (request_id, action), "
+            "CHECK ((status = 'retry' AND next_attempt_at IS NOT NULL) OR "
+            "(status != 'retry' AND next_attempt_at IS NULL)))"
         )
 
     @staticmethod
@@ -1233,6 +1262,7 @@ class StateStore:
                 self._create_candidate_semantic_checkpoint_table(db)
                 self._create_candidate_backup_checkpoint_table(db)
                 self._create_administrative_retry_request_table(db)
+                self._create_deploy_key_administrative_request_table(db)
                 self._create_repo_b_initialization_table(db)
                 self._create_repo_b_initialization_execution_table(db)
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -1279,6 +1309,7 @@ class StateStore:
                 34,
                 35,
                 36,
+                37,
                 SCHEMA_VERSION,
             }:
                 raise StateError("Unsupported state schema")
@@ -1504,6 +1535,12 @@ class StateStore:
                     db.execute("BEGIN IMMEDIATE")
                     self._expand_repo_b_initialization_table_v37(db)
                     self._create_repo_b_initialization_execution_table(db)
+                    db.execute("PRAGMA user_version = 37")
+                version = 37
+            if version == 37:
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._create_deploy_key_administrative_request_table(db)
                     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._identity()
 
@@ -2057,6 +2094,61 @@ class StateStore:
                 AdministrativeRetryRuntimeEvidence(
                     outcome=outcome,
                     processed_at=parsed,
+                )
+            )
+        return tuple(evidence)
+
+    def deploy_key_administrative_runtime_evidence(
+        self,
+    ) -> tuple[DeployKeyAdministrativeRuntimeEvidence, ...]:
+        """Read bounded operator outcomes without request, repository or key identity."""
+
+        try:
+            rows = self._connection.execute(
+                "SELECT action,status,outcome,attempts,processed_at,next_attempt_at "
+                "FROM deploy_key_administrative_request "
+                "ORDER BY processed_at, action LIMIT ?",
+                (MAX_RECOVERY_WORK_EVIDENCE_ROWS + 1,),
+            ).fetchall()
+        except sqlite3.Error:
+            raise StateError("Unable to read deploy-key administrative evidence") from None
+        if len(rows) > MAX_RECOVERY_WORK_EVIDENCE_ROWS:
+            raise StateError("Deploy-key administrative evidence exceeds the limit")
+
+        evidence: list[DeployKeyAdministrativeRuntimeEvidence] = []
+        actions = {
+            "generate",
+            "test",
+            "rotate_prepare",
+            "rotate_verify",
+            "rotate_activate",
+            "initialize",
+        }
+        for row in rows:
+            if len(row) != 6:
+                raise StateError("Invalid deploy-key administrative evidence")
+            action, status, outcome, attempts, processed_at, next_attempt_at = row
+            if (
+                action not in actions
+                or status not in {"completed", "retry", "blocked"}
+                or type(outcome) is not str
+                or not outcome
+                or type(attempts) is not int
+                or not 1 <= attempts <= 8
+            ):
+                raise StateError("Invalid deploy-key administrative evidence")
+            processed = _parse_timestamp(processed_at)
+            next_attempt = None if next_attempt_at is None else _parse_timestamp(next_attempt_at)
+            if (status == "retry") != (next_attempt is not None):
+                raise StateError("Invalid deploy-key administrative evidence")
+            evidence.append(
+                DeployKeyAdministrativeRuntimeEvidence(
+                    action,
+                    status,
+                    outcome,
+                    attempts,
+                    processed,
+                    next_attempt,
                 )
             )
         return tuple(evidence)

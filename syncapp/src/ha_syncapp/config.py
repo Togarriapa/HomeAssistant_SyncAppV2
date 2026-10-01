@@ -9,6 +9,7 @@ from typing import cast
 from uuid import UUID
 
 from .administrative_retry_request import AdministrativeRetryRequest
+from .deploy_key_administration import ACTIONS, DeployKeyAdministrativeRequest
 
 MAX_OPTIONS_BYTES = 65536
 _REPO_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
@@ -41,6 +42,7 @@ class Config:
         default=None,
         repr=False,
     )
+    deploy_key_administrative_request: DeployKeyAdministrativeRequest | None = None
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -141,6 +143,8 @@ def load_config(path: Path) -> Config:
         "administrative_retry_request_id",
         "administrative_retry_work_kind",
         "administrative_retry_work_key",
+        "repo_b_admin_action",
+        "repo_b_admin_request_id",
     }
     if not isinstance(options, dict) or options.keys() - supported:
         raise ConfigError("Options must contain only supported keys")
@@ -226,6 +230,23 @@ def load_config(path: Path) -> Config:
             cast(str, retry_work_key),
         )
 
+    deploy_key_action = options.get("repo_b_admin_action")
+    deploy_key_request_id = options.get("repo_b_admin_request_id")
+    if (deploy_key_action is None) != (deploy_key_request_id is None):
+        raise ConfigError("Deploy-key administrative options must be configured together")
+    deploy_key_administrative_request = None
+    if deploy_key_action is not None:
+        if (
+            repo_b is None
+            or deploy_key_action not in ACTIONS
+            or not _valid_request_id(deploy_key_request_id)
+        ):
+            raise ConfigError("Invalid deploy-key administrative request")
+        deploy_key_administrative_request = DeployKeyAdministrativeRequest(
+            cast(str, deploy_key_request_id),
+            cast(str, deploy_key_action),
+        )
+
     return Config(
         log_level=level,
         status_interval_seconds=interval,
@@ -241,4 +262,5 @@ def load_config(path: Path) -> Config:
         recorder_database_path=cast(str | None, recorder_database_path),
         recorder_retention_days=recorder_retention_days,
         administrative_retry_request=administrative_retry_request,
+        deploy_key_administrative_request=deploy_key_administrative_request,
     )

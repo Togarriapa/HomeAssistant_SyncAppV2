@@ -30,11 +30,13 @@ from ha_syncapp.retrigger_runtime_status import (
     render_candidate_risk_runtime_status,
     render_candidate_semantic_runtime_status,
     render_candidate_static_runtime_status,
+    render_deploy_key_administrative_runtime_status,
     render_deployment_rollback_runtime_status,
     render_retrigger_runtime_status,
 )
 from ha_syncapp.state import (
     AdministrativeRetryRuntimeEvidence,
+    DeployKeyAdministrativeRuntimeEvidence,
     DeploymentRollbackRuntimeEvidence,
     RecoveryWorkEvidence,
     StateStore,
@@ -172,6 +174,26 @@ def test_empty_runtime_inventory_has_explicit_administrative_retry_counts(
         "outcomes": {"rejected": 0, "retried": 0},
         "latest_processed_at": None,
     }
+
+
+def test_deploy_key_administrative_status_is_identity_free() -> None:
+    evidence = (
+        DeployKeyAdministrativeRuntimeEvidence(
+            "generate", "completed", "generated", 1, NOW - timedelta(minutes=1), None
+        ),
+        DeployKeyAdministrativeRuntimeEvidence(
+            "test", "retry", "retry", 2, NOW, NOW + timedelta(minutes=2)
+        ),
+    )
+
+    rendered = render_deploy_key_administrative_runtime_status(evidence, reference_time=NOW)
+
+    assert rendered["total"] == 2
+    assert rendered["actions"]["generate"] == 1
+    assert rendered["actions"]["test"] == 1
+    assert rendered["statuses"] == {"blocked": 0, "completed": 1, "retry": 1}
+    assert rendered["attempts"] == {"maximum": 2, "total": 3}
+    assert rendered["next_attempt_at"] == "2026-09-13T01:02:00+00:00"
 
 
 def test_candidate_apply_recovery_is_visible_without_deployment_identity(tmp_path: Path) -> None:
@@ -455,6 +477,21 @@ def test_empty_status_is_explicit_and_deterministic(tmp_path: Path) -> None:
         "administrative_retry_requests": {
             "total": 0,
             "outcomes": {"rejected": 0, "retried": 0},
+            "latest_processed_at": None,
+        },
+        "deploy_key_administrative_requests": {
+            "total": 0,
+            "actions": {
+                "generate": 0,
+                "initialize": 0,
+                "rotate_activate": 0,
+                "rotate_prepare": 0,
+                "rotate_verify": 0,
+                "test": 0,
+            },
+            "statuses": {"blocked": 0, "completed": 0, "retry": 0},
+            "attempts": {"maximum": 0, "total": 0},
+            "next_attempt_at": None,
             "latest_processed_at": None,
         },
         "repo_b_initialization": {

@@ -38,3 +38,9 @@ configuration:
   administrative_retry_work_key:
     name: Administrative retry work key
     description: Exact durable work key for the selected blocked item. This value is masked and never logged.
+  repo_b_admin_action:
+    name: Repo B deploy-key action
+    description: Optional one-shot action to generate or test the key, stage or advance rotation, or initialize an empty Repo B.
+  repo_b_admin_request_id:
+    name: Repo B deploy-key request ID
+    description: New lowercase UUIDv4 for the selected one-shot action. Reusing it safely replays the durable result.
