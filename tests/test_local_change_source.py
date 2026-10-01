@@ -4,11 +4,11 @@ import os
 from pathlib import Path
 
 import pytest
-from ha_syncapp.main_routing import build_main_path_router
 from ha_syncapp.local_change_source import (
     LocalChangeSourceError,
     observe_local_change_source,
 )
+from ha_syncapp.main_routing import build_main_path_router
 
 
 def test_observation_detects_meaningful_configuration_change(tmp_path: Path) -> None:
