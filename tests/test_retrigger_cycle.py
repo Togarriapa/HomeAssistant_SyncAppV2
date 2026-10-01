@@ -1074,7 +1074,7 @@ def test_cycle_passes_explicit_inputs_and_separates_core_credential(
     assert local_args[-2:] == (TARGET, "github-secret")
     assert database_args[-2:] == (TARGET, "github-secret")
     assert runtime_args[-2:] == (TARGET, "github-secret")
-    assert local_kwargs == {}
+    assert local_kwargs == {"recorder_database": tmp_path / "homeassistant/home-assistant_v2.db"}
     assert database_kwargs == {}
     assert runtime_kwargs == {"core_token": "core-secret"}
     assert set(fetch_stage_kwargs) == {"reference_time"}
