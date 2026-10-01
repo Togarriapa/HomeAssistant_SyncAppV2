@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from .deploy_key_publication_authority import PublicationCredential
@@ -14,6 +15,7 @@ from .local_change_bridge import (
 from .local_change_debounce import LocalChangeDebounceError, LocalChangeDebouncer
 from .local_change_inotify import consume_local_change_events
 from .local_change_mailbox import LocalChangeMailbox, LocalChangeMailboxError
+from .local_change_source import observe_local_change_source
 from .local_change_worker import (
     LocalChangeWorker,
     LocalChangeWorkerConsumer,
@@ -25,6 +27,7 @@ from .local_sync_process import (
     LocalSyncProcessResult,
     run_local_sync_process,
 )
+from .main_routing import build_main_path_router
 from .state import StateStore
 
 
@@ -51,6 +54,7 @@ class LocalChangeService:
         github_token: PublicationCredential,
         *,
         quiet_seconds: float,
+        recorder_database: Path | None = None,
         consumer: LocalChangeWorkerConsumer = consume_local_change_events,
         observer: LocalChangeObserver | None = None,
         processor: LocalSyncProcessor = run_local_sync_process,
@@ -61,6 +65,7 @@ class LocalChangeService:
             raise LocalChangeServiceError("local change service processor is invalid")
 
         try:
+            include_path = build_main_path_router(source, recorder_database)
             mailbox = LocalChangeMailbox()
             debouncer = LocalChangeDebouncer(
                 store,
@@ -68,7 +73,11 @@ class LocalChangeService:
                 quiet_seconds=quiet_seconds,
             )
             bridge = (
-                LocalChangeBridge(source, debouncer)
+                LocalChangeBridge(
+                    source,
+                    debouncer,
+                    observer=partial(observe_local_change_source, include_path=include_path),
+                )
                 if observer is None
                 else LocalChangeBridge(source, debouncer, observer=observer)
             )
@@ -77,6 +86,7 @@ class LocalChangeService:
             LocalChangeBridgeError,
             LocalChangeDebounceError,
             LocalChangeWorkerError,
+            ValueError,
         ) as exc:
             raise LocalChangeServiceError(
                 "local change service initialization failed closed"
@@ -91,7 +101,11 @@ class LocalChangeService:
         self._mailbox = mailbox
         self._bridge = bridge
         self._worker = worker
-        self._processor = processor
+        self._processor = (
+            partial(processor, recorder_database=recorder_database)
+            if processor is run_local_sync_process
+            else processor
+        )
         self._started = False
         self._stopped = False
 
