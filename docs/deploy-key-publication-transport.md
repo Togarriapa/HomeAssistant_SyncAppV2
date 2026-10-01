@@ -1,9 +1,10 @@
 # Repo B deploy-key non-force publication transport
 
 SyncApp now has a proof-bound SSH primitive for publishing one immutable
-`PublicationIntent` from an isolated `GitWorkspace`. The primitive is available
-for later initialization/runtime integration but is not connected to the active
-Local, Runtime, Logs, Database, Candidate, promotion, or retention lanes.
+`PublicationIntent` from an isolated `GitWorkspace`. Explicit initialization and
+the independently selected Local, Runtime, Logs and Database publication lanes
+now consume this primitive. Candidate promotion and retention use their narrower
+specialized deploy-key transports.
 
 ## Exact authority and pre-mutation proof
 
@@ -57,14 +58,14 @@ deterministic divergence and cannot be retriggered indefinitely.
 
 ## Runtime adoption boundary
 
-This primitive does not alter the existing token-backed production publication
-or promotion transports. Explicit initialization must first establish durable,
-reviewed deploy-key authority and runtime status. Later adoption must preserve
-publication preflight, immutable intent, fast-forward ancestry, post-push proof,
-durable baseline completion, locking, idempotency, Retrigger backoff, and every
-Candidate deployment safeguard. When initialized deploy-key authority is absent
-or invalid, the runtime must fail closed: it must never silently fall back to token-backed Git transport.
+Token remains the compatibility default and promotion remains independently
+selected. Explicit initialization first establishes the durable baseline. Runtime
+adoption preserves publication preflight, immutable intent, fast-forward ancestry,
+post-push proof, durable baseline completion, locking, idempotency, Retrigger
+backoff, and every Candidate deployment safeguard. When initialized deploy-key
+authority is absent or invalid, the runtime fails closed: it never silently falls
+back to token-backed Git transport. It must never silently fall back to token-backed Git transport.
 
-No live SSH request, GitHub enrollment/removal, Repo B write, Home Assistant or
-Supervisor mutation, deployment, promotion, retention rewrite, or rollback is
-performed by this development increment.
+GitHub enrollment/removal remains a manual operator action. This primitive grants
+no Home Assistant or Supervisor mutation, deployment, promotion, retention rewrite,
+or rollback authority.

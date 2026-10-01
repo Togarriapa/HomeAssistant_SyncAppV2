@@ -92,6 +92,11 @@ digests and raw options and grants no retry authority.
 
 ## Repo B deploy-key foundation
 
+Start with the consolidated [Repo B deploy-key operations](../docs/repo-b-deploy-key-operations.md)
+runbook for enrollment, initialization, staged rollout, verification, rotation,
+recovery, compatibility rollback and key removal. The references below retain the
+detailed implementation and security boundaries.
+
 The protected Ed25519 generation boundary is exposed through explicit one-shot App
 options; GitHub enrollment remains deliberately manual. It returns only the
 public key, SHA-256 fingerprint, algorithm, and generation UUID; private key bytes

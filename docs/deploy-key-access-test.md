@@ -2,8 +2,9 @@
 
 SyncApp now has a narrow, read-only boundary for proving that one protected
 deploy-key generation can authenticate to the configured private Repo B. This
-is an explicit operator action: it is not run by startup or Retrigger and it
-does not enroll, rotate, remove, or select a key for deployment transport.
+is available as an explicit startup control and is also required while startup
+constructs any selected deploy-key transport authority. Retrigger never schedules
+it as an independent action. It does not enroll, rotate, remove, or select a key.
 
 Before opening SSH, `test_repo_b_deploy_key_access()` uses the existing
 token-authenticated GitHub metadata boundary to re-prove the configured
@@ -52,10 +53,10 @@ This proof grants no mutation or deployment authority. The separate
 [Repo B deploy-key reference transport](deploy-key-reference-transport.md)
 can consume it for a second bounded SSH metadata read only after re-inspecting
 the exact protected generation and matching the configured target and numeric
-repository ID. Existing token-based candidate fetch/publication and every
-validation, backup, observation, promotion, rollback, locking, and Retrigger
-safeguard remain unchanged. GitHub enrollment/removal, write transport, explicit
-Repo B initialization, runtime wiring, and administrative UI remain separate
-reviewed increments under story #388. The staged
-[deploy-key rotation workflow](deploy-key-rotation.md) also reuses this proof
-but intentionally retains the previous generation.
+repository ID. Candidate fetch, ordinary publication, promotion, rollback proof,
+retention and explicit initialization can now consume an exact proof through their
+independently selected authorities. Every validation, backup, observation,
+promotion, rollback, locking, and Retrigger safeguard remains unchanged. GitHub
+enrollment/removal remains manual. The staged [deploy-key rotation
+workflow](deploy-key-rotation.md) also reuses this proof but intentionally retains
+the previous generation.

@@ -42,8 +42,8 @@ contents are not included in diagnostics.
 Generation performs no network operation and grants no Git or GitHub authority.
 The separate [read-only Repo B access test](deploy-key-access-test.md) combines
 this protected generation with token-authenticated repository-identity proof;
-it does not change the generation boundary. Rotation, GitHub enrollment/removal,
-deploy-key transport, explicit Repo B initialization, and runtime exposure remain
-separate tasks. Existing token transport and all
-candidate validation, backup, observation, promotion, rollback, locking, and
+it does not change the generation boundary. The explicit operator control,
+rotation, initialization and independently selected transport lanes now compose
+this primitive without broadening it. GitHub enrollment/removal remains manual.
+Candidate validation, backup, observation, promotion, rollback, locking, and
 Retrigger safeguards are unchanged.
