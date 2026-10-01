@@ -4,6 +4,16 @@ Task [#208](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/208) de
 
 `StateStore.record_prepared_deployment(deployment_id, evidence, prepared_at=...)` records a canonical UUID plus an internally validated `CandidateBackupEvidence` produced by the backup gate. `StateStore.prepared_deployment(deployment_id)` retrieves the exact immutable `PreparedDeployment`, or `None` for an absent ID, after reopening the protected store. The record exposes `deployment_id`, `evidence`, and the original UTC `prepared_at` timestamp.
 
+## Current integration status
+
+Successful backup execution records this evidence and enqueues the bounded
+`candidate_apply` admission lane. Fresh Apply authorization is persisted as a
+separate intent before `candidate_apply_execute` may mutate live configuration.
+The resulting deployment identity is subsequently re-proved by restart/health
+observation, promotion and rollback lanes, including their Retrigger recovery
+adapters. Replaying a prepared record never skips validation, freshness, backup
+or observation gates.
+
 ## Persistence and identity
 
 Schema v5 adds `prepared_deployment` through an explicit v4→v5 transaction. New installations create the same table. Earlier supported schemas migrate sequentially without resetting installation identity, boot/interruption state, work records, repository identity pins or synchronization baselines. Unexpected existing tables, unsupported schemas and failed migrations are not adopted or silently repaired.
@@ -31,9 +41,18 @@ Reads validate every field, the canonical checksum and the current protected rep
 
 This is an in-process persistence API. Callers must pass the successful output of `create_candidate_backup`; a dataclass or its checksum alone cannot prove that Supervisor was contacted. The API validates evidence shape and repository consistency and preserves the association without claiming to repeat semantic validation or verify the backup remotely.
 
-The durable record supplies evidence for later orchestration and diagnostics. It does not copy candidate bytes, call Supervisor, enqueue deployment work, alter blocked work, reload/restart Home Assistant, observe health, promote/tag a commit or restore a backup. It changes neither service scheduling nor the external Retrigger cronjob. Runtime publication of these records and interrupted deployment execution remain future integration work.
+The durable record supplies evidence to the integrated orchestration and
+diagnostic lanes. The persistence API itself does not copy candidate bytes, call
+Supervisor, alter blocked work, reload/restart Home Assistant, observe health,
+promote/tag a commit or restore a backup; those authorities remain in their
+separate evidence-bound executors. Runtime recovery reporting exposes only
+bounded content-free status, not candidate contents or credentials.
 
-Before Apply becomes reachable, orchestration must independently re-prove the current private repository, baseline, staged bytes, semantic validation, runtime/version evidence and backup recoverability, and establish observation and rollback safeguards. Reopening a prepared record must never skip those gates. There is no administrative supersession mechanism for a prepared candidate in this slice.
+Before Apply executes, orchestration must independently re-prove the current
+private repository, baseline, staged bytes, semantic validation, runtime/version
+evidence and backup recoverability, and establish observation and rollback
+safeguards. Reopening a prepared record must never skip those gates. There is no
+administrative supersession mechanism for a prepared candidate in this slice.
 
 ## Validation evidence — 2026-09-10
 
