@@ -132,3 +132,46 @@ the public tracker. The `evidence_sha256` is computed from canonical JSON, so
 formatting and object-key order do not change it. Any substantive field change
 does. Re-run the complete physical procedure for a new build; do not carry a prior
 observation forward.
+
+## Issue-specific content-free review
+
+The summary retains the aggregate fields and also contains two fixed gate entries:
+
+```json
+{
+  "gates": {
+    "application_lifecycle": {
+      "passed": true,
+      "check_count": 14,
+      "failed_count": 0
+    },
+    "validator_confinement": {
+      "passed": true,
+      "check_count": 12,
+      "failed_count": 0
+    }
+  }
+}
+```
+
+`application_lifecycle` is the content-free result for
+[issue #251](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/251).
+It covers the enforced parent profile, the three security booleans and the ten
+lifecycle observations. `validator_confinement` is the content-free result for
+[issue #212](https://github.com/Togarriapa/HomeAssistant_SyncAppV2/issues/212).
+It covers the enforced child profile and the eleven validator observations.
+Their check and failure counts sum exactly to the aggregate values.
+
+Post the complete content-free checker summary to both issues, but assess only the
+matching fixed gate entry when deciding that issue's result. A failed lifecycle
+observation does not mark validator confinement failed, and a failed validator
+observation does not mark application lifecycle failed. Exit status remains
+aggregate: `0` only when both gates pass, `1` when either gate has a false
+observation, and `2` for invalid evidence.
+
+This partition does not prove that any physical observation occurred, and the
+original evidence document remains private and still requires independent review. Never post
+its observation UUID, platform versions, hardware values, profile labels, paths,
+repository information, credentials, raw field names, or diagnostics. A gate may be
+closed only from reviewed physical evidence, not from a structurally valid summary
+alone.
