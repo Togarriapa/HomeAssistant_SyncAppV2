@@ -25,7 +25,7 @@ from .deploy_key_access import (
 )
 from .git_workspace import GitWorkspace, WorkspaceError, prepare_git_workspace
 from .local_git import GitError, create_snapshot_commit, initialize_repository
-from .main_routing import include_in_main
+from .main_routing import build_main_path_router
 from .publication_intent import PublicationIntent
 from .publication_transport import (
     PublicationTransportError,
@@ -101,6 +101,7 @@ def execute_authorized_repo_b_initialization(
     git_executable: Path = Path("/usr/bin/git"),
     ssh_executable: Path = Path("/usr/bin/ssh"),
     now: datetime | None = None,
+    recorder_database: Path | None = None,
 ) -> RepoBInitializationExecution:
     """Execute or reconcile exactly one journaled empty-repository authority."""
 
@@ -157,7 +158,11 @@ def execute_authorized_repo_b_initialization(
             remote_proven_empty = True
 
         prepared_at = existing.prepared_at if existing is not None else when
-        snapshot = capture_snapshot(source, snapshot_root, include_path=include_in_main)
+        snapshot = capture_snapshot(
+            source,
+            snapshot_root,
+            include_path=build_main_path_router(source, recorder_database),
+        )
         workspace = prepare_git_workspace(snapshot.root, workspace_root)
         initialize_repository(workspace, default_branch="main")
         commit_sha = create_snapshot_commit(workspace, committed_at=prepared_at)
