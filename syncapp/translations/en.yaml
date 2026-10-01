@@ -20,6 +20,9 @@ configuration:
   repo_b_rollback_transport:
     name: Repo B rollback proof transport
     description: Select token Git or the explicitly enrolled and verified deploy key for read-only rollback repository proof. Home Assistant backup restore remains Supervisor-authorized.
+  repo_b_retention_transport:
+    name: Repo B retention rewrite transport
+    description: Select token Git or the explicitly enrolled and verified deploy key for generated logs and Recorder history retention rewrites.
   recorder_database_path:
     name: Recorder database path
     description: Optional absolute path to the Recorder database below /homeassistant.

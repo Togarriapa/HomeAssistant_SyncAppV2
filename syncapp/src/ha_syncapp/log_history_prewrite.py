@@ -43,6 +43,17 @@ def reprove_log_history_prewrite(
     except RepositoryVerificationError:
         raise LogHistoryPrewriteError("trusted logs repository verification failed") from None
 
+    return verify_log_history_prewrite(evidence=evidence, current=current)
+
+
+def verify_log_history_prewrite(
+    *,
+    evidence: TrustedLogHistoryEvidence,
+    current: BranchHead,
+) -> TrustedLogHistoryPrewrite:
+    """Bind already authenticated fresh branch evidence to the retention plan."""
+
+    _validate_evidence_boundary(evidence)
     _require_unchanged_head(evidence, current)
     return TrustedLogHistoryPrewrite(
         target=current.target,

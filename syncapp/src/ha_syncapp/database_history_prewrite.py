@@ -50,6 +50,17 @@ def reprove_database_history_prewrite(
             "trusted database repository verification failed"
         ) from None
 
+    return verify_database_history_prewrite(evidence=evidence, current=current)
+
+
+def verify_database_history_prewrite(
+    *,
+    evidence: TrustedDatabaseHistoryEvidence,
+    current: BranchHead,
+) -> TrustedDatabaseHistoryPrewrite:
+    """Bind already authenticated fresh branch evidence to the retention plan."""
+
+    _validate_evidence_boundary(evidence)
     _require_unchanged_head(evidence, current)
     return _trusted_database_history_prewrite(current)
 

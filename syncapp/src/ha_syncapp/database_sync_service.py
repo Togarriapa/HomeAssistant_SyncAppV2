@@ -19,6 +19,7 @@ from .database_sync_process import (
 )
 from .database_sync_schedule import DatabaseSyncScheduleError, schedule_database_sync_generation
 from .deploy_key_publication_authority import PublicationCredential
+from .deploy_key_retention_authority import DeployKeyRetentionAuthority
 from .state import StateStore
 
 
@@ -51,6 +52,7 @@ class DatabaseSyncService:
         interval_seconds: float,
         retention_days: int | None = None,
         publication_credential: PublicationCredential | None = None,
+        retention_authority: DeployKeyRetentionAuthority | None = None,
     ) -> None:
         if type(store) is not StateStore:
             raise DatabaseSyncServiceError("database service state store is invalid")
@@ -67,7 +69,8 @@ class DatabaseSyncService:
         self._snapshot_staging_root = snapshot_staging_root
         self._workspace_root = workspace_root
         self._target = target
-        self._github_token = github_token
+        self._retention_token = None if retention_authority is not None else github_token
+        self._retention_authority = retention_authority
         self._publication_credential = publication_credential or github_token
         self._interval_seconds = float(interval_seconds)
         if retention_days is not None and (
@@ -120,9 +123,10 @@ class DatabaseSyncService:
                     self._store,
                     self._workspace_root / "retention",
                     self._target,
-                    self._github_token,
+                    self._retention_token,
                     retention_days=self._retention_days,
                     reference_time=datetime.now(UTC),
+                    retention_authority=self._retention_authority,
                 )
             )
         except (

@@ -42,9 +42,9 @@ to use the Supervisor token and retain their journal-before-mutation, observatio
 and ambiguity safeguards. The deploy-key rollback authority performs no Git write,
 force push, history rewrite, backup restore, or deployment mutation.
 
-Retention history rewrites remain independently token-backed. A later retention
-transport increment must preserve its destructive-operation safeguards and is not
-enabled by this option.
+Retention history rewrites remain independently selected by
+`repo_b_retention_transport`; enabling rollback deploy-key proof does not change
+their credential or destructive-operation safeguards.
 
 ## Failures and recovery
 

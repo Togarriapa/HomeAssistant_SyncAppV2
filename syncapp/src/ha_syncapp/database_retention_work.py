@@ -33,6 +33,10 @@ from .database_retention_staging import (
     DatabaseRetentionStagingError,
     prepare_database_history_staging,
 )
+from .deploy_key_retention_authority import (
+    DeployKeyRetentionAuthority,
+    DeployKeyRetentionAuthorityError,
+)
 from .github_repo import RepositoryVerificationError, fetch_trusted_branch_head
 from .state import StateError, StateStore, WorkItem
 
@@ -103,10 +107,11 @@ def database_retention_work_key(evidence: TrustedDatabaseHistoryEvidence) -> str
 def discover_database_retention_work(
     store: StateStore,
     target: str,
-    token: str,
+    token: str | None,
     *,
     retention_days: int,
     reference_time: datetime,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> WorkItem:
     """Read fresh trusted history and idempotently enqueue its exact policy outcome."""
 
@@ -115,12 +120,17 @@ def discover_database_retention_work(
         repository_id = store.repository_id(target)
         if repository_id is None:
             raise DatabaseRetentionWorkError("database retention repository is not pinned")
-        evidence = fetch_trusted_database_history_evidence(
-            target=target,
-            token=token,
-            expected_id=repository_id,
-            reference_time=reference_time,
-            retention_days=retention_days,
+        _require_one_authority(token, retention_authority)
+        evidence = (
+            retention_authority.read_database_history(reference_time, retention_days)
+            if retention_authority is not None
+            else fetch_trusted_database_history_evidence(
+                target=target,
+                token=_require_token(token),
+                expected_id=repository_id,
+                reference_time=reference_time,
+                retention_days=retention_days,
+            )
         )
         if (
             evidence.target.casefold() != target.casefold()
@@ -136,7 +146,7 @@ def discover_database_retention_work(
         )
     except DatabaseRetentionWorkError:
         raise
-    except (DatabaseHistoryReadError, StateError):
+    except (DeployKeyRetentionAuthorityError, DatabaseHistoryReadError, StateError):
         raise DatabaseRetentionWorkError("database retention discovery failed closed") from None
 
 
@@ -156,17 +166,19 @@ def run_database_retention_work_pass(
     store: StateStore,
     staging_root: Path,
     target: str,
-    token: str,
+    token: str | None,
     *,
     retention_days: int,
     reference_time: datetime | None = None,
     recover_interrupted: bool = False,
+    retention_authority: DeployKeyRetentionAuthority | None = None,
 ) -> DatabaseRetentionPassResult:
     """Discover current policy and process at most one durable retention item."""
 
     _validate_store(store)
     current = reference_time or datetime.now(UTC)
     try:
+        _require_one_authority(token, retention_authority)
         recovered = store.recover_interrupted_work(now=current) if recover_interrupted else 0
         item = claim_database_retention_work(store, now=current)
         if item is None:
@@ -176,6 +188,7 @@ def run_database_retention_work_pass(
                 token,
                 retention_days=retention_days,
                 reference_time=current,
+                retention_authority=retention_authority,
             )
             item = claim_database_retention_work(store, now=current)
             if item is None:
@@ -188,6 +201,7 @@ def run_database_retention_work_pass(
             token,
             retention_days=retention_days,
             reference_time=current,
+            retention_authority=retention_authority,
         )
         return DatabaseRetentionPassResult(recovered, processed)
     except (StateError, DatabaseRetentionWorkError):
@@ -199,10 +213,11 @@ def _execute_claimed(
     item: WorkItem,
     staging_root: Path,
     target: str,
-    token: str,
+    token: str | None,
     *,
     retention_days: int,
     reference_time: datetime,
+    retention_authority: DeployKeyRetentionAuthority | None,
 ) -> DatabaseRetentionWorkResult:
     if (
         type(item) is not WorkItem
@@ -224,11 +239,15 @@ def _execute_claimed(
                 or intent.repository_id != repository_id
             ):
                 return _fail(store, item, transient=False, now=reference_time)
-            current = fetch_trusted_branch_head(
-                target,
-                token,
-                expected_id=repository_id,
-                branch="database",
+            current = (
+                retention_authority.observe(target, repository_id, "database")
+                if retention_authority is not None
+                else fetch_trusted_branch_head(
+                    target,
+                    _require_token(token),
+                    expected_id=repository_id,
+                    branch="database",
+                )
             )
             if current.commit_sha == intent.replacement_head_sha:
                 baseline = store.synchronization_baseline(target, "database")
@@ -251,12 +270,16 @@ def _execute_claimed(
             if current.commit_sha != intent.expected_head_sha:
                 blocked = store.fail_work(item, transient=False, now=reference_time)
                 return DatabaseRetentionWorkResult(blocked, DatabaseRetentionWorkDisposition.STALE)
-        evidence = fetch_trusted_database_history_evidence(
-            target=target,
-            token=token,
-            expected_id=repository_id,
-            reference_time=item.created_at,
-            retention_days=retention_days,
+        evidence = (
+            retention_authority.read_database_history(item.created_at, retention_days)
+            if retention_authority is not None
+            else fetch_trusted_database_history_evidence(
+                target=target,
+                token=_require_token(token),
+                expected_id=repository_id,
+                reference_time=item.created_at,
+                retention_days=retention_days,
+            )
         )
         if item.work_key != database_retention_work_key(evidence):
             blocked = store.fail_work(item, transient=False, now=reference_time)
@@ -269,19 +292,28 @@ def _execute_claimed(
             or baseline.commit_sha != evidence.expected_head_sha
         ):
             return _fail(store, item, transient=False, now=reference_time)
-        prewrite = reprove_database_history_prewrite(evidence=evidence, token=token)
+        prewrite = (
+            retention_authority.prewrite_database(evidence)
+            if retention_authority is not None
+            else reprove_database_history_prewrite(evidence=evidence, token=_require_token(token))
+        )
         authorization = authorize_database_history_replacement(evidence=evidence, prewrite=prewrite)
         if not authorization.requires_replacement:
-            replace_database_history(authorization=authorization)
+            if retention_authority is None:
+                replace_database_history(authorization=authorization)
             completed = store.complete_work(item, now=reference_time)
             return DatabaseRetentionWorkResult(
                 completed, DatabaseRetentionWorkDisposition.NO_CHANGE
             )
 
-        repository = prepare_database_history_staging(
-            evidence=evidence,
-            staging_root=staging_root,
-            token=token,
+        repository = (
+            retention_authority.stage_database_history(evidence)
+            if retention_authority is not None
+            else prepare_database_history_staging(
+                evidence=evidence,
+                staging_root=staging_root,
+                token=_require_token(token),
+            )
         )
         artifact = build_database_history_replacement(
             authorization=authorization,
@@ -298,11 +330,14 @@ def _execute_claimed(
         )
         if persisted_intent.replacement_head_sha != artifact.replacement_head_sha:
             return _fail(store, item, transient=False, now=reference_time)
-        replace_database_history(
-            authorization=authorization,
-            artifact=artifact,
-            token=token,
-        )
+        if retention_authority is None:
+            replace_database_history(
+                authorization=authorization,
+                artifact=artifact,
+                token=_require_token(token),
+            )
+        else:
+            retention_authority.replace_database(authorization, artifact)
         store.record_synchronization_baseline(
             target,
             "database",
@@ -314,6 +349,8 @@ def _execute_claimed(
         return DatabaseRetentionWorkResult(completed, DatabaseRetentionWorkDisposition.REPLACED)
     except DatabaseHistoryReplacementTransportError as error:
         return _fail(store, item, transient=error.retryable, now=reference_time)
+    except DeployKeyRetentionAuthorityError as error:
+        return _fail(store, item, transient=error.transient, now=reference_time)
     except DatabaseHistoryReadError as error:
         transient = (
             "transport" in str(error)
@@ -372,6 +409,24 @@ def _fail(
 def _validate_store(store: StateStore) -> None:
     if type(store) is not StateStore:
         raise DatabaseRetentionWorkError("database retention state store is invalid")
+
+
+def _require_one_authority(
+    token: str | None,
+    authority: DeployKeyRetentionAuthority | None,
+) -> None:
+    if (token is None) == (authority is None):
+        raise DatabaseRetentionWorkError(
+            "database retention requires exactly one transport authority"
+        )
+    if authority is not None and type(authority) is not DeployKeyRetentionAuthority:
+        raise DatabaseRetentionWorkError("database retention authority is invalid")
+
+
+def _require_token(token: str | None) -> str:
+    if not isinstance(token, str) or not token:
+        raise DatabaseRetentionWorkError("database retention token authority is invalid")
+    return token
 
 
 def _repository_failure_is_transient(error: RepositoryVerificationError) -> bool:
