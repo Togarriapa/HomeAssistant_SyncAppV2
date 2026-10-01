@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from ha_syncapp import local_sync
 from ha_syncapp.deploy_key_access import (
     DeployKeyAccessProof,
     DeployKeyReference,
@@ -99,6 +100,7 @@ def _execute(
     *,
     proof: DeployKeyAccessProof | None = None,
     now: datetime = NOW,
+    recorder_database: Path | None = None,
 ):
     source, snapshots, workspaces, key_directory = paths
     return execute_authorized_repo_b_initialization(
@@ -110,6 +112,7 @@ def _execute(
         proof or _proof(),
         key_directory,
         now=now,
+        recorder_database=recorder_database,
     )
 
 
@@ -170,6 +173,43 @@ def test_authorized_empty_repository_is_initialized_and_completed_atomically(
     assert [name for name, _ in calls] == ["references", "push", "references"]
     assert list(paths[1].iterdir()) == []
     assert list(paths[2].iterdir()) == []
+
+
+def test_authorized_initialization_excludes_configured_recorder_family(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    paths = _paths(tmp_path)
+    source = paths[0]
+    recorder = source / "storage" / "recorder.db"
+    recorder.parent.mkdir()
+    recorder.write_bytes(b"recorder")
+    recorder.with_name("recorder.db-wal").write_bytes(b"wal")
+    unrelated = source / "custom_components/data.db"
+    unrelated.parent.mkdir()
+    unrelated.write_bytes(b"configuration-data")
+    expected_staging = tmp_path / "expected-snapshots"
+    expected_staging.mkdir()
+    expected = local_sync.capture_snapshot(
+        source,
+        expected_staging,
+        recorder_database=recorder,
+    )
+    calls: list[tuple[str, object]] = []
+    _install_successful_transport(monkeypatch, calls)
+
+    try:
+        result = _execute(store, paths, recorder_database=recorder)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert result.phase == "completed"
+    assert result.snapshot_id == expected.snapshot_id
+    assert tuple(file.path for file in expected.files) == (
+        "configuration.yaml",
+        "custom_components/data.db",
+    )
 
 
 def test_completed_execution_replays_without_filesystem_network_or_mutation(
