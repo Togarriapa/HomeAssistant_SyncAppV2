@@ -40,7 +40,13 @@ def _install_isolated_staging_fakes(
     tmp_path: Path,
     calls: list[tuple[str, object]],
 ) -> None:
-    def capture(source: Path, root: Path) -> Snapshot:
+    def capture(
+        source: Path,
+        root: Path,
+        *,
+        recorder_database: Path | None = None,
+    ) -> Snapshot:
+        assert recorder_database is None
         calls.append(("capture", source))
         snapshot_dir = root / ".snapshot-test.tmp"
         tree = snapshot_dir / "tree"
