@@ -49,7 +49,11 @@ The startup bootstrap uses only app-owned private staging, snapshot and Git-work
 
 If shutdown has already been requested before bootstrap begins, the service skips this work. An unconfigured service also remains passive and performs no runtime publication attempt.
 
-This startup bootstrap is deliberately distinct from the long-running WebSocket lifecycle. It establishes a fresh baseline opportunity at process start but does not yet attach asynchronous event consumption to the synchronous state-owning service loop.
+This startup bootstrap is deliberately distinct from the long-running WebSocket
+lifecycle. It establishes a fresh baseline opportunity before
+`RuntimeEventBridge` starts the asynchronous event transport. The bridge then
+hands only bounded normalized signals to the synchronous state-owning service
+loop, where durable scheduling and at most one runtime processing attempt occur.
 
 ## Runtime event classification
 
@@ -59,13 +63,25 @@ Events that can change the runtime view—state, entity/device/area/floor/label/
 
 ### Owner-thread mailbox
 
-`runtime_event_mailbox.RuntimeEventMailbox` is the bounded bridge intended for future cross-context event transport. It accepts only two immutable signal shapes: verified subscription `ready`, or one allowed normalized `event_type`. Raw Home Assistant event payloads, credentials and arbitrary objects are not part of the mailbox schema.
+`RuntimeEventMailbox` (`runtime_event_mailbox.RuntimeEventMailbox`) is the
+bounded bridge used for cross-context event transport. It accepts only two immutable signal shapes:
+verified subscription `ready`, or one allowed normalized `event_type`. Raw Home
+Assistant event payloads, credentials and arbitrary objects are not part of the
+mailbox schema.
 
-The mailbox is capacity-bounded and uses non-blocking insertion. Capacity exhaustion fails closed rather than silently dropping evidence. A future transport owner can therefore disconnect/retry and rely on the next verified readiness baseline to close any observation gap instead of pretending an overflowing event stream was complete.
+The mailbox is capacity-bounded and uses non-blocking insertion. Capacity
+exhaustion fails closed rather than silently dropping evidence. The transport
+owner can therefore disconnect/retry and rely on the next verified readiness
+baseline to close any observation gap instead of pretending an overflowing
+event stream was complete.
 
 `drain_runtime_event_mailbox()` must run on the `StateStore`-owning thread. It consumes at most a fixed bounded number of signals per call, revalidates every signal, and delegates only to the existing normal runtime scheduling boundaries. It performs no interrupted-work recovery. Repeated ready/events coalesce into the same durable runtime work identity, and deterministic blocked work remains blocked.
 
-This mailbox does not itself start a thread, process, socket or WebSocket lifecycle. Those ownership decisions remain a separate service-integration gate.
+This mailbox does not itself start a thread, process, socket or WebSocket
+lifecycle. `RuntimeEventBridge` owns the worker lifecycle while `__main__.run()`
+starts, ticks and stops the bridge from the StateStore owner thread. An
+unexpected transport termination or invalid cross-thread access fails the
+service boundary closed.
 
 ## Core WebSocket transport
 
