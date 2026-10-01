@@ -18,6 +18,10 @@ from .core_health_observation import (
     CoreHealthTransport,
     probe_core_api_health,
 )
+from .deploy_key_rollback_authority import (
+    DeployKeyRollbackRepositoryAuthority,
+    DeployKeyRollbackRepositoryAuthorityError,
+)
 from .deployment_finalization import (
     DeploymentFinalization,
     DeploymentFinalizationError,
@@ -55,6 +59,8 @@ _DEFAULT_MAX_RESPONSE_BYTES: Final = 64 * 1024
 
 class DeploymentRollbackError(RuntimeError):
     """Rollback authority or durable state is unavailable or invalid."""
+
+    transient: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,7 +419,8 @@ def complete_deployment_rollback_once(
     *,
     github_token: str | None,
     supervisor_token: str | None,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     core_transport: CoreHealthTransport | None = None,
     supervisor_transport: SupervisorHealthTransport | None = None,
     timeout_seconds: float = 10.0,
@@ -435,13 +442,13 @@ def complete_deployment_rollback_once(
     ):
         raise DeploymentRollbackError("rollback restore is not ready for health proof")
 
-    repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
     supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
     repository = _read_repository(
         repository_reader,
         current.target,
-        repository_credential,
+        github_token,
         current.repository_id,
+        repository_authority,
     )
     if (
         repository.repository_id != current.repository_id
@@ -503,8 +510,9 @@ def request_deployment_restore_once(
     *,
     github_token: str | None,
     supervisor_token: str | None,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
     backup_reader: BackupReader,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     transport: SupervisorRestoreTransport | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
@@ -523,15 +531,15 @@ def request_deployment_restore_once(
     if current.phase != "planned":
         raise DeploymentRollbackError("rollback restore is not requestable")
 
-    repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
     supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
     _validate_limits(timeout_seconds, max_response_bytes)
     _reprove_external_inputs(
         current,
-        repository_credential,
+        github_token,
         supervisor_credential,
         repository_reader,
         backup_reader,
+        repository_authority,
     )
     when = _timestamp(requested_at or datetime.now(UTC))
     started = _transition(
@@ -622,8 +630,9 @@ def authorize_deployment_rollback_once(
     *,
     github_token: str | None,
     supervisor_token: str | None,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
     backup_reader: BackupReader,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     observed_at: datetime | None = None,
 ) -> RollbackAuthorizationResult:
     """Re-prove exact rollback inputs and persist immutable intent without mutation."""
@@ -633,13 +642,13 @@ def authorize_deployment_rollback_once(
             _require_recovery_authority(store, plan)
             return RollbackAuthorizationResult(existing.phase, True, existing)
         prepared, finalization = _failure_authority(store, plan)
-        repository_credential = _validate_token(github_token, "SYNCAPP_GITHUB_TOKEN")
         supervisor_credential = _validate_token(supervisor_token, "SUPERVISOR_TOKEN")
         repository = _read_repository(
             repository_reader,
             prepared.evidence.target,
-            repository_credential,
+            github_token,
             prepared.evidence.repository_id,
+            repository_authority,
         )
         if (
             repository.repository_id != prepared.evidence.repository_id
@@ -804,16 +813,18 @@ def _require_recovery_authority(
 
 def _reprove_external_inputs(
     intent: DeploymentRollback,
-    github_token: str,
+    github_token: str | None,
     supervisor_token: str,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
     backup_reader: BackupReader,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None,
 ) -> None:
     repository = _read_repository(
         repository_reader,
         intent.target,
         github_token,
         intent.repository_id,
+        repository_authority,
     )
     if (
         repository.repository_id != intent.repository_id
@@ -1122,19 +1133,44 @@ def _default_reconciliation_transport(
 
 
 def _read_repository(
-    reader: RepositoryReader,
+    reader: RepositoryReader | None,
     target: str,
-    token: str,
+    token: str | None,
     repository_id: int,
+    authority: DeployKeyRollbackRepositoryAuthority | None,
 ) -> RollbackRepositoryProof:
     try:
-        result = reader(target, token, repository_id)
+        if authority is None:
+            if reader is None:
+                raise DeploymentRollbackError(
+                    "rollback repository requires exactly one transport authority"
+                )
+            credential = _validate_token(token, "SYNCAPP_GITHUB_TOKEN")
+            result = reader(target, credential, repository_id)
+        else:
+            if (
+                token is not None
+                or reader is not None
+                or type(authority) is not DeployKeyRollbackRepositoryAuthority
+            ):
+                raise DeploymentRollbackError(
+                    "rollback repository requires exactly one transport authority"
+                )
+            result = authority.read(target, repository_id)
         if type(result) is not RollbackRepositoryProof:
             _invalid_proof("repository")
         result.validate()
         return result
     except DeploymentRollbackError:
         raise
+    except DeployKeyRollbackRepositoryAuthorityError as exc:
+        failure = DeploymentRollbackError(
+            "repository proof is unavailable"
+            if exc.transient
+            else "rollback repository authority is invalid"
+        )
+        failure.transient = exc.transient
+        raise failure from exc
     except Exception:
         raise DeploymentRollbackError("repository proof is unavailable") from None
 

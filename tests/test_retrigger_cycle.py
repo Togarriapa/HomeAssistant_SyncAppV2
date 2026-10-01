@@ -44,6 +44,7 @@ from ha_syncapp.database_sync_retrigger import DatabaseSyncRetriggerResult
 from ha_syncapp.deploy_key_access import DeployKeyAccessProof
 from ha_syncapp.deploy_key_promotion_authority import DeployKeyPromotionAuthority
 from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
+from ha_syncapp.deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from ha_syncapp.deployment_rollback_retrigger import DeploymentRollbackRetriggerResult
 from ha_syncapp.local_sync_retrigger import LocalSyncRetriggerResult
 from ha_syncapp.runtime_sync_retrigger import RuntimeSyncRetriggerResult
@@ -94,6 +95,7 @@ def _run(
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
+    deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None,
 ):
     home = tmp_path / "homeassistant"
     home.mkdir(exist_ok=True)
@@ -116,6 +118,7 @@ def _run(
         candidate_deploy_key_ingress=candidate_deploy_key_ingress,
         deploy_key_publication_authority=deploy_key_publication_authority,
         deploy_key_promotion_authority=deploy_key_promotion_authority,
+        deploy_key_rollback_authority=deploy_key_rollback_authority,
         core_token=core_token,
     )
 
@@ -792,6 +795,52 @@ def test_cycle_scopes_deploy_key_to_promotion_and_leaves_rollback_token(
     assert observed == [
         ("promotion", None, authority),
         ("rollback", "github-token", "core-token"),
+    ]
+
+
+def test_cycle_scopes_deploy_key_to_rollback_proof_but_keeps_supervisor_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    proof = DeployKeyAccessProof(
+        TARGET,
+        123,
+        "SHA256:" + "A" * 43,
+        "123e4567-e89b-42d3-a456-426614174000",
+        1,
+        "a" * 64,
+    )
+    authority = DeployKeyRollbackRepositoryAuthority(
+        proof,
+        tmp_path / "key",
+        tmp_path / "rollback-access",
+    )
+    observed: list[tuple[str, object, object, object]] = []
+
+    def deployment(*args: object, **kwargs: object) -> DeploymentRollbackRetriggerResult:
+        observed.append(("deployment", args[2], args[3], kwargs["repository_authority"]))
+        return DeploymentRollbackRetriggerResult(0, 0, None)
+
+    def candidate(*args: object, **kwargs: object) -> CandidateRollbackRetriggerResult:
+        observed.append(("candidate", args[1], args[2], kwargs["repository_authority"]))
+        return CandidateRollbackRetriggerResult(0, 0, None)
+
+    monkeypatch.setattr(retrigger_cycle, "run_deployment_rollback_retrigger_pass", deployment)
+    monkeypatch.setattr(retrigger_cycle, "run_candidate_rollback_retrigger_pass", candidate)
+    monkeypatch.setattr(
+        retrigger_cycle,
+        "detect_and_enqueue_trusted_candidate",
+        lambda *args, **kwargs: _candidate_absent(),
+    )
+    try:
+        _run(store, tmp_path, deploy_key_rollback_authority=authority)
+    finally:
+        store.__exit__(None, None, None)
+
+    assert observed == [
+        ("deployment", None, "core-token", authority),
+        ("candidate", None, "core-token", authority),
     ]
 
 

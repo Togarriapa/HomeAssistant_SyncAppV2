@@ -11,6 +11,7 @@ from .candidate_assertion_observation_execution import (
     CandidateAssertionObservationExecutionError,
     _load_plan,
 )
+from .deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from .deployment_rollback import (
     BackupReader,
     DeploymentRollbackError,
@@ -51,8 +52,9 @@ def execute_candidate_rollback_once(
     *,
     github_token: str | None,
     supervisor_token: str | None,
-    repository_reader: RepositoryReader,
+    repository_reader: RepositoryReader | None,
     backup_reader: BackupReader,
+    repository_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     now: datetime | None = None,
 ) -> CandidateRollbackExecutionResult:
     """Re-prove rollback inputs, persist authority, then complete exact work."""
@@ -71,15 +73,27 @@ def execute_candidate_rollback_once(
     when = when.astimezone(UTC)
     try:
         plan = _load_plan(store, item.work_key)
-        authorized = authorize_deployment_rollback_once(
-            store,
-            plan,
-            github_token=github_token,
-            supervisor_token=supervisor_token,
-            repository_reader=repository_reader,
-            backup_reader=backup_reader,
-            observed_at=when,
-        )
+        if repository_authority is None:
+            authorized = authorize_deployment_rollback_once(
+                store,
+                plan,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=repository_reader,
+                backup_reader=backup_reader,
+                observed_at=when,
+            )
+        else:
+            authorized = authorize_deployment_rollback_once(
+                store,
+                plan,
+                github_token=github_token,
+                supervisor_token=supervisor_token,
+                repository_reader=repository_reader,
+                repository_authority=repository_authority,
+                backup_reader=backup_reader,
+                observed_at=when,
+            )
         if (
             authorized.intent.deployment_id != item.work_key
             or authorized.status != authorized.intent.phase

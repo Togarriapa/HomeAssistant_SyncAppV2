@@ -33,6 +33,7 @@ class Config:
     repo_b_candidate_transport: str = "token"
     repo_b_publication_transport: str = "token"
     repo_b_promotion_transport: str = "token"
+    repo_b_rollback_transport: str = "token"
     recorder_database_path: str | None = None
     recorder_retention_days: int = 7
     administrative_retry_request: AdministrativeRetryRequest | None = field(
@@ -132,6 +133,7 @@ def load_config(path: Path) -> Config:
         "repo_b_candidate_transport",
         "repo_b_publication_transport",
         "repo_b_promotion_transport",
+        "repo_b_rollback_transport",
         "recorder_database_path",
         "recorder_retention_days",
         "administrative_retry_request_id",
@@ -179,6 +181,11 @@ def load_config(path: Path) -> Config:
         raise ConfigError("Invalid Repo B promotion transport")
     if promotion_transport == "deploy_key" and repo_b is None:
         raise ConfigError("Deploy-key promotion transport requires Repo B")
+    rollback_transport = options.get("repo_b_rollback_transport", "token")
+    if rollback_transport not in {"token", "deploy_key"}:
+        raise ConfigError("Invalid Repo B rollback transport")
+    if rollback_transport == "deploy_key" and repo_b is None:
+        raise ConfigError("Deploy-key rollback transport requires Repo B")
 
     recorder_database_path = options.get("recorder_database_path")
     if recorder_database_path is not None and not _valid_recorder_database_path(
@@ -222,6 +229,7 @@ def load_config(path: Path) -> Config:
         repo_b_candidate_transport=cast(str, candidate_transport),
         repo_b_publication_transport=cast(str, publication_transport),
         repo_b_promotion_transport=cast(str, promotion_transport),
+        repo_b_rollback_transport=cast(str, rollback_transport),
         recorder_database_path=cast(str | None, recorder_database_path),
         recorder_retention_days=recorder_retention_days,
         administrative_retry_request=administrative_retry_request,

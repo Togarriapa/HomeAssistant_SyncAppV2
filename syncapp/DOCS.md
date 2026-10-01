@@ -44,6 +44,7 @@ that writes from the app are denied.
 | `repo_b_candidate_transport` | `token` | `token`, `deploy_key` |
 | `repo_b_publication_transport` | `token` | `token`, `deploy_key` |
 | `repo_b_promotion_transport` | `token` | `token`, `deploy_key` |
+| `repo_b_rollback_transport` | `token` | `token`, `deploy_key` |
 | `recorder_database_path` | unset | Normalized absolute Recorder path below `/homeassistant` |
 | `recorder_retention_days` | `7` | Integer from 1 through 365 |
 | `administrative_retry_request_id` | unset | Canonical lowercase UUIDv4 |
@@ -156,6 +157,16 @@ tag publication, and reconciliation use only the proof-bound SSH authority. The
 durable promotion journal and completed replay semantics are unchanged. Candidate
 rollback, retention rewrites, and REST identity verification retain their existing
 credentials and safeguards. See [Deploy-key candidate promotion adoption](../docs/deploy-key-promotion-adoption.md).
+
+Rollback repository proof can be independently switched with
+`repo_b_rollback_transport: deploy_key`. Activation requires the pinned private
+repository identity, initialized `main` baseline, enrolled protected key, and a
+fresh identity-bound access proof. Initial rollback authorization, pre-restore
+re-proof, post-restore observation completion, stale-work recovery, and retry then
+read the exact `refs/heads/main` value through descriptor-bound, host-pinned SSH
+without token Git or fallback. Backup proof, backup restore, health checks, and
+restore reconciliation remain on the Home Assistant Supervisor token. Retention
+history rewrites remain token-backed. See [Deploy-key rollback repository-proof adoption](../docs/deploy-key-rollback-adoption.md).
 
 ## Retrigger recovery
 

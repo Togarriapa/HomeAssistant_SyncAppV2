@@ -16,6 +16,7 @@ from ha_syncapp.deploy_key_access import (
 from ha_syncapp.deployment_rollback import (
     DeploymentRollbackError,
     RollbackBackupProof,
+    RollbackRepositoryProof,
     authorize_deployment_rollback_once,
 )
 from ha_syncapp.state import StateStore
@@ -124,9 +125,7 @@ def test_authority_sanitizes_transport_failure_and_preserves_retry_classificatio
         ),
     )
 
-    with pytest.raises(
-        authority_module.DeployKeyRollbackRepositoryAuthorityError
-    ) as caught:
+    with pytest.raises(authority_module.DeployKeyRollbackRepositoryAuthorityError) as caught:
         _authority(tmp_path).read(TARGET, REPOSITORY_ID)
 
     assert caught.value.transient is transient
@@ -145,9 +144,9 @@ def test_authorization_uses_deploy_key_authority_without_github_token(
     monkeypatch.setattr(
         authority_module.DeployKeyRollbackRepositoryAuthority,
         "read",
-        lambda _self, target, repository_id: calls.append((target, repository_id))
-        or authority_module.RollbackRepositoryProof(
-            repository_id, True, prepared.evidence.baseline_sha
+        lambda _self, target, repository_id: (
+            calls.append((target, repository_id))
+            or RollbackRepositoryProof(repository_id, True, prepared.evidence.baseline_sha)
         ),
     )
 
@@ -224,3 +223,32 @@ def test_service_builds_rollback_authority_only_after_initialization(
 
     assert authority is not None
     assert "rest-identity-token" not in repr(authority)
+
+
+def test_service_sanitizes_rollback_authority_activation_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = tmp_path / "data"
+    (data / "syncapp" / "repo-b-deploy-key").mkdir(parents=True, mode=0o700)
+    config = Config(
+        repo_b=TARGET,
+        github_token="rest-secret-sentinel",
+        repo_b_rollback_transport="deploy_key",
+    )
+    with StateStore(data) as store:
+        store.bind_repository(TARGET, REPOSITORY_ID)
+        store.record_synchronization_baseline(
+            TARGET, "main", "e" * 64, BASELINE, synchronized_at=NOW
+        )
+        monkeypatch.setattr(
+            service,
+            "test_repo_b_deploy_key_access",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                DeployKeyAccessError("rest-secret-sentinel private path")
+            ),
+        )
+
+        with pytest.raises(service.RetriggerCycleError) as caught:
+            service._deploy_key_rollback_authority_if_configured(store, config, data)
+
+    assert "rest-secret-sentinel" not in str(caught.value)

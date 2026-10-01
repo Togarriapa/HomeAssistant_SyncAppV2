@@ -133,6 +133,7 @@ from ha_syncapp.database_sync_retrigger import (
 )
 from ha_syncapp.deploy_key_promotion_authority import DeployKeyPromotionAuthority
 from ha_syncapp.deploy_key_publication_authority import DeployKeyPublicationAuthority
+from ha_syncapp.deploy_key_rollback_authority import DeployKeyRollbackRepositoryAuthority
 from ha_syncapp.deployment_rollback_retrigger import (
     DeploymentRollbackRetriggerError,
     DeploymentRollbackRetriggerResult,
@@ -225,6 +226,7 @@ def run_retrigger_cycle(
     candidate_deploy_key_ingress: DeployKeyCandidateIngress | None = None,
     deploy_key_publication_authority: DeployKeyPublicationAuthority | None = None,
     deploy_key_promotion_authority: DeployKeyPromotionAuthority | None = None,
+    deploy_key_rollback_authority: DeployKeyRollbackRepositoryAuthority | None = None,
     core_token: str | None = None,
     log_artifact_root: Path | None = None,
     log_snapshot_root: Path | None = None,
@@ -313,13 +315,23 @@ def run_retrigger_cycle(
                 recover_interrupted=True,
             )
 
-        deployment_rollback = run_deployment_rollback_retrigger_pass(
-            store,
-            target,
-            github_token,
-            core_token,
-            reference_time=recovery_reference_time or datetime.now(UTC),
-        )
+        if deploy_key_rollback_authority is None:
+            deployment_rollback = run_deployment_rollback_retrigger_pass(
+                store,
+                target,
+                github_token,
+                core_token,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
+        else:
+            deployment_rollback = run_deployment_rollback_retrigger_pass(
+                store,
+                target,
+                None,
+                core_token,
+                repository_authority=deploy_key_rollback_authority,
+                reference_time=recovery_reference_time or datetime.now(UTC),
+            )
 
         candidate_reference_time = recovery_reference_time or datetime.now(UTC)
         if candidate_deploy_key_ingress is None:
@@ -764,12 +776,21 @@ def run_retrigger_cycle(
             and candidate_finalization.processed is None
             and candidate_promotion.processed is None
         ):
-            candidate_rollback = run_candidate_rollback_retrigger_pass(
-                store,
-                github_token,
-                core_token,
-                reference_time=recovery_reference_time or datetime.now(UTC),
-            )
+            if deploy_key_rollback_authority is None:
+                candidate_rollback = run_candidate_rollback_retrigger_pass(
+                    store,
+                    github_token,
+                    core_token,
+                    reference_time=recovery_reference_time or datetime.now(UTC),
+                )
+            else:
+                candidate_rollback = run_candidate_rollback_retrigger_pass(
+                    store,
+                    None,
+                    core_token,
+                    repository_authority=deploy_key_rollback_authority,
+                    reference_time=recovery_reference_time or datetime.now(UTC),
+                )
         else:
             candidate_rollback = CandidateRollbackRetriggerResult(0, 0, None)
 
