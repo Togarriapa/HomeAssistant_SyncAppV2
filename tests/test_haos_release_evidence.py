@@ -244,3 +244,17 @@ def test_cli_sanitizes_invalid_document_error(
     assert output.out == ""
     assert output.err == "HAOS release evidence is invalid\n"
     assert "secret-sentinel" not in output.err
+
+
+def test_runbook_defines_issue_specific_content_free_review() -> None:
+    runbook = (Path(__file__).resolve().parents[1] / "docs/haos-release-evidence.md").read_text()
+
+    for required in (
+        "application_lifecycle",
+        "validator_confinement",
+        "issues/212",
+        "issues/251",
+        "does not prove",
+        "original evidence document remains private",
+    ):
+        assert required in runbook
