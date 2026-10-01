@@ -37,6 +37,34 @@ def test_unrelated_configuration_paths_remain_in_main(path: str) -> None:
     assert main_routing.include_in_main(path) is True
 
 
+def test_configured_recorder_family_is_not_routed_to_main(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    recorder = source / "storage" / "recorder.db"
+
+    include = main_routing.build_main_path_router(source, recorder)
+
+    assert include("storage/recorder.db") is False
+    assert include("storage/recorder.db-wal") is False
+    assert include("storage/recorder.db-shm") is False
+    assert include("storage/recorder.db-journal") is False
+    assert include("custom_components/demo/data.db") is True
+    assert include("storage/recorder.db.notes") is True
+
+
+@pytest.mark.parametrize(
+    "recorder",
+    [
+        Path("relative/recorder.db"),
+        Path("/homeassistant"),
+        Path("/outside/recorder.db"),
+        Path("/homeassistant/../outside/recorder.db"),
+    ],
+)
+def test_configured_recorder_route_rejects_invalid_path(recorder: Path) -> None:
+    with pytest.raises(ValueError, match="configured Recorder path is invalid"):
+        main_routing.build_main_path_router(Path("/homeassistant"), recorder)
+
+
 def test_main_snapshot_preserves_config_and_omits_dedicated_artifacts(tmp_path: Path) -> None:
     source = tmp_path / "homeassistant"
     staging = tmp_path / "snapshots"
@@ -64,6 +92,30 @@ def test_main_snapshot_preserves_config_and_omits_dedicated_artifacts(tmp_path: 
     }
     assert (captured.tree_path / "secrets.yaml").read_bytes() == b"token: private\n"
     assert (captured.tree_path / "custom_components/demo/data.db").read_bytes() == b"config-db"
+
+
+def test_main_snapshot_omits_configured_recorder_family(tmp_path: Path) -> None:
+    source = tmp_path / "homeassistant"
+    staging = tmp_path / "snapshots"
+    recorder = source / "storage" / "recorder.db"
+    recorder.parent.mkdir(parents=True)
+    staging.mkdir()
+    (source / "configuration.yaml").write_text("homeassistant:\n")
+    recorder.write_bytes(b"recorder")
+    recorder.with_name("recorder.db-wal").write_bytes(b"wal")
+    (source / "custom_components").mkdir()
+    (source / "custom_components/data.db").write_bytes(b"configuration-data")
+
+    captured = local_sync.capture_snapshot(
+        source,
+        staging,
+        recorder_database=recorder,
+    )
+
+    assert tuple(entry.path for entry in captured.files) == (
+        "configuration.yaml",
+        "custom_components/data.db",
+    )
 
 
 def test_excluded_database_churn_does_not_destabilize_main_snapshot(
