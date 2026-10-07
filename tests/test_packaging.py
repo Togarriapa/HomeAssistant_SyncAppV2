@@ -207,7 +207,7 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     websocket_lock_fingerprint = hashlib.sha256("\n".join(websocket_hashes).encode()).hexdigest()
     assert (
         websocket_lock_fingerprint
-        == "9692a9082a36605f1a4a76314de411a712cf6a6e5bcf048d75c2208efab13178"
+        == "933170b725d0c410ff15631bc70f9a9ad3f39661b692c5b7e0307c348831b4de"
     )
     assert non_comment_lines[pyyaml_index:] == [
         "PyYAML==6.0.3 \\",
