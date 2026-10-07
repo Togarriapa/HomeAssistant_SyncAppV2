@@ -1,5 +1,5 @@
 # Development tools only. Runtime dependencies are installed separately from syncapp/requirements.txt.
-ast_serialize==0.11.2
+ast_serialize==0.12.1
 bandit==1.9.4
 iniconfig==2.3.0
 librt==0.15.0
