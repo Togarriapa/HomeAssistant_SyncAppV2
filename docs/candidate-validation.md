@@ -48,7 +48,7 @@ aggregate invalid/unvalidated path counts, and the latest timestamp.
 
 `candidate_semantics.validate_candidate_semantics()` requires a successful complete static
 result, the identical upstream evidence, and a Core version bound to the runtime snapshot.
-The image bundles the official Core **2026.9.4** runtime. Other running versions remain
+The image bundles the official Core **2026.10.0** runtime. Other running versions remain
 blocked until an image with their exact validator is built and verified; there is no
 `stable` fallback or runtime package installation. App dependencies use a separate virtual
 environment, preserving the Core image's dependency set.
@@ -137,6 +137,6 @@ OS installation remains a separate on-device verification requirement.
 
 Implementation references: [Home Assistant AppArmor guidance](https://developers.home-assistant.io/docs/apps/presentation/#apparmor),
 [official Core check_config CLI](https://www.home-assistant.io/docs/tools/check_config/),
-[Core 2026.9.4 checker](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/scripts/check_config.py),
+[Core 2026.10.0 checker](https://github.com/home-assistant/core/blob/2026.10.0/homeassistant/scripts/check_config.py),
 [Landlock filesystem restrictions](https://docs.kernel.org/userspace-api/landlock.html),
 and [seccomp filters](https://docs.kernel.org/userspace-api/seccomp_filter.html).
