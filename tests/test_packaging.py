@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -189,9 +190,26 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
         for line in requirements.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    assert non_comment_lines == [
-        "websockets==17.1 \\",
-        "--hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23",
+    pyyaml_index = non_comment_lines.index("PyYAML==6.0.3 \\")
+    websocket_lines = non_comment_lines[:pyyaml_index]
+    websocket_hashes = websocket_lines[1:]
+
+    assert websocket_lines[0] == "websockets==17.2 \\"
+    assert len(websocket_hashes) == 148
+    assert len(set(websocket_hashes)) == 148
+    assert all(
+        line.startswith("--hash=sha256:")
+        and len(line.removesuffix(" \\")) == len("--hash=sha256:") + 64
+        for line in websocket_hashes
+    )
+    assert all(line.endswith(" \\") for line in websocket_hashes[:-1])
+    assert not websocket_hashes[-1].endswith(" \\")
+    websocket_lock_fingerprint = hashlib.sha256("\n".join(websocket_hashes).encode()).hexdigest()
+    assert (
+        websocket_lock_fingerprint
+        == "933170b725d0c410ff15631bc70f9a9ad3f39661b692c5b7e0307c348831b4de"
+    )
+    assert non_comment_lines[pyyaml_index:] == [
         "PyYAML==6.0.3 \\",
         "--hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \\",
         "--hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \\",
