@@ -21,7 +21,7 @@ def test_success_binds_every_gate_and_uses_a_copy(tmp_path, monkeypatch):
     def run(config, version):
         assert config != stage.tree
         assert config.joinpath("configuration.yaml").read_bytes() == b"homeassistant:\n"
-        assert version == "2026.9.4"
+        assert version == "2026.10.0"
         copied.append(config)
 
     monkeypatch.setattr(semantic, "_run_validator", run)
@@ -30,7 +30,7 @@ def test_success_binds_every_gate_and_uses_a_copy(tmp_path, monkeypatch):
     assert result.candidate_sha == stage.commit_sha
     assert result.stage_manifest_sha256 == stage.manifest_sha256
     assert result.runtime_sha256 == inputs[-1].runtime_sha256
-    assert result.core_version == "2026.9.4"
+    assert result.core_version == "2026.10.0"
     assert result.risk_level == inputs[5].level
     assert result.validator == "homeassistant.check_config.fail_on_warnings"
     assert not copied[0].exists()
@@ -41,7 +41,9 @@ def test_success_binds_every_gate_and_uses_a_copy(tmp_path, monkeypatch):
         )
 
 
-@pytest.mark.parametrize("version", ["2026.8.1", "2026.9.0", "2026.9.2", "2026.9.3"])
+@pytest.mark.parametrize(
+    "version", ["2026.8.1", "2026.9.0", "2026.9.2", "2026.9.3", "2026.9.4"]
+)
 def test_exact_version_mismatch_never_launches(tmp_path, monkeypatch, version):
     inputs = candidate_inputs(tmp_path, {"configuration.yaml": b"homeassistant:\n"}, version)
     monkeypatch.setattr(semantic, "_run_validator", lambda *args: pytest.fail("must not launch"))

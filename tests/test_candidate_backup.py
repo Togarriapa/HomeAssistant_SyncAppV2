@@ -38,7 +38,7 @@ def test_success_creates_full_backup_and_binds_exact_candidate(tmp_path, monkeyp
             {
                 "slug": "abc123",
                 "type": "full",
-                "homeassistant": "2026.9.4",
+                "homeassistant": "2026.10.0",
                 "content": {"homeassistant": True},
             }
         )
@@ -70,7 +70,7 @@ def test_creation_uses_exact_journaled_request_name(tmp_path, monkeypatch):
         calls.append((method, body))
         if method == "POST":
             return _json_response({"slug": "abc123"})
-        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.10.0"})
 
     backup.create_candidate_backup(
         authorization,
@@ -143,13 +143,14 @@ def test_ambiguous_or_unsafe_creation_response_is_blocked(tmp_path, monkeypatch,
 @pytest.mark.parametrize(
     "info",
     [
-        {"slug": "other", "type": "full", "homeassistant": "2026.9.4"},
-        {"slug": "abc123", "type": "partial", "homeassistant": "2026.9.4"},
+        {"slug": "other", "type": "full", "homeassistant": "2026.10.0"},
+        {"slug": "abc123", "type": "partial", "homeassistant": "2026.10.0"},
         {"slug": "abc123", "type": "full", "homeassistant": "2026.9.3"},
+        {"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"},
         {
             "slug": "abc123",
             "type": "full",
-            "homeassistant": "2026.9.4",
+            "homeassistant": "2026.10.0",
             "content": {"homeassistant": False},
         },
     ],
@@ -211,7 +212,7 @@ def test_uncertain_creation_reconciles_unique_fresh_named_backup_without_post(
                     ]
                 }
             )
-        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.10.0"})
 
     evidence = backup.reconcile_candidate_backup(
         authorization,
@@ -275,7 +276,7 @@ def test_semantic_drift_after_backup_discards_success(tmp_path, monkeypatch):
         if method == "POST":
             return _json_response({"slug": "abc123"})
         inputs[6].manifest["core_config"]["version"] = "2026.9.2"
-        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.10.0"})
 
     with pytest.raises(backup.CandidateBackupError, match="semantic"):
         backup.create_candidate_backup(
@@ -291,7 +292,7 @@ def test_verified_backup_evidence_is_exactly_retrievable_after_restart(tmp_path,
     def transport(method, *_args):
         if method == "POST":
             return _json_response({"slug": "abc123"})
-        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.10.0"})
 
     evidence = backup.create_candidate_backup(
         authorization, *inputs, token="secret-token", transport=transport
@@ -319,7 +320,7 @@ def _prepared_backup(tmp_path, monkeypatch):
             {
                 "slug": "abc123",
                 "type": "full",
-                "homeassistant": "2026.9.4",
+                "homeassistant": "2026.10.0",
                 "content": {"homeassistant": True},
             }
         )
@@ -341,7 +342,7 @@ def test_preapply_reproof_reads_only_exact_prepared_backup(tmp_path, monkeypatch
             {
                 "slug": "abc123",
                 "type": "full",
-                "homeassistant": "2026.9.4",
+                "homeassistant": "2026.10.0",
                 "content": {"homeassistant": True},
             }
         )
@@ -383,7 +384,7 @@ def test_preapply_reproof_rejects_missing_or_changed_backup(tmp_path, monkeypatc
     inputs, authorization, prepared = _prepared_backup(tmp_path, monkeypatch)
 
     def transport(*_args):
-        return _json_response({"slug": "other", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "other", "type": "full", "homeassistant": "2026.10.0"})
 
     with pytest.raises(backup.CandidateBackupError) as caught:
         backup.reprove_prepared_candidate_backup(
@@ -420,7 +421,7 @@ def test_preapply_reproof_rechecks_semantic_evidence_after_supervisor_read(tmp_p
 
     def transport(*_args):
         inputs[6].manifest["core_config"]["version"] = "2026.9.2"
-        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.9.4"})
+        return _json_response({"slug": "abc123", "type": "full", "homeassistant": "2026.10.0"})
 
     with pytest.raises(backup.CandidateBackupError, match="semantic"):
         backup.reprove_prepared_candidate_backup(
