@@ -204,9 +204,7 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     )
     assert all(line.endswith(" \\") for line in websocket_hashes[:-1])
     assert not websocket_hashes[-1].endswith(" \\")
-    websocket_lock_fingerprint = hashlib.sha256(
-        "\n".join(websocket_hashes).encode()
-    ).hexdigest()
+    websocket_lock_fingerprint = hashlib.sha256("\n".join(websocket_hashes).encode()).hexdigest()
     assert (
         websocket_lock_fingerprint
         == "9692a9082a36605f1a4a76314de411a712cf6a6e5bcf048d75c2208efab13178"
