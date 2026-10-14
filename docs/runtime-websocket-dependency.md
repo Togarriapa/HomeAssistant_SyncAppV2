@@ -10,8 +10,8 @@ through `ws://supervisor/core/websocket` when `homeassistant_api: true` is enabl
 `hassio_api` capability is required for this Core proxy.
 
 V2 uses the `websockets` Python package as the protocol implementation instead of maintaining a
-custom RFC 6455 framing/handshake implementation. Version 17.1 is pinned to the published universal
-Python wheel SHA-256 in `syncapp/requirements.txt`. The app image installs that file with
+custom RFC 6455 framing/handshake implementation. Version 17.2 is pinned to the published artifact
+SHA-256 digests in `syncapp/requirements.txt`. The app image installs those files with
 `--require-hashes`; the development environment includes the same runtime requirements.
 
 This milestone grants no new Home Assistant or Supervisor permission and sends no WebSocket traffic.
