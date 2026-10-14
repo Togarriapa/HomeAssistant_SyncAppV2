@@ -185,6 +185,7 @@ def test_documented_default_options_are_accepted(tmp_path: Path) -> None:
 
 def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     requirements = (ROOT / "syncapp/requirements.txt").read_text()
+    websocket_docs = (ROOT / "docs/runtime-websocket-dependency.md").read_text()
     non_comment_lines = [
         line.strip()
         for line in requirements.splitlines()
@@ -195,6 +196,8 @@ def test_runtime_dependencies_are_exactly_pinned_and_hashed() -> None:
     websocket_hashes = websocket_lines[1:]
 
     assert websocket_lines[0] == "websockets==17.2 \\"
+    assert "Version 17.2 is pinned" in websocket_docs
+    assert "Version 17.1 is pinned" not in websocket_docs
     assert len(websocket_hashes) == 148
     assert len(set(websocket_hashes)) == 148
     assert all(
