@@ -6,8 +6,8 @@ from ha_syncapp import __version__
 from ha_syncapp.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE_VERSION = "2026.10.0"
-CORE_IMAGE_INDEX = "1b64d38f38d922bf9d59336451fd6453e1d614f934456af4ee3d2a51061be3a4"
+CORE_VERSION = "2026.10.1"
+CORE_IMAGE_INDEX = "130241f28d01fa80dfa3b44f7d89781c188d8642ecab9024f079f19f9f82baa0"
 
 
 def test_core_validator_base_is_versioned_and_digest_pinned() -> None:
@@ -30,8 +30,8 @@ def test_core_validator_version_bindings_and_documentation_are_consistent() -> N
     assert f"core/blob/{CORE_VERSION}/homeassistant/scripts/check_config.py" in validation_docs
     assert f"Core `{CORE_VERSION}` tag" in development_docs
     assert CORE_IMAGE_INDEX in development_docs
-    assert "956a5d9effc091888cd34cb0b6fb4f66c448d257d20519e72302557682734fd0" in development_docs
-    assert "0c73235a9140a9b02e4bf618d06d8c496b12ae70656ecddb0e02ad31ad122be4" in development_docs
+    assert "a7ecc966ffed643296af32d576ee081910a0362c01e695db24fbee6816175fbe" in development_docs
+    assert "17100609af8bb79bf5390f5d514b9aaeb00d184ce758f37769cd80c450851db7" in development_docs
 
 
 def test_packaging_exposes_only_required_read_only_home_assistant_access() -> None:
