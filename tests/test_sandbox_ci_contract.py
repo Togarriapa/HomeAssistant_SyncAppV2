@@ -56,7 +56,7 @@ def test_native_ci_names_each_sandbox_security_boundary() -> None:
 def test_ci_uses_immutable_current_github_action_releases() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     checkout = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
-    upload = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+    upload = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
 
     assert workflow.count(checkout) == 2
     assert workflow.count(upload) == 4
