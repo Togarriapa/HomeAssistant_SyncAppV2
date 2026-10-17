@@ -34,7 +34,7 @@ jobs:
           python -m ruff format --check --diff . 2>&1 | tee quality-diagnostics/ruff-format.txt
       - name: Upload Ruff format diagnostics
         if: failure() && steps.ruff-format.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quality-ruff-format-diagnostics
           path: quality-diagnostics/ruff-format.txt
@@ -48,7 +48,7 @@ jobs:
           python -m ruff check . 2>&1 | tee quality-diagnostics/ruff.txt
       - name: Upload Ruff diagnostics
         if: failure() && steps.ruff.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quality-ruff-diagnostics
           path: quality-diagnostics/ruff.txt
@@ -64,7 +64,7 @@ jobs:
           python -m pytest -q 2>&1 | tee quality-diagnostics/pytest.txt
       - name: Upload pytest diagnostics
         if: failure() && steps.pytest.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quality-pytest-diagnostics
           path: quality-diagnostics/pytest.txt
@@ -125,7 +125,7 @@ jobs:
             > validator-diagnostics/core-fixture-probe.txt 2>&1 || true
       - name: Upload validator diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: validator-diagnostics-${{ matrix.arch }}
           path: validator-diagnostics/
