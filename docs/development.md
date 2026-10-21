@@ -2,14 +2,14 @@
 
 ## Bundled Core image identity
 
-The validator base retains the readable Core `2026.10.1` tag and pins the immutable
+The validator base retains the readable Core `2026.10.2` tag and pins the immutable
 multi-platform OCI index digest in `syncapp/Dockerfile` (issue #198). On
-2026-10-17, the official GHCR manifest endpoint for
-`ghcr.io/home-assistant/home-assistant:2026.10.1` returned index digest
-`sha256:130241f28d01fa80dfa3b44f7d89781c188d8642ecab9024f079f19f9f82baa0`, containing:
+2026-10-21, the official GHCR manifest endpoint for
+`ghcr.io/home-assistant/home-assistant:2026.10.2` returned index digest
+`sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4`, containing:
 
-- Linux amd64: `sha256:a7ecc966ffed643296af32d576ee081910a0362c01e695db24fbee6816175fbe`.
-- Linux arm64 (App aarch64): `sha256:17100609af8bb79bf5390f5d514b9aaeb00d184ce758f37769cd80c450851db7`.
+- Linux amd64: `sha256:d30d46d24d55c43f1122ab04fdf04d2d31144815b983b07feb075f3a18814239`.
+- Linux arm64 (App aarch64): `sha256:1edf9ce6c140826cdfcd6358802cf3466e38045cd7ed62ccf42c78980ff937ae`.
 
 The index digest fixes build input identity; it is **not** evidence of the running
 Home Assistant Core version. Runtime-bound exact-version semantic validation is
