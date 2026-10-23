@@ -239,9 +239,7 @@ def _claim_due_pending_candidate(
 ) -> tuple[WorkItem | None, str | None]:
     current = when.isoformat()
     action_parameters = tuple(
-        value
-        for action, phase in _ACTION_PHASES.items()
-        for value in (action, phase)
+        value for action, phase in _ACTION_PHASES.items() for value in (action, phase)
     )
     try:
         with store._connection as database:
