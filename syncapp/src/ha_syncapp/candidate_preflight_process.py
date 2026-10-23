@@ -124,7 +124,10 @@ def run_candidate_preflight_process(
         or not target
         or not isinstance(github_token, str)
         or not github_token
-        or (deploy_key_ingress is not None and type(deploy_key_ingress) is not DeployKeyCandidateIngress)
+        or (
+            deploy_key_ingress is not None
+            and type(deploy_key_ingress) is not DeployKeyCandidateIngress
+        )
         or not _aware(when)
         or any(
             not isinstance(path, Path) or not path.is_absolute()
@@ -142,14 +145,14 @@ def run_candidate_preflight_process(
     try:
         repository_id = store.repository_id(target)
     except (StateError, sqlite3.Error):
-        raise CandidatePreflightProcessError("candidate preflight repository is unavailable") from None
+        raise CandidatePreflightProcessError(
+            "candidate preflight repository is unavailable"
+        ) from None
     if type(repository_id) is not int or repository_id <= 0:
         raise CandidatePreflightProcessError("candidate preflight repository is not trusted")
 
     try:
-        claimed, selected_action = _claim_due_pending_candidate(
-            store, target, repository_id, when
-        )
+        claimed, selected_action = _claim_due_pending_candidate(store, target, repository_id, when)
     except CandidatePreflightProcessError:
         raise
     except (CandidateOrchestrationError, StateError, sqlite3.Error, TypeError, ValueError):
@@ -181,7 +184,9 @@ def run_candidate_preflight_process(
     except CandidateOrchestrationError:
         return _record_executor_failure(store, claimed, action, None, when)
     except (StateError, sqlite3.Error, TypeError, ValueError):
-        raise CandidatePreflightProcessError("candidate preflight authority failed closed") from None
+        raise CandidatePreflightProcessError(
+            "candidate preflight authority failed closed"
+        ) from None
 
     try:
         _execute_action(
@@ -367,14 +372,14 @@ def _record_executor_failure(
             now=when,
         )
     except (StateError, sqlite3.Error):
-        raise CandidatePreflightProcessError("candidate preflight failure state is unavailable") from None
+        raise CandidatePreflightProcessError(
+            "candidate preflight failure state is unavailable"
+        ) from None
     return CandidatePreflightProcessResult(
         action,
         "retry" if failed.status == "retry" else "blocked",
     )
+
+
 def _aware(value: object) -> bool:
-    return (
-        isinstance(value, datetime)
-        and value.tzinfo is not None
-        and value.utcoffset() is not None
-    )
+    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None

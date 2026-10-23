@@ -153,10 +153,7 @@ class CandidatePreflightService:
         self._next_due = None
 
     def _advance_clock(self, now: float) -> float:
-        if (
-            isinstance(now, bool)
-            or not isinstance(now, (int, float))
-        ):
+        if isinstance(now, bool) or not isinstance(now, (int, float)):
             raise CandidatePreflightServiceError("candidate preflight service clock is invalid")
         try:
             current = float(now)

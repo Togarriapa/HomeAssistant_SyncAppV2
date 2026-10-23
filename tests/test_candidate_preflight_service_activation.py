@@ -100,9 +100,7 @@ class FakePreflightService:
 
 
 def _write_config(data_dir: Path) -> None:
-    (data_dir / "options.json").write_text(
-        json.dumps({"repo_b": TARGET, "github_token": TOKEN})
-    )
+    (data_dir / "options.json").write_text(json.dumps({"repo_b": TARGET, "github_token": TOKEN}))
 
 
 def _patch_common(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
@@ -181,11 +179,17 @@ def test_candidate_preflight_starts_after_detection_and_ticks_after_detection(
     output = capsys.readouterr().out
     assert TOKEN not in output and CORE_TOKEN not in output
     assert '"mode":"active"' in output
-    assert '"event":"candidate_preflight_processed","action":"fetch_stage","outcome":"advanced"' in output
+    assert (
+        '"event":"candidate_preflight_processed","action":"fetch_stage","outcome":"advanced"'
+        in output
+    )
     with sqlite3.connect(tmp_path / "syncapp/state.sqlite3") as database:
-        assert database.execute(
-            "SELECT active_run_id FROM installation WHERE singleton = 1"
-        ).fetchone()[0] is None
+        assert (
+            database.execute(
+                "SELECT active_run_id FROM installation WHERE singleton = 1"
+            ).fetchone()[0]
+            is None
+        )
 
 
 def test_preflight_exception_stops_started_services_and_preserves_interrupted_run(
@@ -227,9 +231,12 @@ def test_preflight_exception_stops_started_services_and_preserves_interrupted_ru
         "detection_stop",
     ]
     with sqlite3.connect(tmp_path / "syncapp/state.sqlite3") as database:
-        assert database.execute(
-            "SELECT active_run_id FROM installation WHERE singleton = 1"
-        ).fetchone()[0] is not None
+        assert (
+            database.execute(
+                "SELECT active_run_id FROM installation WHERE singleton = 1"
+            ).fetchone()[0]
+            is not None
+        )
 
 
 def test_preflight_builder_uses_trusted_identity_and_private_roots(
@@ -274,12 +281,15 @@ def test_unconfigured_or_untrusted_candidate_preflight_is_disabled_or_fails_clos
     home = tmp_path / "homeassistant"
     home.mkdir()
     with StateStore(data_dir) as store:
-        assert service._candidate_preflight_service_if_configured(
-            store,
-            Config(),
-            data_dir,
-            home_assistant_root=home,
-        ) is None
+        assert (
+            service._candidate_preflight_service_if_configured(
+                store,
+                Config(),
+                data_dir,
+                home_assistant_root=home,
+            )
+            is None
+        )
         with pytest.raises(CandidatePreflightServiceError, match="not trusted"):
             service._candidate_preflight_service_if_configured(
                 store,

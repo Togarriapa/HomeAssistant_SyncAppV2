@@ -699,6 +699,7 @@ def test_process_runs_the_six_real_read_only_executors_to_backup_boundary(
         "static_executor": run_static,
         "semantic_executor": run_semantic,
     }
+
     def process_with_synthetic_transport(*args: object, **options: object) -> object:
         return preflight.run_candidate_preflight_process(
             *args,
