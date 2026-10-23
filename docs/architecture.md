@@ -67,6 +67,13 @@ Home Assistant, Supervisor and analysis data for AI consumption. Log collection 
 database/log retention remain bounded and use dedicated branches. Branch routing keeps
 `main`, `candidate`, `database`, `runtime` and `logs` responsibilities separate.
 
+Routine candidate preflight advances at most one due pending candidate action per
+one-second state-owner tick, after candidate detection. It runs the existing
+Fetch/Stage, integrity, dependency, risk, static and semantic executors in order,
+then stops at `semantically_validated/prepare_backup`. Running, retry, blocked,
+exhausted and backup-ready work remain outside this normal lane; transient recovery
+continues through Retrigger. See the [routine candidate preflight runbook](candidate-preflight.md).
+
 ## Retrigger recovery
 
 The launcher sends the first Retrigger request one full configured interval after

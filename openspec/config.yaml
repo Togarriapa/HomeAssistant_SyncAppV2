@@ -1,0 +1,15 @@
+schema: spec-driven
+
+context: |
+  HomeAssistant_SyncAppV2 is a Home Assistant OS App using Python 3.12 and the
+  standard library. The sole product specification is the initial root README.md
+  at commit 71d284ce447d79b044e332c9bc01ae801dc91947. OpenSpec changes describe
+  bounded implementation increments and must not replace or weaken that authority.
+  GitHub Issues and Projects track requirements, acceptance criteria and delivery.
+  Use TDD, short-lived branches, reviewed pull requests and green CI.
+  Preserve byte-for-byte configuration, private Repo B identity pinning, protected
+  state, exact evidence-bound deployment gates, deterministic blocking and bounded
+  retries. Routine producers and Retrigger recovery are separate authority domains.
+  Never disable, pause or remove Retrigger scheduling. Do not perform live Home
+  Assistant actions during development. Keep the default live mount read-only and
+  physical HAOS release gates #212 and #251 open until reviewed hardware evidence.

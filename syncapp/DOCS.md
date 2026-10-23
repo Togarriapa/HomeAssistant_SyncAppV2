@@ -63,6 +63,16 @@ Recorder synchronization remains optional; omitting `recorder_database_path` ski
 only the Recorder recovery lane and does not disable Local, runtime, log or candidate
 recovery.
 
+Routine candidate preflight is enabled with a trusted `repo_b` and runs in the
+state-owning process after candidate detection. It processes one due pending
+read-only action per one-second tick and stops after exact semantic validation at
+the separate backup boundary. Running, retry, blocked, exhausted and backup-ready
+work are not routine inputs; Retrigger remains responsible for recovery. The
+configured candidate transport selects token or proof-bound deploy-key Fetch/Stage
+without fallback, while integrity analysis uses the configured GitHub token and
+dependency collection uses the Supervisor token. The full admission, retry,
+transport and safety boundaries are in the [routine candidate preflight runbook](../docs/candidate-preflight.md).
+
 ### Explicit retry of blocked work
 
 The three `administrative_retry_*` options are an advanced, one-shot recovery
