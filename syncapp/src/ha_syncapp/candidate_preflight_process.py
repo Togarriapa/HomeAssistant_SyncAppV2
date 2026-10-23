@@ -382,4 +382,6 @@ def _record_executor_failure(
 
 
 def _aware(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )
