@@ -211,7 +211,7 @@ def run_candidate_preflight_process(
             ),
         )
     except _EXECUTOR_ERRORS as error:
-        return _record_executor_failure(store, claimed, action, cast(_ExecutionError, error), when)
+        return _record_executor_failure(store, claimed, action, error, when)
     except CandidateOrchestrationError:
         return _record_executor_failure(store, claimed, action, None, when)
 
