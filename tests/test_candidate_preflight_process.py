@@ -7,25 +7,22 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from ha_syncapp import candidate_preflight_process as preflight, candidate_stage as stage_module
+from ha_syncapp import candidate_preflight_process as preflight
+from ha_syncapp import candidate_preflight_service as preflight_service_module
+from ha_syncapp import candidate_stage as stage_module
 from ha_syncapp.candidate_changes import CandidateChange, CandidateChanges
-from ha_syncapp.candidate_dependency_execution import (
-    execute_candidate_dependency_once,
-    load_candidate_dependency_checkpoint,
-)
+from ha_syncapp.candidate_dependency_execution import execute_candidate_dependency_once
 from ha_syncapp.candidate_deploy_key_ingress import DeployKeyCandidateIngress
 from ha_syncapp.candidate_detection import CandidateObservation
 from ha_syncapp.candidate_detection_service import CandidateDetectionService
 from ha_syncapp.candidate_fetch import CandidateFetch
 from ha_syncapp.candidate_fetch_stage_execution import (
+    CandidateFetchStageExecutionError,
     execute_candidate_fetch_stage_once,
-    load_candidate_fetch_stage_checkpoint,
-)
-from ha_syncapp.candidate_integrity_execution import (
-    execute_candidate_integrity_once,
-    load_candidate_integrity_checkpoint,
 )
 from ha_syncapp.candidate_integrity import CandidateIntegrity
+from ha_syncapp.candidate_fetch_stage_retrigger import run_candidate_fetch_stage_retrigger_pass
+from ha_syncapp.candidate_integrity_execution import execute_candidate_integrity_once
 from ha_syncapp.candidate_orchestration import (
     CandidateOrchestration,
     dependencies_analyzed_candidate_orchestration,
@@ -36,28 +33,15 @@ from ha_syncapp.candidate_orchestration import (
     staged_candidate_orchestration,
     static_validated_candidate_orchestration,
 )
-from ha_syncapp.candidate_risk_execution import (
-    execute_candidate_risk_once,
-    load_candidate_risk_checkpoint,
-)
-from ha_syncapp.candidate_semantic_execution import (
-    execute_candidate_semantic_once,
-    load_candidate_semantic_checkpoint,
-)
-from ha_syncapp.candidate_semantics import CandidateSemanticValidation
+from ha_syncapp.candidate_preflight_service import CandidatePreflightService
+from ha_syncapp.candidate_risk_execution import execute_candidate_risk_once
+from ha_syncapp.candidate_semantic_execution import execute_candidate_semantic_once
+from ha_syncapp.candidate_semantics import CandidateSemanticError, CandidateSemanticValidation
 from ha_syncapp.candidate_stage import CandidateStage, CandidateStageEntry
-from ha_syncapp.candidate_static_execution import (
-    execute_candidate_static_once,
-    load_candidate_static_checkpoint,
-)
-from ha_syncapp.candidate_fetch_stage_execution import CandidateFetchStageExecutionError
+from ha_syncapp.candidate_static_execution import execute_candidate_static_once
 from ha_syncapp.deploy_key_access import DeployKeyAccessProof
 from ha_syncapp.runtime_inventory import RuntimeInventoryInput
 from ha_syncapp.state import StateError, StateStore
-from ha_syncapp.candidate_fetch_stage_retrigger import run_candidate_fetch_stage_retrigger_pass
-from ha_syncapp import candidate_preflight_service as preflight_service_module
-from ha_syncapp.candidate_preflight_service import CandidatePreflightService
-from ha_syncapp.candidate_semantics import CandidateSemanticError
 
 TARGET = "Owner/Home"
 TOKEN = "github-secret-sentinel"
@@ -244,7 +228,8 @@ def test_process_leaves_non_pending_exhausted_and_backup_ready_work_untouched(
             if name == "retry_due":
                 with store._connection as database:
                     database.execute(
-                        "UPDATE work SET next_attempt_at=? WHERE work_kind='candidate' AND work_key=?",
+                        "UPDATE work SET next_attempt_at=? WHERE work_kind='candidate' "
+                        "AND work_key=?",
                         ((NOW - timedelta(seconds=1)).isoformat(), candidate_sha),
                     )
             assert failed.status == "retry"

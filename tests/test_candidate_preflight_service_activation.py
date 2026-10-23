@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from ha_syncapp import __main__ as service
-from ha_syncapp.candidate_detection_service import CandidateDetectionServiceError
 from ha_syncapp.candidate_deploy_key_ingress import DeployKeyCandidateIngress
 from ha_syncapp.candidate_preflight_process import CandidatePreflightProcessResult
 from ha_syncapp.candidate_preflight_service import (
