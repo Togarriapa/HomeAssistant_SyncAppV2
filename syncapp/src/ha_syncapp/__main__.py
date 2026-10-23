@@ -26,6 +26,10 @@ from .candidate_detection_service import (
     CandidateDetectionService,
     CandidateDetectionServiceError,
 )
+from .candidate_preflight_service import (
+    CandidatePreflightService,
+    CandidatePreflightServiceError,
+)
 from .config import Config, ConfigError, load_config
 from .database_startup import (
     DatabaseStartupError,
@@ -463,6 +467,44 @@ def _candidate_detection_service_if_configured(
     )
 
 
+def _candidate_preflight_service_if_configured(
+    store: StateStore,
+    config: Config,
+    data_dir: Path,
+    deploy_key_ingress: DeployKeyCandidateIngress | None = None,
+    *,
+    home_assistant_root: Path = Path("/homeassistant"),
+) -> CandidatePreflightService | None:
+    """Build routine candidate preflight only for a trusted configured Repo B."""
+    if config.repo_b is None or config.github_token is None:
+        return None
+    if store.repository_id(config.repo_b) is None:
+        raise CandidatePreflightServiceError("candidate preflight repository is not trusted")
+    try:
+        snapshot_root, workspace_root = _local_work_roots(data_dir, home_assistant_root)
+        protected = (data_dir / "syncapp").resolve(strict=True)
+        fetch_workspace_root = workspace_root / "candidate-fetch"
+        analysis_workspace_root = workspace_root / "candidate-analysis"
+        staging_root = snapshot_root / "candidate-stage"
+        for root in (fetch_workspace_root, analysis_workspace_root, staging_root):
+            _ensure_private_work_directory(protected, root)
+    except (RetriggerCycleError, OSError):
+        raise CandidatePreflightServiceError(
+            "candidate preflight work roots are unavailable"
+        ) from None
+    return CandidatePreflightService(
+        store,
+        home_assistant_root,
+        fetch_workspace_root,
+        analysis_workspace_root,
+        staging_root,
+        config.repo_b,
+        config.github_token,
+        deploy_key_ingress=deploy_key_ingress,
+        core_token=os.environ.get("SUPERVISOR_TOKEN") or None,
+    )
+
+
 def _candidate_deploy_key_ingress_if_configured(
     store: StateStore,
     config: Config,
@@ -876,6 +918,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         runtime_bridge: RuntimeEventBridge | None = None
         log_sync_service: LogSyncService | None = None
         candidate_detection_service: CandidateDetectionService | None = None
+        candidate_preflight_service: CandidatePreflightService | None = None
         if not stop.requested:
             if deploy_key_publication_authority is None:
                 _run_startup_local_if_configured(store, config, data_dir)
@@ -1001,6 +1044,15 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                     candidate_detection_service = _candidate_detection_service_if_configured(
                         store, config, candidate_deploy_key_ingress
                     )
+                if not stop.requested:
+                    if candidate_deploy_key_ingress is None:
+                        candidate_preflight_service = _candidate_preflight_service_if_configured(
+                            store, config, data_dir
+                        )
+                    else:
+                        candidate_preflight_service = _candidate_preflight_service_if_configured(
+                            store, config, data_dir, candidate_deploy_key_ingress
+                        )
         socket_path = retrigger_socket_path(data_dir.resolve(strict=True))
         next_status = time.monotonic() + config.status_interval_seconds
         mode = (
@@ -1010,6 +1062,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             or runtime_bridge is not None
             or log_sync_service is not None
             or candidate_detection_service is not None
+            or candidate_preflight_service is not None
             else "passive"
         )
         local_change_started = False
@@ -1017,6 +1070,7 @@ def run(data_dir: Path, stop: Shutdown) -> None:
         runtime_bridge_started = False
         log_sync_started = False
         candidate_detection_started = False
+        candidate_preflight_started = False
 
         try:
             if not stop.requested and local_change_service is not None:
@@ -1034,6 +1088,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if not stop.requested and candidate_detection_service is not None:
                 candidate_detection_service.start(time.monotonic())
                 candidate_detection_started = True
+            if not stop.requested and candidate_preflight_service is not None:
+                candidate_preflight_service.start(time.monotonic())
+                candidate_preflight_started = True
             with RetriggerServer(socket_path) as retrigger_server:
                 fields = {**asdict(boot), "version": __version__, "mode": mode}
                 level = "warning" if boot.interrupted_run_id else "info"
@@ -1087,6 +1144,22 @@ def run(data_dir: Path, stop: Shutdown) -> None:
                         and candidate_detection_service is not None
                     ):
                         candidate_detection_service.tick(now)
+                    if (
+                        not stop.requested
+                        and candidate_preflight_started
+                        and candidate_preflight_service is not None
+                    ):
+                        preflight_tick = candidate_preflight_service.tick(now)
+                        if (
+                            preflight_tick.due
+                            and preflight_tick.process is not None
+                            and preflight_tick.process.action is not None
+                        ):
+                            emit(
+                                "candidate_preflight_processed",
+                                action=preflight_tick.process.action,
+                                outcome=preflight_tick.process.outcome,
+                            )
                     if not stop.requested and now >= next_status:
                         if config.log_level == "info":
                             emit("service_idle", run_id=boot.run_id, mode=mode)
@@ -1104,6 +1177,9 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             if log_sync_started and log_sync_service is not None:
                 with suppress(LogSyncServiceError):
                     log_sync_service.stop()
+            if candidate_preflight_started and candidate_preflight_service is not None:
+                with suppress(CandidatePreflightServiceError):
+                    candidate_preflight_service.stop()
             if candidate_detection_started and candidate_detection_service is not None:
                 with suppress(CandidateDetectionServiceError):
                     candidate_detection_service.stop()
@@ -1117,6 +1193,8 @@ def run(data_dir: Path, stop: Shutdown) -> None:
             runtime_bridge.stop()
         if log_sync_started and log_sync_service is not None:
             log_sync_service.stop()
+        if candidate_preflight_started and candidate_preflight_service is not None:
+            candidate_preflight_service.stop()
         if candidate_detection_started and candidate_detection_service is not None:
             candidate_detection_service.stop()
         store.finish_run()
@@ -1206,6 +1284,9 @@ def main() -> int:
     except CandidateDetectionServiceError:
         emit("service_failed", level="error", reason="candidate_detection_service_failed")
         return 13
+    except CandidatePreflightServiceError:
+        emit("service_failed", level="error", reason="candidate_preflight_service_failed")
+        return 16
     except AdministrativeRetryRequestError:
         emit("service_failed", level="error", reason="administrative_retry_failed")
         return 14

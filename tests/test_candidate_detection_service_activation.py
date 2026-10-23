@@ -89,6 +89,11 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
     monkeypatch.setattr(service, "_run_startup_runtime_if_configured", lambda *args: None)
     monkeypatch.setattr(service, "_runtime_event_bridge_if_configured", lambda *args: None)
     monkeypatch.setattr(service, "_log_sync_service_if_configured", lambda *args: None)
+    monkeypatch.setattr(
+        service,
+        "_candidate_preflight_service_if_configured",
+        lambda *args, **kwargs: None,
+    )
 
 
 def test_configured_service_runs_candidate_detection_after_trusted_startup(

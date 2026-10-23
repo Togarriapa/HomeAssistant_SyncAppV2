@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,26 @@ from ha_syncapp.runtime_event_bridge import RuntimeEventBridgeError
 
 TARGET = "Owner/Home"
 GITHUB_TOKEN = "github-secret-sentinel"
+
+
+class FakeRetriggerServer:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def __enter__(self) -> FakeRetriggerServer:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def serve_once(
+        self,
+        handler: Callable[[object], str],
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        del handler
+        assert timeout_seconds == 0.25
 
 
 class FakeBridge:
@@ -58,9 +79,14 @@ def _trusted_repo(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> None:
         return RepoIdentity(target=TARGET, repository_id=123)
 
     monkeypatch.setattr("ha_syncapp.__main__.fetch_and_verify_private_repository", verify)
+    monkeypatch.setattr("ha_syncapp.__main__.RetriggerServer", FakeRetriggerServer)
     monkeypatch.setattr(
         "ha_syncapp.__main__._local_change_service_if_configured",
         lambda store, config, data_dir: None,
+    )
+    monkeypatch.setattr(
+        "ha_syncapp.__main__._candidate_preflight_service_if_configured",
+        lambda *args, **kwargs: None,
     )
 
 
@@ -167,6 +193,7 @@ def test_unconfigured_service_remains_passive_and_does_not_start_bridge(
         pytest.fail("unconfigured service attempted runtime event bridge construction")
 
     monkeypatch.setattr("ha_syncapp.__main__._run_startup_runtime_if_configured", bootstrap)
+    monkeypatch.setattr("ha_syncapp.__main__.RetriggerServer", FakeRetriggerServer)
     monkeypatch.setattr(
         "ha_syncapp.__main__._runtime_event_bridge_if_configured",
         forbidden_bridge,
