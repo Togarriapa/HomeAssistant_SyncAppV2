@@ -238,9 +238,10 @@ def _claim_due_pending_candidate(
     when: datetime,
 ) -> tuple[WorkItem | None, str | None]:
     current = when.isoformat()
-    permitted = " OR ".join(
-        f"(c.phase = '{phase}' AND c.next_action = '{action}')"
+    action_parameters = tuple(
+        value
         for action, phase in _ACTION_PHASES.items()
+        for value in (action, phase)
     )
     try:
         with store._connection as database:
@@ -252,13 +253,19 @@ def _claim_due_pending_candidate(
                 "ON c.candidate_sha=w.work_key WHERE w.work_kind='candidate' "
                 "AND w.status='pending' AND w.attempts < ? AND w.next_attempt_at <= ? "
                 "AND (c.candidate_sha IS NULL OR (c.target=? AND c.repository_id=? AND ("
-                + permitted
-                + "))) ORDER BY w.next_attempt_at,w.created_at,w.work_key LIMIT 1",
+                "(c.next_action=? AND c.phase=?) OR "
+                "(c.next_action=? AND c.phase=?) OR "
+                "(c.next_action=? AND c.phase=?) OR "
+                "(c.next_action=? AND c.phase=?) OR "
+                "(c.next_action=? AND c.phase=?) OR "
+                "(c.next_action=? AND c.phase=?)))) "
+                "ORDER BY w.next_attempt_at,w.created_at,w.work_key LIMIT 1",
                 (
                     StateStore.MAX_WORK_ATTEMPTS,
                     current,
                     target,
                     repository_id,
+                    *action_parameters,
                 ),
             ).fetchall()
             if not rows:
