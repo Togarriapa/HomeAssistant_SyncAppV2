@@ -20,8 +20,8 @@ from ha_syncapp.candidate_fetch_stage_execution import (
     CandidateFetchStageExecutionError,
     execute_candidate_fetch_stage_once,
 )
-from ha_syncapp.candidate_integrity import CandidateIntegrity
 from ha_syncapp.candidate_fetch_stage_retrigger import run_candidate_fetch_stage_retrigger_pass
+from ha_syncapp.candidate_integrity import CandidateIntegrity
 from ha_syncapp.candidate_integrity_execution import execute_candidate_integrity_once
 from ha_syncapp.candidate_orchestration import (
     CandidateOrchestration,
