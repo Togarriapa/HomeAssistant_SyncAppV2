@@ -1,5 +1,5 @@
 # The official Core checker and its integration dependencies must match runtime evidence.
-FROM ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
+FROM ghcr.io/home-assistant/home-assistant:2026.10.4@sha256:23f4dfbb69ce76315dbc4de7915504f1c2dcecd7ca2648113a493a385972e133
 
 ARG BUILD_VERSION=0.1.0
 ARG BUILD_ARCH
