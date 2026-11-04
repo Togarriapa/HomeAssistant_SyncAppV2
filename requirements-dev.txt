@@ -16,5 +16,5 @@ PyYAML==6.0.3
 rich==15.0.0
 ruff==0.17.1
 stevedore==5.9.1
-types-PyYAML==6.0.12.20260906
+types-PyYAML==6.0.12.20261030
 typing_extensions==4.16.0
